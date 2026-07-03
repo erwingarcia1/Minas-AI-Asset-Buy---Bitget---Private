@@ -1,0 +1,27 @@
+{
+  "poll_seconds": 30,
+  "subaccounts": [
+    {
+      "name": "sub1-btc",
+      "api_key": "SUB1_API_KEY",
+      "api_secret": "SUB1_API_SECRET",
+      "api_passphrase": "SUB1_API_PASSPHRASE",
+      "buy_coin": "BTC",
+      "min_usdt_to_trigger": 5,
+      "reserve_usdt": 0,
+      "max_usdt_per_order": 0,
+      "enabled": true
+    },
+    {
+      "name": "sub2-eth",
+      "api_key": "SUB2_API_KEY",
+      "api_secret": "SUB2_API_SECRET",
+      "api_passphrase": "SUB2_API_PASSPHRASE",
+      "buy_coin": "ETH",
+      "min_usdt_to_trigger": 10,
+      "reserve_usdt": 0,
+      "max_usdt_per_order": 0,
+      "enabled": true
+    }
+  ]
+}
