@@ -68,13 +68,16 @@ class BitgetClient:
             )
 
         url = self.base_url + request_path
-        resp = self.session.request(
-            method,
-            url,
-            data=body_str if body is not None else None,
-            headers=headers,
-            timeout=self.timeout,
-        )
+        try:
+            resp = self.session.request(
+                method,
+                url,
+                data=body_str if body is not None else None,
+                headers=headers,
+                timeout=self.timeout,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise BitgetAPIError("NETWORK", f"{method} {path}: {exc.__class__.__name__}: {exc}") from exc
 
         try:
             payload = resp.json()

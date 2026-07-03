@@ -1,0 +1,17 @@
+services:
+  autobuy:
+    build: .
+    image: bitget-autobuy:latest
+    container_name: bitget-autobuy
+    restart: unless-stopped
+    volumes:
+      - ./config.json:/app/config.json:ro
+    # Keep secrets out of config.json by referencing ${VAR} there and
+    # supplying values from an env file (chmod 600 .env, never commit it).
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

@@ -1,0 +1,12 @@
+.git
+.gitignore
+tests
+config.json
+*.local.json
+.env
+__pycache__
+*.pyc
+.venv
+venv
+deploy
+README.md

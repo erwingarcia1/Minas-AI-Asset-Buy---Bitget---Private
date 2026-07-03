@@ -49,6 +49,11 @@ Edit `config.json` — one entry per sub-account:
 
 Global: `poll_seconds` — how often to check balances.
 
+**Keeping secrets out of the file:** any string value may reference an
+environment variable as `${VAR}`, e.g. `"api_key": "${SUB1_API_KEY}"`.
+The bot expands these at startup and errors if a referenced variable is
+unset. Recommended for any server/container deployment.
+
 ### 3. Run
 
 ```bash
@@ -59,10 +64,31 @@ python autobuy.py --once      # single pass, then exit
 python autobuy.py             # run forever
 ```
 
-Keep it running 24/7 with systemd, Docker, `tmux`, or any process manager, e.g.:
+### 4. Run it 24/7
+
+**Docker** (config mounted read-only, secrets from `.env`, auto-restart):
 
 ```bash
-nohup python autobuy.py >> autobuy.log 2>&1 &
+cp config.example.json config.json && nano config.json   # use ${VAR} refs
+nano .env                                                # VAR=value lines
+docker compose run --rm autobuy --once --dry-run         # sanity check
+docker compose up -d
+docker compose logs -f
+```
+
+**systemd** (no Docker): see `deploy/autobuy.service` — install notes are in
+the unit file's header comments.
+
+**Alibaba Cloud**: full ECS walkthrough (region choice, security groups,
+EIP whitelisting, both Docker and systemd paths) in
+[`deploy/ALIBABA_CLOUD.md`](deploy/ALIBABA_CLOUD.md).
+
+## Tests
+
+No network or credentials needed — the Bitget API is mocked:
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
 ## Safety notes

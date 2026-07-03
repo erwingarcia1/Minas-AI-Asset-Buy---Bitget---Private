@@ -21,6 +21,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import time
 import uuid
@@ -121,9 +122,32 @@ class SubAccountWorker:
                 log.warning("[%s] could not fetch fill info for %s: %s", self.name, order_id, exc)
 
 
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env(value):
+    """Expand ${VAR} references from the environment in config string values.
+
+    Lets deployments keep secrets out of the config file entirely
+    (e.g. "api_key": "${SUB1_API_KEY}"). Unset variables are an error.
+    """
+    if isinstance(value, str):
+        def repl(match):
+            var = match.group(1)
+            if var not in os.environ:
+                raise ValueError(f"config references ${{{var}}} but it is not set in the environment")
+            return os.environ[var]
+        return _ENV_REF.sub(repl, value)
+    if isinstance(value, list):
+        return [_expand_env(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    return value
+
+
 def load_config(path):
     with open(path, "r", encoding="utf-8") as fh:
-        cfg = json.load(fh)
+        cfg = _expand_env(json.load(fh))
 
     subs = cfg.get("subaccounts", [])
     if not subs:
