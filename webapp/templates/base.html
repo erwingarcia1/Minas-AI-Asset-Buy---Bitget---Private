@@ -5,61 +5,226 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Auto-Buy Admin{% endblock %}</title>
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    --bg: #0a0a13;
+    --panel: rgba(255,255,255,.025);
+    --panel-solid: #12121d;
+    --border: rgba(255,255,255,.08);
+    --border-strong: rgba(255,255,255,.14);
+    --ink: #e9e9f2;
+    --muted: #8f8fa8;
+    --gold: #e8b64c;
+    --gold-bright: #f6cd6f;
+    --gold-deep: #c9932e;
+    --violet: #8b6cff;
+    --violet-deep: #6c4de0;
+    --mint: #3ddc97;
+    --amber: #f0a33c;
+    --red: #ff5470;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
   * { box-sizing: border-box; }
-  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-         margin: 0; background: Canvas; color: CanvasText; }
-  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1rem;
-           padding: .8rem 1.2rem; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
-  header h1 { font-size: 1.1rem; margin: 0; }
-  header nav { display: flex; gap: 1rem; flex-wrap: wrap; }
-  header form { margin-left: auto; }
-  main { max-width: 72rem; margin: 0 auto; padding: 1.2rem; }
-  a { color: #2f6fd6; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .flash { padding: .6rem .9rem; border-radius: 6px; margin: .4rem 0;
-           background: color-mix(in srgb, #2f9e44 14%, Canvas);
-           border: 1px solid color-mix(in srgb, #2f9e44 45%, transparent); }
-  .flash.error { background: color-mix(in srgb, #e03131 12%, Canvas);
-                 border-color: color-mix(in srgb, #e03131 45%, transparent); }
-  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-  th, td { text-align: left; padding: .5rem .6rem;
-           border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
-  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
-  .table-wrap { overflow-x: auto; }
-  .badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
-           font-size: .78rem; white-space: nowrap; }
-  .badge.ok  { background: color-mix(in srgb, #2f9e44 18%, Canvas); }
-  .badge.off { background: color-mix(in srgb, CanvasText 10%, Canvas); opacity: .8; }
-  .badge.warn{ background: color-mix(in srgb, #e8590c 18%, Canvas); }
-  button, .btn { font: inherit; padding: .45rem 1rem; border-radius: 6px; cursor: pointer;
-                 border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
-                 background: color-mix(in srgb, CanvasText 6%, Canvas); color: inherit; }
-  button.primary { background: #2f6fd6; border-color: #2f6fd6; color: #fff; }
-  button.danger  { color: #e03131; }
-  button.linklike { border: none; background: none; padding: .2rem .3rem; }
+  html { min-height: 100%; }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    margin: 0; color: var(--ink);
+    background:
+      radial-gradient(1100px 500px at 12% -10%, rgba(139,108,255,.13), transparent 60%),
+      radial-gradient(900px 480px at 95% 0%, rgba(232,182,76,.07), transparent 55%),
+      radial-gradient(1200px 700px at 50% 120%, rgba(108,77,224,.08), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  ::selection { background: rgba(232,182,76,.35); }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 1.1rem;
+    padding: 1rem 1.6rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,10,19,.72);
+    backdrop-filter: blur(14px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: .8rem; text-decoration: none; }
+  .brand:hover { text-decoration: none; }
+  .brand-mark {
+    width: 40px; height: 40px; border-radius: 12px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(140deg, rgba(139,108,255,.25), rgba(232,182,76,.18));
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 0 22px rgba(139,108,255,.25), inset 0 0 12px rgba(232,182,76,.10);
+  }
+  .brand-text { line-height: 1.25; }
+  .brand-text .row1 { font-size: 1.02rem; font-weight: 700; letter-spacing: .24em; }
+  .brand-text .row1 .minas { color: var(--gold); }
+  .brand-text .row1 .prod { color: var(--ink); font-weight: 500; letter-spacing: .14em; }
+  .brand-text .row2 { font-size: .68rem; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+
+  header nav { display: flex; gap: .35rem; flex-wrap: wrap; margin-left: .6rem; }
+  header nav a {
+    color: var(--muted); text-decoration: none; font-size: .86rem; font-weight: 500;
+    padding: .42rem .95rem; border-radius: 999px; border: 1px solid transparent;
+    letter-spacing: .02em; transition: all .18s ease;
+  }
+  header nav a:hover { color: var(--ink); border-color: var(--border); background: var(--panel); text-decoration: none; }
+  header nav a.active { color: var(--ink); background: var(--panel); border-color: var(--border-strong); }
+
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: .8rem; }
+  .live-pill {
+    display: flex; align-items: center; gap: .5rem;
+    font-family: var(--mono); font-size: .78rem; color: var(--muted);
+    padding: .4rem .9rem; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--panel);
+  }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mint);
+              box-shadow: 0 0 8px var(--mint); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+
+  main { max-width: 76rem; margin: 0 auto; padding: 1.8rem 1.6rem 3rem; }
+
+  a { color: var(--gold); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  h2 { font-size: 1.35rem; font-weight: 650; letter-spacing: .01em; margin: 0 0 1.1rem; }
+
+  .flash {
+    padding: .75rem 1.05rem; border-radius: 12px; margin: .5rem 0 1rem; font-size: .92rem;
+    background: rgba(61,220,151,.08); border: 1px solid rgba(61,220,151,.35);
+    box-shadow: 0 0 24px rgba(61,220,151,.07);
+  }
+  .flash.error {
+    background: rgba(255,84,112,.08); border-color: rgba(255,84,112,.4);
+    box-shadow: 0 0 24px rgba(255,84,112,.07);
+  }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+    padding: 1.3rem 1.4rem;
+    box-shadow: 0 18px 44px rgba(0,0,0,.35);
+  }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+           gap: .9rem; margin-bottom: 1.4rem; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+          padding: 1.05rem 1.2rem; }
+  .stat .label { font-size: .68rem; text-transform: uppercase; letter-spacing: .14em;
+                 color: var(--muted); margin-bottom: .45rem; }
+  .stat .value { font-family: var(--mono); font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
+  .stat .value.gold { color: var(--gold); }
+  .stat .value.mint { color: var(--mint); }
+  .stat .value.amber { color: var(--amber); }
+  .stat .sub { font-size: .78rem; color: var(--muted); margin-top: .3rem; }
+
+  .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border);
+                border-radius: 16px; box-shadow: 0 18px 44px rgba(0,0,0,.35); }
+  table { border-collapse: collapse; width: 100%; min-width: 56rem; }
+  th, td { text-align: left; padding: .85rem 1.05rem; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  th { font-size: .68rem; text-transform: uppercase; letter-spacing: .14em;
+       color: var(--muted); font-weight: 600; white-space: nowrap; }
+  tbody-row, table tr { transition: background .15s ease; }
+  table tr:hover td { background: rgba(255,255,255,.02); }
+  td { font-size: .92rem; }
+  td .name { font-weight: 650; }
+  td a.mail { color: var(--muted); font-family: var(--mono); font-size: .82rem; }
+  td a.mail:hover { color: var(--ink); }
+  .ticker { font-family: var(--mono); font-weight: 700; color: var(--gold);
+            letter-spacing: .04em; }
+  .mono { font-family: var(--mono); font-size: .85rem; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: .45rem;
+    padding: .22rem .8rem; border-radius: 999px;
+    font-size: .74rem; font-weight: 600; letter-spacing: .05em; white-space: nowrap;
+    border: 1px solid;
+  }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.ok  { color: var(--mint); background: rgba(61,220,151,.08); border-color: rgba(61,220,151,.35);
+               box-shadow: 0 0 14px rgba(61,220,151,.12); }
+  .badge.off { color: var(--muted); background: rgba(255,255,255,.04); border-color: var(--border-strong); }
+  .badge.warn{ color: var(--amber); background: rgba(240,163,60,.08); border-color: rgba(240,163,60,.4);
+               box-shadow: 0 0 14px rgba(240,163,60,.12); }
+
+  button, .btn {
+    font: inherit; font-size: .9rem; font-weight: 600; letter-spacing: .02em;
+    padding: .55rem 1.25rem; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border-strong);
+    background: var(--panel); color: var(--ink);
+    transition: all .18s ease;
+    text-decoration: none; display: inline-block;
+  }
+  button:hover, .btn:hover { border-color: rgba(255,255,255,.3); transform: translateY(-1px); text-decoration: none; }
+  button.primary, .btn.primary {
+    background: linear-gradient(135deg, var(--gold-bright), var(--gold-deep));
+    border: none; color: #191204;
+    box-shadow: 0 4px 22px rgba(232,182,76,.28);
+  }
+  button.primary:hover, .btn.primary:hover { box-shadow: 0 6px 30px rgba(232,182,76,.42); }
+  button.violet {
+    background: linear-gradient(135deg, var(--violet), var(--violet-deep));
+    border: none; color: #fff;
+    box-shadow: 0 4px 22px rgba(139,108,255,.3);
+  }
+  button.violet:hover { box-shadow: 0 6px 30px rgba(139,108,255,.45); }
+  button.danger { color: var(--red); }
+  button.linklike { border: none; background: none; padding: .2rem .3rem; font-weight: 500; box-shadow: none; }
+  button.linklike:hover { transform: none; text-decoration: underline; text-underline-offset: 3px; }
   form.inline { display: inline; }
-  label { display: block; margin-top: .9rem; font-weight: 600; }
-  label small { font-weight: 400; opacity: .7; }
+
+  label { display: block; margin-top: 1.15rem; font-weight: 600; font-size: .8rem;
+          text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+  label small { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: .78rem;
+                display: block; margin: .15rem 0 .1rem; color: var(--muted); opacity: .85; }
   input[type=text], input[type=email], input[type=number], input[type=password],
-  select, textarea { width: 100%; max-width: 28rem; padding: .45rem .6rem; font: inherit;
-           border: 1px solid color-mix(in srgb, CanvasText 30%, transparent);
-           border-radius: 6px; background: Field; color: FieldText; }
-  .muted { opacity: .65; font-size: .85rem; }
-  .actions { margin-top: 1.4rem; display: flex; gap: .8rem; align-items: center; }
+  select, textarea {
+    width: 100%; max-width: 30rem; padding: .62rem .8rem; font: inherit; font-size: .95rem;
+    color: var(--ink); margin-top: .4rem;
+    border: 1px solid var(--border-strong); border-radius: 10px;
+    background: rgba(0,0,0,.35);
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(232,182,76,.15);
+  }
+  input[type=checkbox] { accent-color: var(--gold); width: 1.05rem; height: 1.05rem; }
+  select { appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238f8fa8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right .9rem center; }
+
+  .muted { color: var(--muted); font-size: .85rem; }
+  .actions { margin-top: 1.6rem; display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Auto-Buy Admin</h1>
+  <a class="brand" href="{{ url_for('index') }}">
+    <span class="brand-mark">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2l8 4.5v6.2c0 4.6-3.4 7.9-8 9.3-4.6-1.4-8-4.7-8-9.3V6.5L12 2z"
+              stroke="#e8b64c" stroke-width="1.5" fill="rgba(232,182,76,.08)"/>
+        <path d="M8.5 12.2l2.3 2.3 4.7-4.8" stroke="#8b6cff" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="brand-text">
+      <span class="row1"><span class="minas">MINAS</span>&nbsp;<span class="prod">AUTO-BUY</span></span>
+      <span class="row2">Private client acquisition desk</span>
+    </span>
+  </a>
   <nav>
-    <a href="{{ url_for('index') }}">Clients</a>
-    <a href="{{ url_for('add') }}">Add client</a>
+    <a href="{{ url_for('index') }}" {% if request.endpoint in ('index', 'edit') %}class="active"{% endif %}>Clients</a>
+    <a href="{{ url_for('add') }}" {% if request.endpoint == 'add' %}class="active"{% endif %}>Add client</a>
     <a href="{{ url_for('export_csv') }}">Export CSV</a>
   </nav>
-  {% if locked is defined and locked %}
-  <form class="inline" method="post" action="{{ url_for('logout') }}"><button class="linklike">Log out</button></form>
-  {% endif %}
+  <div class="header-right">
+    <span class="live-pill"><span class="live-dot"></span>Live · <span id="utc-clock">--:--:--</span> UTC</span>
+    {% if locked is defined and locked %}
+    <form class="inline" method="post" action="{{ url_for('logout') }}"><button class="linklike">Log out</button></form>
+    {% endif %}
+  </div>
 </header>
 <main>
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -69,5 +234,17 @@
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
+<script>
+  (function () {
+    var el = document.getElementById("utc-clock");
+    function tick() {
+      var d = new Date();
+      el.textContent = String(d.getUTCHours()).padStart(2, "0") + ":" +
+                       String(d.getUTCMinutes()).padStart(2, "0") + ":" +
+                       String(d.getUTCSeconds()).padStart(2, "0");
+    }
+    tick(); setInterval(tick, 1000);
+  })();
+</script>
 </body>
 </html>

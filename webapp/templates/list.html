@@ -3,6 +3,32 @@
 {% block content %}
 
 {% if clients %}
+{% set enabled_clients = clients | selectattr("enabled") | list %}
+{% set ready_clients = enabled_clients | selectattr("keys_ok") | list %}
+{% set awaiting = clients | rejectattr("keys_ok") | list %}
+<div class="stats">
+  <div class="stat">
+    <div class="label">Clients</div>
+    <div class="value">{{ clients | length }}</div>
+    <div class="sub">{{ enabled_clients | length }} enabled · {{ (clients | length) - (enabled_clients | length) }} disabled</div>
+  </div>
+  <div class="stat">
+    <div class="label">Ready to trade</div>
+    <div class="value mint">{{ ready_clients | length }}</div>
+    <div class="sub">enabled with API keys in place</div>
+  </div>
+  <div class="stat">
+    <div class="label">Awaiting keys</div>
+    <div class="value {% if awaiting %}amber{% endif %}">{{ awaiting | length }}</div>
+    <div class="sub">{% if awaiting %}need credentials in .env{% else %}all credentials present{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Last applied</div>
+    <div class="value gold" style="font-size:1.05rem; padding-top:.4rem">{{ applied_at or "never" }}</div>
+    <div class="sub">bot config deployment</div>
+  </div>
+</div>
+
 <div class="table-wrap">
 <table>
   <tr>
@@ -11,12 +37,12 @@
   </tr>
   {% for c in clients %}
   <tr>
-    <td>{{ c.name }}</td>
-    <td><a href="mailto:{{ c.email }}">{{ c.email }}</a></td>
-    <td>{{ c.license_number or "—" }}</td>
+    <td><span class="name">{{ c.name }}</span></td>
+    <td><a class="mail" href="mailto:{{ c.email }}">{{ c.email }}</a></td>
+    <td class="mono">{{ c.license_number or "—" }}</td>
     <td>{{ c.exchange }}</td>
-    <td>{{ c.subaccount }}</td>
-    <td><strong>{{ c.ticker }}</strong> <span class="muted">≥ {{ c.min_usdt }} USDT</span></td>
+    <td class="mono">{{ c.subaccount }}</td>
+    <td><span class="ticker">{{ c.ticker }}</span> <span class="muted mono">≥ {{ c.min_usdt }} USDT</span></td>
     <td>
       {% if c.keys_ok %}<span class="badge ok">configured</span>
       {% else %}<span class="badge warn" title="Add {{ c.env_vars|join(', ') }} to the server's .env">awaiting keys</span>{% endif %}
@@ -36,15 +62,21 @@
 
 <div class="actions">
   <form class="inline" method="post" action="{{ url_for('apply') }}">
-    <button class="primary">Apply to bot</button>
+    <button class="violet">Apply to bot</button>
   </form>
+  <a class="btn primary" href="{{ url_for('add') }}">+ Add client</a>
   <span class="muted">
     Writes the enabled clients to the bot's config — the bot picks it up automatically.
     {% if applied_at %}Last applied: {{ applied_at }}.{% endif %}
   </span>
 </div>
 {% else %}
-<p>No clients yet. <a href="{{ url_for('add') }}">Add the first one</a>.</p>
+<div class="card" style="max-width:32rem; margin:4rem auto; text-align:center; padding:2.6rem 2rem;">
+  <div style="font-size:.68rem; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); margin-bottom:.8rem;">Client registry</div>
+  <h2 style="margin-bottom:.5rem;">No clients on the desk yet</h2>
+  <p class="muted" style="margin:0 0 1.6rem;">Register your first client to begin automated acquisitions.</p>
+  <a class="btn primary" href="{{ url_for('add') }}">+ Add the first client</a>
+</div>
 {% endif %}
 
 {% endblock %}

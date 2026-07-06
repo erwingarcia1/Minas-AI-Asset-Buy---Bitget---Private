@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Auto-Buy Admin{% endblock %}
 {% block content %}
+<div class="card" style="max-width:36rem; margin:0 auto;">
 <h2>{{ title }}</h2>
 <form method="post">
   <label>Name
@@ -31,7 +32,7 @@
     <input type="number" name="min_usdt" step="0.01" min="0"
            value="{{ client.min_usdt or client.get('min_usdt', 5) }}">
   </label>
-  <label>
+  <label style="display:flex; align-items:center; gap:.6rem; text-transform:none; letter-spacing:0; font-size:.92rem; color:var(--ink); font-weight:500;">
     <input type="checkbox" name="enabled" style="width:auto"
            {% if client.get('enabled', 1) in (1, '1', 'on', True) or client.enabled %}checked{% endif %}>
     Enabled (include in the bot when applied)
@@ -44,4 +45,5 @@
     <a href="{{ url_for('index') }}">Cancel</a>
   </div>
 </form>
+</div>
 {% endblock %}
