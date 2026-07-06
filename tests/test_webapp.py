@@ -45,6 +45,15 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(key_vars("sub1"),
                          ["SUB1_API_KEY", "SUB1_API_SECRET", "SUB1_API_PASSPHRASE"])
 
+    def test_key_vars_per_exchange(self):
+        """Bybit and Binance keys have no passphrase; Bitget and OKX do."""
+        self.assertEqual(key_vars("sub1", "Bybit"), ["SUB1_API_KEY", "SUB1_API_SECRET"])
+        self.assertEqual(key_vars("sub1", "Binance"), ["SUB1_API_KEY", "SUB1_API_SECRET"])
+        self.assertEqual(key_vars("sub1", "OKX"),
+                         ["SUB1_API_KEY", "SUB1_API_SECRET", "SUB1_API_PASSPHRASE"])
+        self.assertEqual(key_vars("sub1", "Bitget"),
+                         ["SUB1_API_KEY", "SUB1_API_SECRET", "SUB1_API_PASSPHRASE"])
+
 
 class TestCrud(WebAppBase):
     def test_add_and_list(self):
@@ -67,7 +76,7 @@ class TestCrud(WebAppBase):
         self.add_client(ticker="not a ticker!!")
         self.add_client(email="not-an-email")
         page = self.client.get("/").get_data(as_text=True)
-        self.assertIn("No clients yet", page)
+        self.assertIn("No clients on the desk yet", page)
 
     def test_edit_and_delete(self):
         self.add_client()
@@ -77,7 +86,7 @@ class TestCrud(WebAppBase):
         self.assertIn("ETH", page)
         self.client.post("/delete/1")
         page = self.client.get("/").get_data(as_text=True)
-        self.assertIn("No clients yet", page)
+        self.assertIn("No clients on the desk yet", page)
 
     def test_csv_export(self):
         self.add_client()
@@ -131,6 +140,48 @@ class TestApply(WebAppBase):
             cfg = autobuy.load_config(cfg_path)
         self.assertEqual(cfg["subaccounts"][0]["api_key"], "k")
         self.assertEqual(cfg["subaccounts"][0]["buy_coin"], "BTC")
+
+
+class TestMultiExchange(WebAppBase):
+    def test_form_accepts_all_supported_exchanges(self):
+        for i, exchange in enumerate(("Bitget", "Bybit", "OKX", "Binance"), start=1):
+            self.add_client(exchange=exchange, subaccount=f"sub{i}",
+                            email=f"c{i}@example.com")
+        page = self.client.get("/").get_data(as_text=True)
+        for exchange in ("Bitget", "Bybit", "OKX", "Binance"):
+            self.assertIn(exchange, page)
+
+    def test_form_rejects_unknown_exchange(self):
+        self.add_client(exchange="Kraken")
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertIn("No clients on the desk yet", page)
+
+    def test_apply_writes_exchange_and_omits_passphrase_for_bybit(self):
+        self.add_client(exchange="Bybit", ticker="SOL")
+        self.client.post("/apply")
+        with open(os.path.join(self.tmp.name, "config.json"), encoding="utf-8") as fh:
+            sub = json.load(fh)["subaccounts"][0]
+        self.assertEqual(sub["exchange"], "bybit")
+        self.assertEqual(sub["api_key"], "${SUB1_API_KEY}")
+        self.assertNotIn("api_passphrase", sub)
+
+    def test_bybit_keys_badge_needs_no_passphrase(self):
+        self.add_client(exchange="Bybit")
+        with mock.patch.dict(os.environ, {"SUB1_API_KEY": "k", "SUB1_API_SECRET": "s"}):
+            page = self.client.get("/").get_data(as_text=True)
+        self.assertIn("configured", page)
+
+    def test_applied_bybit_config_loads_in_bot(self):
+        """End-to-end: a Bybit client applied by the UI loads without a passphrase var."""
+        import autobuy
+
+        self.add_client(exchange="Bybit", ticker="SOL")
+        self.client.post("/apply")
+        cfg_path = os.path.join(self.tmp.name, "config.json")
+        with mock.patch.dict(os.environ, {"SUB1_API_KEY": "k", "SUB1_API_SECRET": "s"}):
+            cfg = autobuy.load_config(cfg_path)
+        self.assertEqual(cfg["subaccounts"][0]["exchange"], "bybit")
+        self.assertEqual(cfg["subaccounts"][0]["buy_coin"], "SOL")
 
 
 class TestAuth(unittest.TestCase):

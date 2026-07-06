@@ -222,7 +222,18 @@ class TestWorkerTick(unittest.TestCase):
 
 
 class TestSelftest(unittest.TestCase):
-    """--selftest needs no config or credentials; it must hit only public endpoints."""
+    """--selftest needs no config or credentials; it must hit only public endpoints.
+
+    These tests pin the exchange registry to Bitget only — the multi-venue
+    sweep is covered in tests/test_multi_exchange.py with per-venue stubs.
+    """
+
+    def setUp(self):
+        patcher = mock.patch.dict(
+            autobuy.EXCHANGE_CLIENTS,
+            {"bitget": ("bitget_client", "BitgetClient")}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _fake(self, server_time_offset_ms=0, reachable=True):
         # A plain function patched over Session.request gets bound, so the

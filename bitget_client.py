@@ -15,19 +15,17 @@ from urllib.parse import urlencode
 
 import requests
 
+from exchange_errors import ExchangeAPIError
+
 log = logging.getLogger("bitget")
 
 BASE_URL = "https://api.bitget.com"
 
 
-class BitgetAPIError(Exception):
+class BitgetAPIError(ExchangeAPIError):
     """Raised when Bitget returns a non-00000 business code or an HTTP error."""
 
-    def __init__(self, code, message, http_status=None):
-        self.code = code
-        self.message = message
-        self.http_status = http_status
-        super().__init__(f"Bitget error {code}: {message}")
+    exchange = "Bitget"
 
 
 class BitgetClient:
@@ -91,6 +89,11 @@ class BitgetClient:
 
     # --------------------------------------------------------------- public
 
+    @staticmethod
+    def spot_symbol(base, quote):
+        """Bitget spot symbol format: BTC + USDT -> BTCUSDT."""
+        return f"{base}{quote}"
+
     def get_server_time(self):
         """Bitget server time in epoch milliseconds. No auth required."""
         data = self._request("GET", "/api/v2/public/time", auth=False)
@@ -135,6 +138,18 @@ class BitgetClient:
             body["clientOid"] = client_oid
         return self._request("POST", "/api/v2/spot/trade/place-order", body=body)
 
-    def get_order_info(self, order_id):
+    def get_order_info(self, symbol, order_id):
+        """Normalized order lookup: {"status", "baseVolume", "quoteVolume"} or None.
+
+        `symbol` is unused (Bitget resolves orders by id alone) but kept for
+        interface parity with the other exchange clients.
+        """
         data = self._request("GET", "/api/v2/spot/trade/orderInfo", params={"orderId": order_id})
-        return data[0] if data else None
+        if not data:
+            return None
+        order = data[0]
+        return {
+            "status": str(order.get("status", "")).lower(),
+            "baseVolume": order.get("baseVolume"),
+            "quoteVolume": order.get("quoteVolume"),
+        }

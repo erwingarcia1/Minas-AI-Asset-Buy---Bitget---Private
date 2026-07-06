@@ -1,4 +1,4 @@
-"""Admin web UI for the Bitget auto-buy bot.
+"""Admin web UI for the multi-exchange auto-buy bot.
 
 Lets VAs register clients (name, email, license #, exchange, sub-account,
 ticker) in a SQLite registry, and applies the enabled entries to the bot's
@@ -25,7 +25,10 @@ from datetime import datetime, timezone
 from flask import (Flask, abort, flash, g, redirect, render_template,
                    request, send_file, session, url_for)
 
-EXCHANGES = ["Bitget"]  # extend when other exchanges are supported
+EXCHANGES = ["Bitget", "Bybit", "OKX", "Binance"]
+
+# Venues whose API keys carry a passphrase; the rest need only key + secret.
+NEEDS_PASSPHRASE = {"Bitget", "OKX"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS clients (
@@ -52,13 +55,16 @@ def env_prefix(subaccount):
     return re.sub(r"[^A-Za-z0-9]+", "_", subaccount).strip("_").upper()
 
 
-def key_vars(subaccount):
+def key_vars(subaccount, exchange="Bitget"):
     p = env_prefix(subaccount)
-    return [f"{p}_API_KEY", f"{p}_API_SECRET", f"{p}_API_PASSPHRASE"]
+    names = [f"{p}_API_KEY", f"{p}_API_SECRET"]
+    if exchange in NEEDS_PASSPHRASE:
+        names.append(f"{p}_API_PASSPHRASE")
+    return names
 
 
-def keys_present(subaccount):
-    return all(os.environ.get(v) for v in key_vars(subaccount))
+def keys_present(subaccount, exchange="Bitget"):
+    return all(os.environ.get(v) for v in key_vars(subaccount, exchange))
 
 
 def create_app(data_dir=None):
@@ -130,8 +136,8 @@ def create_app(data_dir=None):
         rows = db().execute("SELECT * FROM clients ORDER BY name COLLATE NOCASE").fetchall()
         clients = [dict(r) for r in rows]
         for c in clients:
-            c["keys_ok"] = keys_present(c["subaccount"])
-            c["env_vars"] = key_vars(c["subaccount"])
+            c["keys_ok"] = keys_present(c["subaccount"], c["exchange"])
+            c["env_vars"] = key_vars(c["subaccount"], c["exchange"])
         applied_at = None
         if os.path.exists(app.config["BOT_CONFIG"]):
             applied_at = datetime.fromtimestamp(
@@ -257,17 +263,20 @@ def create_app(data_dir=None):
 
         subaccounts, missing = [], []
         for r in rows:
-            kv = key_vars(r["subaccount"])
-            subaccounts.append({
+            kv = key_vars(r["subaccount"], r["exchange"])
+            entry = {
                 "name": r["subaccount"],
+                "exchange": r["exchange"].lower(),
                 "api_key": "${%s}" % kv[0],
                 "api_secret": "${%s}" % kv[1],
-                "api_passphrase": "${%s}" % kv[2],
                 "buy_coin": r["ticker"],
                 "min_usdt_to_trigger": r["min_usdt"],
                 "enabled": True,
-            })
-            if not keys_present(r["subaccount"]):
+            }
+            if len(kv) == 3:  # passphrase venues (Bitget, OKX)
+                entry["api_passphrase"] = "${%s}" % kv[2]
+            subaccounts.append(entry)
+            if not keys_present(r["subaccount"], r["exchange"]):
                 missing.append((r["subaccount"], [v for v in kv if not os.environ.get(v)]))
 
         cfg = {"poll_seconds": existing.get("poll_seconds", 30), "subaccounts": subaccounts}

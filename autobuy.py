@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Bitget sub-account USDT auto-buy bot.
+"""Multi-exchange sub-account USDT auto-buy bot.
 
 Polls the spot USDT balance of each configured sub-account and, whenever the
 available balance exceeds the configured threshold, places a spot market buy
 for that sub-account's target coin.
 
-Each sub-account entry in config.json carries its own API credentials (Bitget
-requires the sub-account's own API key to trade inside it — create one from
-the parent account under "Sub-account management") plus the coin to buy.
+Each sub-account entry in config.json carries its own exchange, API
+credentials (exchanges scope keys to the account they are created under —
+create the key from the parent account's sub-account management page) plus
+the coin to buy. Supported exchanges: Bitget, Bybit, OKX, Binance.
 
 Usage:
     python autobuy.py                 # run with config.json
@@ -17,6 +18,7 @@ Usage:
 """
 
 import argparse
+import importlib
 import json
 import logging
 import math
@@ -26,12 +28,34 @@ import sys
 import time
 import uuid
 
-from bitget_client import BitgetAPIError, BitgetClient
+from exchange_errors import ExchangeAPIError
 
 log = logging.getLogger("autobuy")
 
 QUOTE_COIN = "USDT"
 SYMBOL_CACHE_TTL = 3600  # seconds between refreshes of symbol metadata
+
+# exchange name (lowercase) -> (module, class). Imported lazily so a missing
+# or broken client module only affects configs that actually use that venue.
+EXCHANGE_CLIENTS = {
+    "bitget": ("bitget_client", "BitgetClient"),
+    "bybit": ("bybit_client", "BybitClient"),
+    "okx": ("okx_client", "OKXClient"),
+    "binance": ("binance_client", "BinanceClient"),
+}
+
+# Venues whose API keys carry a passphrase; the rest need only key + secret.
+PASSPHRASE_EXCHANGES = {"bitget", "okx"}
+
+EXCHANGE_LABELS = {"bitget": "Bitget", "bybit": "Bybit", "okx": "OKX", "binance": "Binance"}
+
+
+def make_client(exchange, api_key="", api_secret="", passphrase=""):
+    """Instantiate the REST client for `exchange` (lowercase, validated)."""
+    module_name, class_name = EXCHANGE_CLIENTS[exchange]
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)(
+        api_key=api_key, api_secret=api_secret, passphrase=passphrase)
 
 
 class SubAccountWorker:
@@ -39,18 +63,20 @@ class SubAccountWorker:
 
     def __init__(self, cfg, dry_run=False):
         self.name = cfg["name"]
+        self.exchange = str(cfg.get("exchange", "bitget")).lower()
         self.coin = cfg["buy_coin"].upper()
-        self.symbol = f"{self.coin}{QUOTE_COIN}"
         self.min_usdt = float(cfg.get("min_usdt_to_trigger", 5))
         self.reserve_usdt = float(cfg.get("reserve_usdt", 0))
         self.max_usdt_per_order = float(cfg.get("max_usdt_per_order", 0)) or None
         self.enabled = bool(cfg.get("enabled", True))
         self.dry_run = dry_run
-        self.client = BitgetClient(
+        self.client = make_client(
+            self.exchange,
             api_key=cfg["api_key"],
             api_secret=cfg["api_secret"],
-            passphrase=cfg["api_passphrase"],
+            passphrase=cfg.get("api_passphrase", ""),
         )
+        self.symbol = self.client.spot_symbol(self.coin, QUOTE_COIN)
         self._symbol_info = None
         self._symbol_info_at = 0.0
 
@@ -113,12 +139,12 @@ class SubAccountWorker:
         if order_id:
             time.sleep(1.5)
             try:
-                order = self.client.get_order_info(order_id)
+                order = self.client.get_order_info(self.symbol, order_id)
                 if order:
                     log.info("[%s] order %s status=%s filled=%s %s for %s USDT",
                              self.name, order_id, order.get("status"),
                              order.get("baseVolume"), self.coin, order.get("quoteVolume"))
-            except BitgetAPIError as exc:
+            except ExchangeAPIError as exc:
                 log.warning("[%s] could not fetch fill info for %s: %s", self.name, order_id, exc)
 
 
@@ -160,13 +186,21 @@ def load_config(path):
 
     cfg = {k: _expand_env(v) for k, v in raw.items() if k != "subaccounts"}
 
-    required = ("name", "api_key", "api_secret", "api_passphrase", "buy_coin")
+    required = ("name", "api_key", "api_secret", "buy_coin")
     valid, skipped = [], []
     for i, sub in enumerate(subs_raw):
         label = sub.get("name") or f"subaccounts[{i}]"
         try:
             sub = _expand_env(sub)
+            exchange = str(sub.get("exchange", "bitget")).lower()
+            if exchange not in EXCHANGE_CLIENTS:
+                raise ValueError(f"unknown exchange {exchange!r} "
+                                 f"(supported: {', '.join(sorted(EXCHANGE_CLIENTS))})")
+            sub["exchange"] = exchange
             missing = [k for k in required if not sub.get(k)]
+            # Only Bitget and OKX keys carry a passphrase.
+            if exchange in PASSPHRASE_EXCHANGES and not sub.get("api_passphrase"):
+                missing.append("api_passphrase")
             if missing:
                 raise ValueError(f"missing fields: {', '.join(missing)}")
             valid.append(sub)
@@ -186,37 +220,55 @@ def load_config(path):
 def selftest():
     """Verify this machine can run the bot — no API keys or config needed.
 
-    Checks Bitget public-API reachability, latency, and local clock skew
+    Checks every supported exchange's public-API reachability, latency, and
+    market data, plus local clock skew against the first reachable venue
     (signed requests are rejected if the clock is off). Returns an exit code.
     """
-    client = BitgetClient()
     failures = 0
+    reachable = 0
+    clock_checked = False
 
-    try:
-        t0 = time.time()
-        server_ms = client.get_server_time()
-        latency_ms = (time.time() - t0) * 1000
-        skew_ms = abs(server_ms - int((t0 + (time.time() - t0) / 2) * 1000))
-        log.info("PASS  Bitget API reachable (latency %.0f ms)", latency_ms)
-        if skew_ms < 2000:
-            log.info("PASS  clock skew vs Bitget: %d ms", skew_ms)
-        else:
-            log.error("FAIL  clock skew vs Bitget is %d ms (>2s) — fix NTP: sudo timedatectl set-ntp true", skew_ms)
+    for exchange in sorted(EXCHANGE_CLIENTS):
+        label = EXCHANGE_LABELS[exchange]
+        try:
+            client = make_client(exchange)
+        except Exception as exc:  # missing/broken client module
+            log.error("FAIL  %s client unavailable: %s", label, exc)
             failures += 1
-    except BitgetAPIError as exc:
-        log.error("FAIL  cannot reach Bitget API: %s", exc)
-        log.error("      (mainland-China regions and some networks block api.bitget.com)")
-        return 1  # nothing else can pass without connectivity
+            continue
 
-    try:
-        info = client.get_symbol_info("BTCUSDT")
-        price = client.get_ticker_price("BTCUSDT")
-        log.info("PASS  market data OK (BTCUSDT status=%s, last price %.2f USDT)",
-                 info.get("status"), price)
-    except BitgetAPIError as exc:
-        log.error("FAIL  market data: %s", exc)
-        failures += 1
+        try:
+            t0 = time.time()
+            server_ms = client.get_server_time()
+            latency_ms = (time.time() - t0) * 1000
+            log.info("PASS  %s API reachable (latency %.0f ms)", label, latency_ms)
+            reachable += 1
+            if not clock_checked:
+                clock_checked = True
+                skew_ms = abs(server_ms - int((t0 + (time.time() - t0) / 2) * 1000))
+                if skew_ms < 2000:
+                    log.info("PASS  clock skew vs %s: %d ms", label, skew_ms)
+                else:
+                    log.error("FAIL  clock skew vs %s is %d ms (>2s) — fix NTP: "
+                              "sudo timedatectl set-ntp true", label, skew_ms)
+                    failures += 1
+        except ExchangeAPIError as exc:
+            log.error("FAIL  cannot reach %s API: %s", label, exc)
+            failures += 1
+            continue
 
+        try:
+            symbol = client.spot_symbol("BTC", QUOTE_COIN)
+            info = client.get_symbol_info(symbol)
+            price = client.get_ticker_price(symbol)
+            log.info("PASS  %s market data OK (%s status=%s, last price %.2f USDT)",
+                     label, symbol, info.get("status"), price)
+        except ExchangeAPIError as exc:
+            log.error("FAIL  %s market data: %s", label, exc)
+            failures += 1
+
+    if not reachable:
+        log.error("      (mainland-China regions and some networks block exchange APIs)")
     if failures:
         log.error("selftest FAILED (%d problem%s)", failures, "s" if failures > 1 else "")
         return 1
@@ -225,12 +277,13 @@ def selftest():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bitget sub-account USDT auto-buy bot")
+    parser = argparse.ArgumentParser(
+        description="Multi-exchange sub-account USDT auto-buy bot (Bitget, Bybit, OKX, Binance)")
     parser.add_argument("--config", default=os.environ.get("AUTOBUY_CONFIG", "config.json"))
     parser.add_argument("--once", action="store_true", help="run a single pass and exit")
     parser.add_argument("--dry-run", action="store_true", help="log intended buys without placing orders")
     parser.add_argument("--selftest", action="store_true",
-                        help="check Bitget connectivity and clock sync (no config/keys needed), then exit")
+                        help="check exchange connectivity and clock sync (no config/keys needed), then exit")
     parser.add_argument("--verbose", "-v", action="store_true", help="debug logging")
     args = parser.parse_args()
 
@@ -279,8 +332,8 @@ def main():
         for worker in workers:
             try:
                 worker.tick()
-            except BitgetAPIError as exc:
-                log.error("[%s] Bitget API error: %s", worker.name, exc)
+            except ExchangeAPIError as exc:
+                log.error("[%s] %s API error: %s", worker.name, exc.exchange, exc)
             except Exception:
                 log.exception("[%s] unexpected error", worker.name)
         if args.once:
