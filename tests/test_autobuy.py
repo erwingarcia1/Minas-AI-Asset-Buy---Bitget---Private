@@ -132,6 +132,14 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg["subaccounts"][0]["api_key"], "realkey")
         self.assertEqual(cfg["subaccounts"][0]["api_secret"], "realsecret")
 
+    def test_partial_config_keeps_valid_entries(self):
+        """An entry awaiting API keys is skipped; the rest keep working."""
+        incomplete = {"name": "new-client", "buy_coin": "ETH",
+                      "api_key": "${DEFINITELY_UNSET_VAR_X}", "api_secret": "", "api_passphrase": ""}
+        path = self._write({"subaccounts": [SUB_CFG, incomplete]})
+        cfg = load_config(path)
+        self.assertEqual([s["name"] for s in cfg["subaccounts"]], ["sub1"])
+
     def test_unset_env_var_rejected(self):
         sub = dict(SUB_CFG, api_key="${TEST_AUTOBUY_DEFINITELY_UNSET}")
         path = self._write({"subaccounts": [sub]})

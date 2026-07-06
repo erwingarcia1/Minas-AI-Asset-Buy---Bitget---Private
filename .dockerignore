@@ -4,6 +4,7 @@ tests
 config.json
 *.local.json
 .env
+data
 __pycache__
 *.pyc
 .venv

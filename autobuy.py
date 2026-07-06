@@ -146,18 +146,40 @@ def _expand_env(value):
 
 
 def load_config(path):
+    """Load and validate config. Sub-account entries that are incomplete or
+    reference unset env vars are skipped with a warning (so one client added
+    via the web UI before their API keys exist doesn't stop the others);
+    raises ValueError only when no usable entry remains.
+    """
     with open(path, "r", encoding="utf-8") as fh:
-        cfg = _expand_env(json.load(fh))
+        raw = json.load(fh)
 
-    subs = cfg.get("subaccounts", [])
-    if not subs:
+    subs_raw = raw.get("subaccounts", [])
+    if not isinstance(subs_raw, list) or not subs_raw:
         raise ValueError("config has no 'subaccounts' entries")
 
+    cfg = {k: _expand_env(v) for k, v in raw.items() if k != "subaccounts"}
+
     required = ("name", "api_key", "api_secret", "api_passphrase", "buy_coin")
-    for i, sub in enumerate(subs):
-        missing = [k for k in required if not sub.get(k)]
-        if missing:
-            raise ValueError(f"subaccounts[{i}] ({sub.get('name', '?')}) missing fields: {', '.join(missing)}")
+    valid, skipped = [], []
+    for i, sub in enumerate(subs_raw):
+        label = sub.get("name") or f"subaccounts[{i}]"
+        try:
+            sub = _expand_env(sub)
+            missing = [k for k in required if not sub.get(k)]
+            if missing:
+                raise ValueError(f"missing fields: {', '.join(missing)}")
+            valid.append(sub)
+        except ValueError as exc:
+            skipped.append((label, str(exc)))
+
+    for label, why in skipped:
+        log.warning("skipping sub-account %r: %s", label, why)
+    if not valid:
+        raise ValueError(
+            "no usable sub-account entries — " + "; ".join(f"{l}: {w}" for l, w in skipped)
+        )
+    cfg["subaccounts"] = valid
     return cfg
 
 
@@ -220,21 +242,40 @@ def main():
     if args.selftest:
         sys.exit(selftest())
 
-    try:
-        cfg = load_config(args.config)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        log.error("config error: %s", exc)
-        sys.exit(1)
-
-    poll_seconds = float(cfg.get("poll_seconds", 30))
-    workers = [SubAccountWorker(sub, dry_run=args.dry_run) for sub in cfg["subaccounts"]]
-    log.info("watching %d sub-account(s), polling every %.0fs%s",
-             len(workers), poll_seconds, " (dry run)" if args.dry_run else "")
-    for w in workers:
-        log.info("  - %s: buys %s when USDT > %.2f%s", w.name, w.symbol, w.min_usdt,
-                 "" if w.enabled else " [DISABLED]")
+    poll_seconds = 30.0
+    workers = []
+    cfg_mtime = object()  # sentinel != any real mtime, forces initial load
 
     while True:
+        # Hot-reload: pick up config changes (e.g. applied from the web UI)
+        # without a restart. On a bad config, keep the previous workers.
+        try:
+            mtime = os.stat(args.config).st_mtime
+        except OSError:
+            mtime = None
+        if mtime != cfg_mtime:
+            first_load = cfg_mtime.__class__ is object
+            cfg_mtime = mtime
+            try:
+                cfg = load_config(args.config)
+                poll_seconds = float(cfg.get("poll_seconds", 30))
+                workers = [SubAccountWorker(sub, dry_run=args.dry_run) for sub in cfg["subaccounts"]]
+                log.info("%s config: %d sub-account(s), polling every %.0fs%s",
+                         "loaded" if first_load else "reloaded", len(workers), poll_seconds,
+                         " (dry run)" if args.dry_run else "")
+                for w in workers:
+                    log.info("  - %s: buys %s when USDT > %.2f%s", w.name, w.symbol, w.min_usdt,
+                             "" if w.enabled else " [DISABLED]")
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                log.error("config error: %s", exc)
+                if args.once:
+                    sys.exit(1)
+                if first_load or not workers:
+                    workers = []
+                    log.info("waiting for a valid %s (watching for changes)...", args.config)
+                else:
+                    log.warning("keeping previous config (%d sub-account(s))", len(workers))
+
         for worker in workers:
             try:
                 worker.tick()

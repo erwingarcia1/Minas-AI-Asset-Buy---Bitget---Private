@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Clients — Auto-Buy Admin{% endblock %}
+{% block content %}
+
+{% if clients %}
+<div class="table-wrap">
+<table>
+  <tr>
+    <th>Name</th><th>Email</th><th>License #</th><th>Exchange</th>
+    <th>Sub account</th><th>Auto-buys</th><th>API keys</th><th>Status</th><th></th>
+  </tr>
+  {% for c in clients %}
+  <tr>
+    <td>{{ c.name }}</td>
+    <td><a href="mailto:{{ c.email }}">{{ c.email }}</a></td>
+    <td>{{ c.license_number or "—" }}</td>
+    <td>{{ c.exchange }}</td>
+    <td>{{ c.subaccount }}</td>
+    <td><strong>{{ c.ticker }}</strong> <span class="muted">≥ {{ c.min_usdt }} USDT</span></td>
+    <td>
+      {% if c.keys_ok %}<span class="badge ok">configured</span>
+      {% else %}<span class="badge warn" title="Add {{ c.env_vars|join(', ') }} to the server's .env">awaiting keys</span>{% endif %}
+    </td>
+    <td>{% if c.enabled %}<span class="badge ok">enabled</span>{% else %}<span class="badge off">disabled</span>{% endif %}</td>
+    <td style="white-space:nowrap">
+      <a href="{{ url_for('edit', client_id=c.id) }}">Edit</a>
+      <form class="inline" method="post" action="{{ url_for('delete', client_id=c.id) }}"
+            onsubmit="return confirm('Delete {{ c.name }}? This does not touch the exchange, only this registry.')">
+        <button class="linklike danger">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+<div class="actions">
+  <form class="inline" method="post" action="{{ url_for('apply') }}">
+    <button class="primary">Apply to bot</button>
+  </form>
+  <span class="muted">
+    Writes the enabled clients to the bot's config — the bot picks it up automatically.
+    {% if applied_at %}Last applied: {{ applied_at }}.{% endif %}
+  </span>
+</div>
+{% else %}
+<p>No clients yet. <a href="{{ url_for('add') }}">Add the first one</a>.</p>
+{% endif %}
+
+{% endblock %}

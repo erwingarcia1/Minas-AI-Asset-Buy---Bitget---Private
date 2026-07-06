@@ -6,6 +6,13 @@ a **spot market buy** for the coin you picked for that sub-account.
 
 Example: fund `sub1` with USDT → it auto-buys BTC. Fund `sub2` → it auto-buys ETH.
 
+Includes an **admin web UI** (client registry: name, email, license #,
+exchange, sub-account, ticker) meant to be shared with your team over
+**Tailscale** — see [`deploy/AWS_EC2.md`](deploy/AWS_EC2.md) for the full
+server setup. VAs add/edit clients and press *Apply to bot*; the bot
+hot-reloads the config within one poll cycle. API secrets never enter the
+UI or its database — they live only in the server's `.env` file.
+
 ## How it works
 
 - Every `poll_seconds` (default 30s) the bot checks each sub-account's

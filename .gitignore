@@ -1,7 +1,8 @@
-# Never commit real API credentials
+# Never commit real API credentials or the client registry
 config.json
 *.local.json
 .env
+data/
 
 __pycache__/
 *.pyc

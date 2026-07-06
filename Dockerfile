@@ -8,6 +8,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bitget_client.py autobuy.py ./
+COPY webapp/ ./webapp/
 
 USER autobuy
 

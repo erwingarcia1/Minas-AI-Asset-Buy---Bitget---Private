@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Log in — Auto-Buy Admin{% endblock %}
+{% block content %}
+<h2>Log in</h2>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post">
+  <label>Password
+    <input type="password" name="password" autofocus required>
+  </label>
+  <div class="actions"><button class="primary">Log in</button></div>
+</form>
+{% endblock %}

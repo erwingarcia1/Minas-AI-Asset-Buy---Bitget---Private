@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Auto-Buy Admin{% endblock %}</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 0; background: Canvas; color: CanvasText; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1rem;
+           padding: .8rem 1.2rem; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+  header h1 { font-size: 1.1rem; margin: 0; }
+  header nav { display: flex; gap: 1rem; flex-wrap: wrap; }
+  header form { margin-left: auto; }
+  main { max-width: 72rem; margin: 0 auto; padding: 1.2rem; }
+  a { color: #2f6fd6; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .flash { padding: .6rem .9rem; border-radius: 6px; margin: .4rem 0;
+           background: color-mix(in srgb, #2f9e44 14%, Canvas);
+           border: 1px solid color-mix(in srgb, #2f9e44 45%, transparent); }
+  .flash.error { background: color-mix(in srgb, #e03131 12%, Canvas);
+                 border-color: color-mix(in srgb, #e03131 45%, transparent); }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { text-align: left; padding: .5rem .6rem;
+           border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
+  .table-wrap { overflow-x: auto; }
+  .badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
+           font-size: .78rem; white-space: nowrap; }
+  .badge.ok  { background: color-mix(in srgb, #2f9e44 18%, Canvas); }
+  .badge.off { background: color-mix(in srgb, CanvasText 10%, Canvas); opacity: .8; }
+  .badge.warn{ background: color-mix(in srgb, #e8590c 18%, Canvas); }
+  button, .btn { font: inherit; padding: .45rem 1rem; border-radius: 6px; cursor: pointer;
+                 border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+                 background: color-mix(in srgb, CanvasText 6%, Canvas); color: inherit; }
+  button.primary { background: #2f6fd6; border-color: #2f6fd6; color: #fff; }
+  button.danger  { color: #e03131; }
+  button.linklike { border: none; background: none; padding: .2rem .3rem; }
+  form.inline { display: inline; }
+  label { display: block; margin-top: .9rem; font-weight: 600; }
+  label small { font-weight: 400; opacity: .7; }
+  input[type=text], input[type=email], input[type=number], input[type=password],
+  select, textarea { width: 100%; max-width: 28rem; padding: .45rem .6rem; font: inherit;
+           border: 1px solid color-mix(in srgb, CanvasText 30%, transparent);
+           border-radius: 6px; background: Field; color: FieldText; }
+  .muted { opacity: .65; font-size: .85rem; }
+  .actions { margin-top: 1.4rem; display: flex; gap: .8rem; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Auto-Buy Admin</h1>
+  <nav>
+    <a href="{{ url_for('index') }}">Clients</a>
+    <a href="{{ url_for('add') }}">Add client</a>
+    <a href="{{ url_for('export_csv') }}">Export CSV</a>
+  </nav>
+  {% if locked is defined and locked %}
+  <form class="inline" method="post" action="{{ url_for('logout') }}"><button class="linklike">Log out</button></form>
+  {% endif %}
+</header>
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category if category != 'message' else '' }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,17 +1,41 @@
 services:
+  # The trading bot. Reads its config from the shared ./data volume and
+  # hot-reloads it whenever the web UI applies changes.
   autobuy:
     build: .
     image: bitget-autobuy:latest
     container_name: bitget-autobuy
     restart: unless-stopped
+    environment:
+      AUTOBUY_CONFIG: /app/data/config.json
     volumes:
-      - ./config.json:/app/config.json:ro
-    # Keep secrets out of config.json by referencing ${VAR} there and
-    # supplying values from an env file (chmod 600 .env, never commit it).
+      - ./data:/app/data
+    # Secrets live in .env only, referenced from config.json as ${VAR}.
     env_file:
       - .env
-    logging:
+    logging: &logrotate
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
+
+  # Admin web UI (client registry). Published on localhost only — expose it
+  # to your VAs through Tailscale (`tailscale serve`), never publicly.
+  webapp:
+    build: .
+    image: bitget-autobuy:latest
+    container_name: bitget-autobuy-webapp
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "webapp.app"]
+    environment:
+      BIND: 0.0.0.0
+      DATA_DIR: /app/data
+      AUTOBUY_CONFIG: /app/data/config.json
+      # Optional shared password for the UI (set in .env): WEB_PASSWORD
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    logging: *logrotate
