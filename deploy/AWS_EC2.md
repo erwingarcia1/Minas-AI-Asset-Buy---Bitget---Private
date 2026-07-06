@@ -1,7 +1,7 @@
 # Deploying to AWS EC2 (with Tailscale + web UI)
 
 Target: one small Ubuntu EC2 instance (Tokyo `ap-northeast-1` works well for
-Bitget) running two containers — the trading bot and the admin web UI — with
+all supported exchanges) running two containers — the trading bot and the admin web UI — with
 the UI reachable **only over your Tailscale network**, never the public
 internet. Your VAs manage clients through the UI; API keys stay in a
 root-of-server `.env` file and never pass through the UI or its database.
@@ -11,7 +11,7 @@ root-of-server `.env` file and never pass through the UI or its database.
 - Ubuntu 22.04/24.04, `t3.micro`/`t3.small` is plenty (1 vCPU / 1 GB).
 - **Security group inbound: SSH (22) only**, ideally restricted to your IP.
   The web UI does NOT need an open port — Tailscale connects outbound.
-- Allocate an **Elastic IP** if you'll IP-whitelist Bitget API keys
+- Allocate an **Elastic IP** if you'll IP-whitelist your exchange API keys
   (the default public IP changes on stop/start).
 
 ## 2. Install
@@ -31,6 +31,8 @@ cd autobuy && bash deploy/bootstrap.sh
 
 ```bash
 docker compose run --rm autobuy --selftest   # PASS lines = server is good
+# The selftest checks all four exchanges (Bitget, Bybit, OKX, Binance) and
+# passes only when every venue is reachable.
 docker compose up -d
 ```
 
@@ -64,7 +66,7 @@ visible only to devices on your tailnet.
    ```
    SUB1_API_KEY=...
    SUB1_API_SECRET=...
-   SUB1_API_PASSPHRASE=...
+   SUB1_API_PASSPHRASE=...   # Bitget/OKX only — Bybit/Binance have no passphrase
    ```
    then `docker compose restart autobuy`. Until then the bot simply skips
    that client and keeps trading the others.

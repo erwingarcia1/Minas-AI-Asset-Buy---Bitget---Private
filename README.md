@@ -1,10 +1,11 @@
-# Bitget Sub-Account USDT Auto-Buy
+# Sub-Account USDT Auto-Buy (Bitget · Bybit · OKX · Binance)
 
-Watches the **spot USDT balance of each configured Bitget sub-account** and,
+Watches the **spot USDT balance of each configured exchange sub-account** and,
 whenever USDT arrives (deposit, transfer, sale proceeds), automatically places
 a **spot market buy** for the coin you picked for that sub-account.
 
-Example: fund `sub1` with USDT → it auto-buys BTC. Fund `sub2` → it auto-buys ETH.
+Example: fund `sub1` (Bitget) with USDT → it auto-buys BTC. Fund `sub2`
+(OKX) → it auto-buys ETH. Each sub-account picks its own exchange.
 
 Includes an **admin web UI** (client registry: name, email, license #,
 exchange, sub-account, ticker) meant to be shared with your team over
@@ -16,25 +17,73 @@ UI or its database — they live only in the server's `.env` file.
 ## How it works
 
 - Every `poll_seconds` (default 30s) the bot checks each sub-account's
-  available spot USDT.
+  available spot USDT on that sub-account's exchange.
 - If the spendable amount (available minus `reserve_usdt`) is at or above
   `min_usdt_to_trigger` and the symbol's exchange minimum, it market-buys
-  `<buy_coin>USDT` with the full spendable amount (capped by
+  the `buy_coin`/USDT pair with the full spendable amount (capped by
   `max_usdt_per_order` if set).
 - Order size is floored to the symbol's quote precision, so no rejected-order
   loops; leftover dust below the minimum just waits for more USDT.
+- All four exchange clients expose the same normalized interface (balance,
+  symbol metadata, quote-denominated market buy, order status), so behavior
+  is identical regardless of venue.
+
+The bot derives the trading symbol from `buy_coin` per venue:
+
+| Exchange | Symbol format (for `buy_coin: "BTC"`) |
+|---|---|
+| Bitget | `BTCUSDT` |
+| Bybit | `BTCUSDT` |
+| OKX | `BTC-USDT` |
+| Binance | `BTCUSDT` |
 
 ## Setup
 
 ### 1. Create an API key for each sub-account
 
-Bitget only allows trading inside a sub-account with that sub-account's own
-API key. From your **main account**: *Profile → Sub-account management →
-(sub-account) → API management → Create API key*.
+On every venue the rule is the same: **the API key must be created under the
+sub-account it trades** — a main-account key cannot trade inside a
+sub-account.
+
+Common to all exchanges:
 
 - Permissions: **Read** + **Spot Trade**. Do **not** grant withdrawal.
-- Note the key, secret, and passphrase — you need all three.
-- If you restrict by IP, add the IP of the machine running this bot.
+- If the venue offers IP restriction (all four do), **allowlist the server's
+  IP** — use a stable address (Elastic IP / EIP) so it survives restarts.
+
+Venue specifics:
+
+**Bitget**
+- From your **main account**: *Profile → Sub-account management →
+  (sub-account) → API management → Create API key*.
+- Note the key, secret, and **passphrase** — you need all three.
+
+**Bybit**
+- Create the key from the sub-account's own *API Management* page (via
+  main account → Subaccounts → the sub-account, or by logging into it).
+- No passphrase — just key and secret.
+- Works with both **Unified Trading Accounts (UTA)** and legacy classic
+  accounts: the bot reads the UNIFIED wallet balance first and falls back
+  to the classic SPOT wallet automatically. Just make sure the USDT
+  actually sits in the account type your sub-account uses.
+
+**OKX**
+- From the main account: *Sub-accounts → (sub-account) → API → Create*.
+  You set a **passphrase** at creation — record it, OKX won't show it again.
+- **Gotcha: deposits land in the Funding account.** The bot reads the
+  **Trading account** balance, so USDT sitting in Funding is invisible to
+  it. Configure auto-transfer/sweep into the Trading account (or transfer
+  manually) or the bot will never see the deposit.
+
+**Binance**
+- From the main account: *Account → Sub-accounts → API management →
+  (sub-account) → Create*. Requires a corporate/entity account for
+  sub-account support.
+- No passphrase — just key and secret.
+- **Gotcha: NOTIONAL minimum.** Binance rejects market orders below the
+  symbol's NOTIONAL filter (commonly 5 USDT). Keep `min_usdt_to_trigger`
+  at or above it; the bot reads the filter and waits rather than spamming
+  rejected orders.
 
 ### 2. Configure
 
@@ -47,8 +96,10 @@ Edit `config.json` — one entry per sub-account:
 | Field | Meaning |
 |---|---|
 | `name` | Label used in logs (any string). |
-| `api_key` / `api_secret` / `api_passphrase` | That sub-account's API credentials. |
-| `buy_coin` | Coin to auto-buy with incoming USDT, e.g. `BTC`, `ETH`, `SOL`. The pair traded is `<buy_coin>USDT`. |
+| `exchange` | `bitget` (default), `bybit`, `okx`, or `binance`. Legacy configs without this field keep working unchanged — they mean Bitget. |
+| `api_key` / `api_secret` | That sub-account's API credentials. |
+| `api_passphrase` | Required for **Bitget and OKX only**; omit for Bybit/Binance. |
+| `buy_coin` | Coin to auto-buy with incoming USDT, e.g. `BTC`, `ETH`, `SOL`. The pair traded is the venue's `buy_coin`/USDT symbol (see table above). |
 | `min_usdt_to_trigger` | Don't buy until spendable USDT reaches this (default 5). |
 | `reserve_usdt` | USDT to always leave untouched in the sub-account (default 0). |
 | `max_usdt_per_order` | Cap per single order; `0` = spend everything spendable. |
@@ -61,6 +112,15 @@ environment variable as `${VAR}`, e.g. `"api_key": "${SUB1_API_KEY}"`.
 The bot expands these at startup and errors if a referenced variable is
 unset. Recommended for any server/container deployment.
 
+The convention (and what the web UI expects) is one variable set per
+sub-account, prefixed with the upper-cased sub-account name:
+
+```
+SUB1_API_KEY=...
+SUB1_API_SECRET=...
+SUB1_API_PASSPHRASE=...    # Bitget/OKX only — no passphrase var for Bybit/Binance
+```
+
 ### 3. Run
 
 ```bash
@@ -70,6 +130,13 @@ python autobuy.py --dry-run   # recommended first: logs what it WOULD buy
 python autobuy.py --once      # single pass, then exit
 python autobuy.py             # run forever
 ```
+
+`python autobuy.py --selftest` (no config or keys needed) checks that the
+machine can reach **all four exchanges** — public-API reachability, latency,
+market data, and local clock skew (signed requests are rejected if the clock
+is off). The selftest passes only when every venue is reachable; if you only
+trade some of them, a FAIL line for an unused venue tells you which networks
+are blocked but the venues you do use may still work.
 
 ### 4. Run it 24/7
 
@@ -90,9 +157,21 @@ the unit file's header comments.
 EIP whitelisting, both Docker and systemd paths) in
 [`deploy/ALIBABA_CLOUD.md`](deploy/ALIBABA_CLOUD.md).
 
+## Adding a client via the web UI
+
+1. Open the UI (over Tailscale) → **Add client**.
+2. Fill in Name, Email, License #, pick the venue from the **Exchange
+   dropdown** (Bitget, Bybit, OKX, or Binance), enter the Sub Account name
+   and the Ticker (the coin to buy), then Save.
+3. Press **Apply to bot**. The entry shows *awaiting keys* until that
+   sub-account's `<SUBACCOUNT>_API_KEY` / `_API_SECRET` (and
+   `_API_PASSPHRASE` for Bitget/OKX) are added to the server's `.env`;
+   until then the bot skips it and keeps trading the others.
+
 ## Tests
 
-No network or credentials needed — the Bitget API is mocked:
+No network or credentials needed — every exchange API (Bitget, Bybit, OKX,
+Binance) is mocked, with a unit-test suite per client:
 
 ```bash
 python -m unittest discover -s tests -v

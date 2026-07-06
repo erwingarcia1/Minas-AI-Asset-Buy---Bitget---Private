@@ -7,10 +7,10 @@ or plain **systemd**.
 ## Before you start: pick the right region
 
 Mainland China regions (Hangzhou, Beijing, Shanghai, Shenzhen, …) generally
-**cannot reach `api.bitget.com`** — crypto exchange APIs are blocked there.
-Deploy to a region outside the mainland:
+**cannot reach the exchange APIs** (Bitget, Bybit, OKX, Binance) — they are
+blocked there. Deploy to a region outside the mainland:
 
-- **Hong Kong (`cn-hongkong`)** — closest to Bitget's infrastructure, lowest latency
+- **Hong Kong (`cn-hongkong`)** — close to the exchanges' infrastructure, lowest latency
 - **Singapore (`ap-southeast-1`)** — good alternative
 
 Instance sizing: the smallest works. `ecs.t6-c1m1.large` or even
@@ -23,11 +23,11 @@ between 30-second polls). 1 vCPU / 1 GB RAM, 20 GB disk.
    Hong Kong or Singapore with a public IP (or EIP).
 2. **Security group**: no inbound rules are needed except SSH (port 22,
    ideally restricted to your IP). Allow all outbound — the bot only makes
-   outbound HTTPS calls to Bitget.
-3. **Bind an Elastic IP (EIP)** if you plan to IP-whitelist your Bitget API
+   outbound HTTPS calls to the exchange APIs.
+3. **Bind an Elastic IP (EIP)** if you plan to IP-whitelist your exchange API
    keys (recommended). The EIP is stable across restarts; whitelist it in
    each sub-account's API key settings.
-4. **Time sync**: Bitget rejects requests with skewed timestamps. Alibaba
+4. **Time sync**: the exchanges reject requests with skewed timestamps. Alibaba
    ECS images ship with chrony pointed at `ntp.aliyun.com` — verify with
    `chronyc tracking` (offset should be < 1s).
 
@@ -48,7 +48,7 @@ nano config.json          # set buy_coin etc.; use "api_key": "${SUB1_API_KEY}",
 cat > .env <<'EOF'
 SUB1_API_KEY=...
 SUB1_API_SECRET=...
-SUB1_API_PASSPHRASE=...
+SUB1_API_PASSPHRASE=...   # Bitget/OKX only — Bybit/Binance have no passphrase
 EOF
 chmod 600 .env
 
