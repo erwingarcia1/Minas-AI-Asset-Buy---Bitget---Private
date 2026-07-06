@@ -161,11 +161,54 @@ def load_config(path):
     return cfg
 
 
+def selftest():
+    """Verify this machine can run the bot — no API keys or config needed.
+
+    Checks Bitget public-API reachability, latency, and local clock skew
+    (signed requests are rejected if the clock is off). Returns an exit code.
+    """
+    client = BitgetClient()
+    failures = 0
+
+    try:
+        t0 = time.time()
+        server_ms = client.get_server_time()
+        latency_ms = (time.time() - t0) * 1000
+        skew_ms = abs(server_ms - int((t0 + (time.time() - t0) / 2) * 1000))
+        log.info("PASS  Bitget API reachable (latency %.0f ms)", latency_ms)
+        if skew_ms < 2000:
+            log.info("PASS  clock skew vs Bitget: %d ms", skew_ms)
+        else:
+            log.error("FAIL  clock skew vs Bitget is %d ms (>2s) — fix NTP: sudo timedatectl set-ntp true", skew_ms)
+            failures += 1
+    except BitgetAPIError as exc:
+        log.error("FAIL  cannot reach Bitget API: %s", exc)
+        log.error("      (mainland-China regions and some networks block api.bitget.com)")
+        return 1  # nothing else can pass without connectivity
+
+    try:
+        info = client.get_symbol_info("BTCUSDT")
+        price = client.get_ticker_price("BTCUSDT")
+        log.info("PASS  market data OK (BTCUSDT status=%s, last price %.2f USDT)",
+                 info.get("status"), price)
+    except BitgetAPIError as exc:
+        log.error("FAIL  market data: %s", exc)
+        failures += 1
+
+    if failures:
+        log.error("selftest FAILED (%d problem%s)", failures, "s" if failures > 1 else "")
+        return 1
+    log.info("selftest PASSED — this machine is ready. Next: add API keys, then --once --dry-run")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Bitget sub-account USDT auto-buy bot")
     parser.add_argument("--config", default=os.environ.get("AUTOBUY_CONFIG", "config.json"))
     parser.add_argument("--once", action="store_true", help="run a single pass and exit")
     parser.add_argument("--dry-run", action="store_true", help="log intended buys without placing orders")
+    parser.add_argument("--selftest", action="store_true",
+                        help="check Bitget connectivity and clock sync (no config/keys needed), then exit")
     parser.add_argument("--verbose", "-v", action="store_true", help="debug logging")
     args = parser.parse_args()
 
@@ -173,6 +216,9 @@ def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)-7s %(message)s",
     )
+
+    if args.selftest:
+        sys.exit(selftest())
 
     try:
         cfg = load_config(args.config)

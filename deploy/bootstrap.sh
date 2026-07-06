@@ -64,13 +64,17 @@ cat <<'EOF'
 ==========================================================================
  Setup complete. Next steps:
 
- 1. Edit your settings:      nano config.json     (coins, thresholds;
+ 1. Selftest (NO API keys needed — checks Bitget connectivity + clock):
+                             docker compose run --rm autobuy --selftest
+
+ 2. When ready to trade, edit:
+                             nano config.json     (coins, thresholds;
                                                     use ${VAR} for secrets)
                              nano .env             (the actual API keys)
 
- 2. Dry-run (no orders):     docker compose run --rm autobuy --once --dry-run
+ 3. Dry-run (no orders):     docker compose run --rm autobuy --once --dry-run
 
- 3. Go live:                 docker compose up -d
+ 4. Go live:                 docker compose up -d
     Watch logs:              docker compose logs -f
     Stop:                    docker compose down
 ==========================================================================

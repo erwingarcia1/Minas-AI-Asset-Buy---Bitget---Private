@@ -91,6 +91,11 @@ class BitgetClient:
 
     # --------------------------------------------------------------- public
 
+    def get_server_time(self):
+        """Bitget server time in epoch milliseconds. No auth required."""
+        data = self._request("GET", "/api/v2/public/time", auth=False)
+        return int(data["serverTime"])
+
     def get_symbol_info(self, symbol):
         """Spot symbol metadata (min order size, precisions, status)."""
         data = self._request("GET", "/api/v2/spot/public/symbols", params={"symbol": symbol}, auth=False)

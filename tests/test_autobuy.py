@@ -14,6 +14,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import requests
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import autobuy
@@ -209,6 +211,39 @@ class TestWorkerTick(unittest.TestCase):
         with mock.patch("requests.Session.request", new=failing):
             with self.assertRaises(BitgetAPIError):
                 SubAccountWorker(SUB_CFG).tick()
+
+
+class TestSelftest(unittest.TestCase):
+    """--selftest needs no config or credentials; it must hit only public endpoints."""
+
+    def _fake(self, server_time_offset_ms=0, reachable=True):
+        # A plain function patched over Session.request gets bound, so the
+        # session instance arrives as the first argument.
+        def handler(session, method, url, data=None, headers=None, timeout=None):
+            self.assertIsNone(headers.get("ACCESS-KEY"), "selftest must not send auth headers")
+            if not reachable:
+                raise requests.exceptions.ConnectionError("blocked")
+            if "/public/time" in url:
+                now_ms = int(autobuy.time.time() * 1000) + server_time_offset_ms
+                return ok({"serverTime": str(now_ms)})
+            if "/spot/public/symbols" in url:
+                return ok(SYMBOL_DATA)
+            if "/spot/market/tickers" in url:
+                return ok([{"lastPr": "50000.0"}])
+            raise AssertionError(f"selftest hit unexpected endpoint: {url}")
+        return handler
+
+    def test_passes_with_good_connectivity_and_clock(self):
+        with mock.patch("requests.Session.request", new=self._fake()):
+            self.assertEqual(autobuy.selftest(), 0)
+
+    def test_fails_when_unreachable(self):
+        with mock.patch("requests.Session.request", new=self._fake(reachable=False)):
+            self.assertEqual(autobuy.selftest(), 1)
+
+    def test_fails_on_large_clock_skew(self):
+        with mock.patch("requests.Session.request", new=self._fake(server_time_offset_ms=10_000)):
+            self.assertEqual(autobuy.selftest(), 1)
 
 
 if __name__ == "__main__":
