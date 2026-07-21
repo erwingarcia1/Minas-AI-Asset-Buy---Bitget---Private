@@ -30,6 +30,11 @@ EXCHANGES = ["Bitget", "Bybit", "OKX", "Binance"]
 # Venues whose API keys carry a passphrase; the rest need only key + secret.
 NEEDS_PASSPHRASE = {"Bitget", "OKX"}
 
+# Basket weight bounds. Kept in step with autobuy.WEIGHT_MIN/WEIGHT_MAX (this
+# app must never accept a weight the bot would refuse to load); duplicated
+# rather than imported so the UI stays runnable without the bot module.
+WEIGHT_MIN, WEIGHT_MAX = 1e-9, 1e9
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS clients (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +53,47 @@ CREATE TABLE IF NOT EXISTS clients (
 """
 
 FIELDS = ("name", "email", "license_number", "exchange", "subaccount", "ticker")
+
+
+def parse_ticker_field(value):
+    """Parse the ticker box into [(COIN, weight), ...].
+
+    "XLM"              -> one coin, the original behaviour
+    "XRP,XLM,ADA"      -> a basket, split evenly
+    "XRP:3, XLM:2"     -> a basket, weighted 60/40
+
+    Raises ValueError with a message meant for the user's screen.
+    """
+    legs, seen = [], set()
+    for part in str(value).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        coin, _, weight = part.partition(":")
+        coin = coin.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{1,20}", coin):
+            raise ValueError("ticker must be plain symbols like BTC or ETH, "
+                             "optionally several separated by commas")
+        if coin in seen:
+            raise ValueError(f"{coin} is listed twice")
+        seen.add(coin)
+        if weight.strip():
+            try:
+                w = float(weight)
+            except ValueError:
+                raise ValueError(f"weight for {coin} is not a number")
+            # Mirrors autobuy.WEIGHT_MIN/MAX. Anything the box accepts has to
+            # load in the bot — "inf"/"nan"/1e400 would parse fine here and
+            # then make the bot skip the whole client without telling anyone.
+            if not WEIGHT_MIN <= w <= WEIGHT_MAX:
+                raise ValueError(f"weight for {coin} must be a number between "
+                                 f"{WEIGHT_MIN:g} and {WEIGHT_MAX:g}")
+        else:
+            w = 1.0
+        legs.append((coin, w))
+    if not legs:
+        raise ValueError("ticker is required")
+    return legs
 
 
 def env_prefix(subaccount):
@@ -159,15 +205,24 @@ def create_app(data_dir=None):
             errors.append("email does not look valid")
         if data["exchange"] not in EXCHANGES:
             errors.append("unknown exchange")
-        if data["ticker"] and not re.fullmatch(r"[A-Za-z0-9]{1,20}", data["ticker"]):
-            errors.append("ticker must be a plain symbol like BTC or ETH")
+        if data["ticker"]:
+            try:
+                parse_ticker_field(data["ticker"])
+            except ValueError as exc:
+                errors.append(str(exc))
         try:
             data["min_usdt"] = float(data["min_usdt"])
             if data["min_usdt"] < 0:
                 raise ValueError
         except ValueError:
             errors.append("minimum USDT must be a non-negative number")
-        data["ticker"] = data["ticker"].upper()
+        # Canonical form: "xrp:3, xlm" -> "XRP:3,XLM" (weights kept, 1s dropped)
+        if data["ticker"] and not errors:
+            data["ticker"] = ",".join(
+                c if w == 1.0 else "%s:%g" % (c, w)
+                for c, w in parse_ticker_field(data["ticker"]))
+        else:
+            data["ticker"] = data["ticker"].upper()
         return data, errors
 
     @app.route("/add", methods=["GET", "POST"])
@@ -269,10 +324,16 @@ def create_app(data_dir=None):
                 "exchange": r["exchange"].lower(),
                 "api_key": "${%s}" % kv[0],
                 "api_secret": "${%s}" % kv[1],
-                "buy_coin": r["ticker"],
                 "min_usdt_to_trigger": r["min_usdt"],
                 "enabled": True,
             }
+            legs = parse_ticker_field(r["ticker"])
+            if len(legs) == 1:
+                entry["buy_coin"] = legs[0][0]
+            else:
+                # A basket splits each arriving deposit across its coins by
+                # weight; the bot reads this instead of buy_coin.
+                entry["basket"] = [{"coin": c, "weight": w} for c, w in legs]
             if len(kv) == 3:  # passphrase venues (Bitget, OKX)
                 entry["api_passphrase"] = "${%s}" % kv[2]
             subaccounts.append(entry)

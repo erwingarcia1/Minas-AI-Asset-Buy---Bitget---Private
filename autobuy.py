@@ -35,6 +35,11 @@ log = logging.getLogger("autobuy")
 QUOTE_COIN = "USDT"
 SYMBOL_CACHE_TTL = 3600  # seconds between refreshes of symbol metadata
 
+# Accepted range for a basket weight. Anything outside it is either nonsense
+# (0, NaN, inf) or a ratio so lopsided that the small leg can never trade;
+# the bound also keeps the share arithmetic away from float overflow.
+WEIGHT_MIN, WEIGHT_MAX = 1e-9, 1e9
+
 # exchange name (lowercase) -> (module, class). Imported lazily so a missing
 # or broken client module only affects configs that actually use that venue.
 EXCHANGE_CLIENTS = {
@@ -58,15 +63,61 @@ def make_client(exchange, api_key="", api_secret="", passphrase=""):
         api_key=api_key, api_secret=api_secret, passphrase=passphrase)
 
 
+def parse_basket(cfg):
+    """Normalize a sub-account's target(s) into [(COIN, weight), ...].
+
+    Accepts either the original single-coin form ("buy_coin": "XLM") or a
+    basket ("basket": [{"coin": "XRP", "weight": 3}, ...]). A bare string in
+    the basket list means weight 1. A single-coin config is exactly a
+    one-leg basket, so both forms share one code path.
+    """
+    raw = cfg.get("basket")
+    if not raw:
+        return [(cfg["buy_coin"].strip().upper(), 1.0)]
+    if not isinstance(raw, list):
+        raise ValueError("'basket' must be a list")
+
+    legs, seen = [], set()
+    for entry in raw:
+        if isinstance(entry, str):
+            coin, weight = entry, 1.0
+        elif isinstance(entry, dict):
+            coin, weight = entry.get("coin", ""), entry.get("weight", 1)
+        else:
+            raise ValueError(f"bad basket entry: {entry!r}")
+        coin = str(coin).strip().upper()
+        if not coin:
+            raise ValueError("basket entry is missing 'coin'")
+        try:
+            weight = float(weight)
+        except (TypeError, ValueError):
+            raise ValueError(f"basket weight for {coin} is not a number: {weight!r}")
+        # Bounded, not merely positive: NaN and both infinities fail this test,
+        # and so do weights so extreme that budget*weight/total overflows to
+        # inf/NaN and kills the tick. Weights are ratios, not amounts.
+        if not WEIGHT_MIN <= weight <= WEIGHT_MAX:
+            raise ValueError(f"basket weight for {coin} must be a number between "
+                             f"{WEIGHT_MIN:g} and {WEIGHT_MAX:g}")
+        if coin in seen:
+            raise ValueError(f"{coin} appears twice in the basket")
+        seen.add(coin)
+        legs.append((coin, weight))
+
+    if not legs:
+        raise ValueError("'basket' is empty")
+    return legs
+
+
 class SubAccountWorker:
-    """Owns one sub-account: its API client, target symbol, and buy rules."""
+    """Owns one sub-account: its API client, target coins, and buy rules."""
 
     def __init__(self, cfg, dry_run=False):
         self.name = cfg["name"]
         self.exchange = str(cfg.get("exchange", "bitget")).lower()
-        self.coin = cfg["buy_coin"].upper()
         self.min_usdt = float(cfg.get("min_usdt_to_trigger", 5))
         self.reserve_usdt = float(cfg.get("reserve_usdt", 0))
+        # Caps the TOTAL deployed per cycle. For a single-coin worker that is
+        # the one order, so the meaning is unchanged from before baskets.
         self.max_usdt_per_order = float(cfg.get("max_usdt_per_order", 0)) or None
         self.enabled = bool(cfg.get("enabled", True))
         self.dry_run = dry_run
@@ -76,20 +127,43 @@ class SubAccountWorker:
             api_secret=cfg["api_secret"],
             passphrase=cfg.get("api_passphrase", ""),
         )
-        self.symbol = self.client.spot_symbol(self.coin, QUOTE_COIN)
-        self._symbol_info = None
-        self._symbol_info_at = 0.0
+        self.legs = parse_basket(cfg)
+        self.coin = self.legs[0][0]  # kept for logs and single-coin callers
+        self.symbols = {coin: self.client.spot_symbol(coin, QUOTE_COIN)
+                        for coin, _ in self.legs}
+        self.symbol = self.symbols[self.coin]
+        self._symbol_info = {}
+        self._symbol_info_at = {}
+        self._last_stall = None  # suppresses repeat "nothing is buyable" logs
+
+    @property
+    def is_basket(self):
+        return len(self.legs) > 1
+
+    def describe(self):
+        """One-line summary of what this worker buys, for the startup log."""
+        if not self.is_basket:
+            return self.symbol
+        total = sum(w for _, w in self.legs)
+        return "basket of %d: %s" % (
+            len(self.legs),
+            ", ".join("%s %.0f%%" % (c, 100 * w / total) for c, w in self.legs),
+        )
 
     # ----------------------------------------------------------- symbol meta
 
-    def symbol_info(self):
-        if self._symbol_info is None or time.time() - self._symbol_info_at > SYMBOL_CACHE_TTL:
-            self._symbol_info = self.client.get_symbol_info(self.symbol)
-            self._symbol_info_at = time.time()
-            if self._symbol_info.get("status") != "online":
+    def symbol_info(self, coin=None):
+        coin = coin or self.coin
+        symbol = self.symbols[coin]
+        cached_at = self._symbol_info_at.get(symbol, 0.0)
+        if symbol not in self._symbol_info or time.time() - cached_at > SYMBOL_CACHE_TTL:
+            info = self.client.get_symbol_info(symbol)
+            self._symbol_info[symbol] = info
+            self._symbol_info_at[symbol] = time.time()
+            if info.get("status") != "online":
                 log.warning("[%s] symbol %s status is %r, orders may fail",
-                            self.name, self.symbol, self._symbol_info.get("status"))
-        return self._symbol_info
+                            self.name, symbol, info.get("status"))
+        return self._symbol_info[symbol]
 
     def _floor_to_precision(self, amount, precision):
         factor = 10 ** precision
@@ -109,29 +183,89 @@ class SubAccountWorker:
                       self.name, available, max(spendable, 0), self.min_usdt)
             return
 
-        info = self.symbol_info()
-        min_trade = float(info.get("minTradeUSDT", 1))
-        quote_precision = int(info.get("quotePrecision", 4))
-
-        amount = spendable
+        budget = spendable
         if self.max_usdt_per_order:
-            amount = min(amount, self.max_usdt_per_order)
-        amount = self._floor_to_precision(amount, quote_precision)
-        size = f"{amount:.{quote_precision}f}"
+            budget = min(budget, self.max_usdt_per_order)
 
-        if amount < min_trade:
-            log.info("[%s] %.4f USDT spendable but symbol minimum is %.2f — waiting",
-                     self.name, amount, min_trade)
+        total_weight = sum(w for _, w in self.legs)
+        planned, skipped = [], []
+        for coin, weight in self.legs:
+            try:
+                info = self.symbol_info(coin)
+            except ExchangeAPIError as exc:
+                # One unusable symbol must not hold the other legs hostage.
+                # A single-coin worker still propagates, as it always did.
+                if not self.is_basket:
+                    raise
+                log.error("[%s] %s metadata unavailable, skipping this leg: %s",
+                          self.name, coin, exc)
+                continue
+            min_trade = float(info.get("minTradeUSDT", 1))
+            quote_precision = int(info.get("quotePrecision", 4))
+            amount = self._floor_to_precision(budget * weight / total_weight, quote_precision)
+            if amount < min_trade:
+                skipped.append((coin, amount, min_trade, weight))
+                continue
+            planned.append((coin, amount, f"{amount:.{quote_precision}f}"))
+
+        if skipped and not planned:
+            if not self.is_basket:
+                # Word for word (and every cycle) as before baskets existed:
+                # the live single-coin bot is watched through this line.
+                _, amount, min_trade, _ = skipped[0]
+                log.info("[%s] %.4f USDT spendable but symbol minimum is %.2f — waiting",
+                         self.name, amount, min_trade)
+                return
+            # Nothing is buyable. The balance stays above the trigger, so this
+            # branch would repeat every poll cycle — log it once per change of
+            # circumstances instead of every 30 seconds, and say what it would
+            # actually take rather than only complaining per leg.
+            needed = max(min_trade * total_weight / weight
+                         for _, _, min_trade, weight in skipped)
+            state = ("stalled", round(budget, 4), len(skipped))
+            if state != self._last_stall:
+                self._last_stall = state
+                for coin, amount, min_trade, _ in skipped:
+                    log.info("[%s] %s share is %.4f USDT but the symbol minimum is %.2f",
+                             self.name, coin, amount, min_trade)
+                if self.max_usdt_per_order and needed > self.max_usdt_per_order:
+                    # More USDT would not help: the cap, not the balance, binds.
+                    log.info("[%s] no leg meets its minimum with %.4f USDT — this basket needs "
+                             "about %.2f USDT per cycle but max_usdt_per_order caps it at "
+                             "%.2f; raise the cap or drop legs",
+                             self.name, budget, needed, self.max_usdt_per_order)
+                else:
+                    log.info("[%s] no leg meets its minimum with %.4f USDT — this basket needs "
+                             "about %.2f USDT spendable to place every leg",
+                             self.name, budget, needed)
             return
+        self._last_stall = None
 
+        for coin, amount, min_trade, _ in skipped:
+            log.info("[%s] %s share is %.4f USDT but the symbol minimum is %.2f — skipping this leg",
+                     self.name, coin, amount, min_trade)
+
+        for coin, amount, size in planned:
+            try:
+                self._buy_leg(coin, size)
+            except ExchangeAPIError as exc:
+                # One bad leg must not abandon the rest of the basket. A lone
+                # worker re-raises untouched — the main loop reports it.
+                if not self.is_basket:
+                    raise
+                log.error("[%s] %s leg failed: %s", self.name, coin, exc)
+
+    def _buy_leg(self, coin, size):
+        """Place (or simulate) one market buy for one coin of the basket."""
+        symbol = self.symbols[coin]
         if self.dry_run:
-            log.info("[%s] DRY RUN: would market-buy %s with %s USDT", self.name, self.symbol, size)
+            log.info("[%s] DRY RUN: would market-buy %s with %s USDT", self.name, symbol, size)
             return
 
         client_oid = f"autobuy-{uuid.uuid4().hex[:20]}"
         log.info("[%s] placing market buy: %s for %s USDT (clientOid=%s)",
-                 self.name, self.symbol, size, client_oid)
-        result = self.client.place_market_buy(self.symbol, size, client_oid=client_oid)
+                 self.name, symbol, size, client_oid)
+        result = self.client.place_market_buy(symbol, size, client_oid=client_oid)
         order_id = (result or {}).get("orderId")
         log.info("[%s] order accepted: orderId=%s", self.name, order_id)
 
@@ -139,11 +273,11 @@ class SubAccountWorker:
         if order_id:
             time.sleep(1.5)
             try:
-                order = self.client.get_order_info(self.symbol, order_id)
+                order = self.client.get_order_info(symbol, order_id)
                 if order:
                     log.info("[%s] order %s status=%s filled=%s %s for %s USDT",
                              self.name, order_id, order.get("status"),
-                             order.get("baseVolume"), self.coin, order.get("quoteVolume"))
+                             order.get("baseVolume"), coin, order.get("quoteVolume"))
             except ExchangeAPIError as exc:
                 log.warning("[%s] could not fetch fill info for %s: %s", self.name, order_id, exc)
 
@@ -186,7 +320,7 @@ def load_config(path):
 
     cfg = {k: _expand_env(v) for k, v in raw.items() if k != "subaccounts"}
 
-    required = ("name", "api_key", "api_secret", "buy_coin")
+    required = ("name", "api_key", "api_secret")
     valid, skipped = [], []
     for i, sub in enumerate(subs_raw):
         label = sub.get("name") or f"subaccounts[{i}]"
@@ -198,6 +332,12 @@ def load_config(path):
                                  f"(supported: {', '.join(sorted(EXCHANGE_CLIENTS))})")
             sub["exchange"] = exchange
             missing = [k for k in required if not sub.get(k)]
+            # Either form of target is fine, but one of them must be present
+            # and well-formed; parse_basket raises with the specific reason.
+            if not sub.get("buy_coin") and not sub.get("basket"):
+                missing.append("buy_coin")
+            else:
+                parse_basket(sub)
             # Only Bitget and OKX keys carry a passphrase.
             if exchange in PASSPHRASE_EXCHANGES and not sub.get("api_passphrase"):
                 missing.append("api_passphrase")
@@ -317,7 +457,7 @@ def main():
                          "loaded" if first_load else "reloaded", len(workers), poll_seconds,
                          " (dry run)" if args.dry_run else "")
                 for w in workers:
-                    log.info("  - %s: buys %s when USDT > %.2f%s", w.name, w.symbol, w.min_usdt,
+                    log.info("  - %s: buys %s when USDT > %.2f%s", w.name, w.describe(), w.min_usdt,
                              "" if w.enabled else " [DISABLED]")
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 log.error("config error: %s", exc)

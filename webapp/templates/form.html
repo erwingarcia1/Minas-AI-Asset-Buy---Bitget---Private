@@ -25,7 +25,11 @@
     <input type="text" name="subaccount" value="{{ client.subaccount or client.get('subaccount', '') }}" required>
   </label>
   <label>Crypto ticker for auto asset to purchase
-    <small>(e.g. BTC, ETH, SOL — bought with any USDT that arrives)</small>
+    <small>One symbol (BTC) buys just that coin. Several, comma separated
+      (XRP,XLM,ADA), splits every arriving deposit evenly between them — add
+      <code>:weight</code> for uneven splits (XRP:3,XLM:2 = 60/40). Each leg
+      must clear the exchange minimum (about 1 USDT), so a basket of N coins
+      needs roughly N USDT per deposit.</small>
     <input type="text" name="ticker" value="{{ client.ticker or client.get('ticker', '') }}" required>
   </label>
   <label>Minimum USDT to trigger a buy
