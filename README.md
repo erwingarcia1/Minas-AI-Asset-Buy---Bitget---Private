@@ -184,3 +184,52 @@ python -m unittest discover -s tests -v
 - Market buys execute at the current market price; on illiquid pairs consider
   `max_usdt_per_order` to split large deposits across polls.
 - The bot only ever buys. It never sells, transfers, or withdraws.
+
+---
+
+## On-chain meme buy (v2.1.0)
+
+A separate, manually invoked pipeline that moves USDT off Bitget onto a wallet
+you control and swaps it for one specific, pre-allowlisted token on BSC or
+Solana.
+
+**The spot bot is untouched.** `autobuy.py` does not import this subsystem, does
+not call it, and is not modified by it. There is no hook in the running trade
+loop — the only way to invoke the pipeline is to run `memebuy_cli.py` by hand.
+
+Safety posture, in one place:
+
+* dry-run is the default; live mode needs `armed: true` in the config **and**
+  the restart-only `MEME_BUY_ARMED=1` **and**
+  `--i-understand-this-spends-real-money` on the CLI
+* v1 buys **only** tokens whose contract address you allowlisted by hand — there
+  is no trending/discovery sniping
+* per-trade and rolling-24h USDT caps, persisted in their own SQLite journal, so
+  a webapp wipe cannot reset them
+* withdrawal destinations come only from the config allowlist
+* the kill-switch file is checked before every stage
+* every safety check fails closed: missing data is never treated as safe
+
+```sh
+python3 memebuy_cli.py --status                       # read-only summary
+python3 memebuy_cli.py --check-token bsc 0x...        # safety gate only, spends nothing
+python3 memebuy_cli.py --run-once --chain bsc --token 0x... --amount 25 \
+    --i-understand-this-spends-real-money             # refuses unless armed
+```
+
+**Read [`docs/MEME_BUY.md`](docs/MEME_BUY.md) before configuring or arming
+anything.** It covers the pipeline, the owner's manual prerequisite checklist
+(Bitget KYC/2FA/elastic IP/withdrawal address book, wallet funding, host
+hardening), key handling, every CLI command, the safety gate and its
+limitations, failure modes and recovery, and which stages can be undone.
+
+Start from `config.meme_buy.example.json` — it is a **fragment** to be merged
+into the real `config.example.json`, not a replacement for it. As written it is
+inert: `armed=false`, `dry_run=true`, both chains disabled, both token
+allowlists empty.
+
+## Tests
+
+```sh
+python3 -m pytest tests/ -q
+```
