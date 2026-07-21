@@ -8,7 +8,9 @@ fraction-vs-percent tax units.
 
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -215,14 +217,15 @@ class TestAllowlistAndFormat(GateTestCase):
         self.assertRejected(verdict, "01_allowlist")
 
     def test_rule1_allowlist_file_is_read_from_a_path_env_var(self):
-        path = os.path.join(os.path.dirname(__file__), "_tmp_allowlist.json")
+        # Scratch files go to a temp dir, never next to the source: the tests
+        # are mounted read-only when they run inside the container image.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "allowlist.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(ALLOWLIST, fh)
-        try:
-            with mock.patch.dict(os.environ, {"SAFETY_ALLOWLIST_FILE": path}):
-                self.assertIn(BSC_TOKEN, load_allowlist()["bsc"])
-        finally:
-            os.remove(path)
+        with mock.patch.dict(os.environ, {"SAFETY_ALLOWLIST_FILE": path}):
+            self.assertIn(BSC_TOKEN, load_allowlist()["bsc"])
 
     def test_rule1_comment_keys_are_ignored(self):
         self.assertEqual(load_allowlist({"_comment": "notes", "bsc": [BSC_TOKEN]}),
@@ -827,14 +830,13 @@ class TestSolanaMintProvider(unittest.TestCase):
         self.assertNotIn("super-secret", f"{url!r} {url}")
 
     def test_rpc_url_is_read_from_a_file_path_env_var(self):
-        path = os.path.join(os.path.dirname(__file__), "_tmp_rpc_url")
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "rpc_url")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("https://rpc.example/?api-key=super-secret\n")
-        try:
-            with mock.patch.dict(os.environ, {"SOLANA_RPC_URL_FILE": path}):
-                self.assertTrue(solana_mint.rpc_url().value.endswith("super-secret"))
-        finally:
-            os.remove(path)
+        with mock.patch.dict(os.environ, {"SOLANA_RPC_URL_FILE": path}):
+            self.assertTrue(solana_mint.rpc_url().value.endswith("super-secret"))
 
     def test_network_error_message_scrubs_the_endpoint(self):
         import requests
