@@ -1,0 +1,90 @@
+{
+  "__README__": [
+    "MERGE THE 'meme_buy' KEY BELOW INTO THE REPO'S REAL config.example.json.",
+    "This is a fragment, NOT a full config file — it deliberately does not",
+    "contain the spot-bot settings, so it must never replace config.example.json.",
+    "",
+    "Every value below is a SAFE DEFAULT or an OBVIOUS PLACEHOLDER.",
+    "As written this block is inert: armed=false, dry_run=true, both chains",
+    "disabled, and both token allowlists empty. Nothing can be bought.",
+    "",
+    "Arming requires THREE independent things to agree:",
+    "  1. meme_buy.armed = true here,",
+    "  2. MEME_BUY_ARMED=1 in the process environment (restart-only), and",
+    "  3. --i-understand-this-spends-real-money on memebuy_cli.py --run-once.",
+    "A config hot-reload alone can therefore never arm a running bot.",
+    "",
+    "NOTE: the loader rejects unknown keys, so strip the '__comment__' lines",
+    "below when you copy this into a live config.json."
+  ],
+
+  "meme_buy": {
+    "__comment_armed__": "MASTER SWITCH. Leave false. See README above.",
+    "armed": false,
+
+    "__comment_dry_run__": "true = log intended calls, move nothing. Leave true.",
+    "dry_run": true,
+
+    "__comment_caps__": "Hard USDT ceilings. per_trade must be <= daily. Enforced before the first money-moving call and persisted across restarts.",
+    "per_trade_usdt_cap": 25.0,
+    "daily_usdt_cap": 100.0,
+
+    "__comment_kill_switch__": "If this file EXISTS the pipeline stops before every stage. Create it to disarm instantly.",
+    "kill_switch_file": "data/MEME_BUY_KILL",
+
+    "__comment_db_path__": "SQLite journal: caps, idempotency, crash resume.",
+    "db_path": "data/meme_buy.sqlite3",
+
+    "__comment_arrival__": "How long to wait for withdrawn USDT to actually land on-chain before giving up.",
+    "arrival_timeout_s": 900.0,
+    "arrival_poll_interval_s": 15.0,
+
+    "chains": {
+      "bsc": {
+        "__comment__": "enabled=false makes every other key here inert.",
+        "enabled": false,
+
+        "__comment_withdraw__": "REPLACE-ME placeholder. Must be YOUR OWN BEP20 wallet and must also appear in withdraw_allowlist.",
+        "withdraw_address": "0x000000000000000000000000000000000000dEaD",
+        "withdraw_allowlist": [
+          "0x000000000000000000000000000000000000dEaD"
+        ],
+
+        "__comment_rpc__": "REPLACE-ME. May embed an API key — keep it out of logs and out of git.",
+        "rpc_url": "https://REPLACE-ME.example.invalid/bsc",
+
+        "__comment_min_native__": "Keep this much BNB for gas; abort rather than dip below it.",
+        "min_native_balance": 0.005,
+
+        "__comment_slippage__": "Basis points. 100 = 1%.",
+        "slippage_bps": 100,
+
+        "__comment_tokens__": "EMPTY ON PURPOSE. v1 has no discovery: it buys only what is listed here. Empty + armed=true is a hard config error.",
+        "token_allowlist": []
+      },
+
+      "solana": {
+        "__comment__": "enabled=false makes every other key here inert.",
+        "enabled": false,
+
+        "__comment_withdraw__": "REPLACE-ME placeholder (the all-ones system address). Must be YOUR OWN Solana wallet and must also appear in withdraw_allowlist.",
+        "withdraw_address": "11111111111111111111111111111111",
+        "withdraw_allowlist": [
+          "11111111111111111111111111111111"
+        ],
+
+        "__comment_rpc__": "REPLACE-ME. May embed an API key — keep it out of logs and out of git.",
+        "rpc_url": "https://REPLACE-ME.example.invalid/solana",
+
+        "__comment_min_native__": "Keep this much SOL for fees and rent.",
+        "min_native_balance": 0.02,
+
+        "__comment_slippage__": "Basis points. 100 = 1%.",
+        "slippage_bps": 100,
+
+        "__comment_tokens__": "EMPTY ON PURPOSE. See the bsc note above.",
+        "token_allowlist": []
+      }
+    }
+  }
+}

@@ -8,3 +8,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# On-chain subsystem: never commit wallet keys or a live allowlist
+secrets/
+*.pem
+data/meme_buy.sqlite3
