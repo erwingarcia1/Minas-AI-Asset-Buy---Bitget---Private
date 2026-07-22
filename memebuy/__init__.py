@@ -24,11 +24,20 @@ from .caps import (  # noqa: F401
     kill_switch_engaged,
 )
 from .config import (  # noqa: F401
+    SWAP_BACKEND_BITGET,
+    SWAP_BACKEND_NATIVE,
+    SWAP_BACKENDS,
     ChainConfig,
     ConfigError,
     MemeBuyConfig,
     env_arm_acknowledged,
     load_meme_buy_config,
+)
+from .credentials import (  # noqa: F401
+    ROLE_MAIN,
+    ROLE_SUB,
+    RoleCredentials,
+    inspect_role,
 )
 from .orchestrator import (  # noqa: F401
     Deps,
@@ -46,12 +55,19 @@ __all__ = [
     "MemeBuyConfig",
     "MemeBuyOrchestrator",
     "MemeBuyState",
+    "ROLE_MAIN",
+    "ROLE_SUB",
+    "RoleCredentials",
     "RunResult",
+    "SWAP_BACKENDS",
+    "SWAP_BACKEND_BITGET",
+    "SWAP_BACKEND_NATIVE",
     "check_address_allowlist",
     "check_daily_cap",
     "check_per_trade_cap",
     "check_token_allowlist",
     "env_arm_acknowledged",
+    "inspect_role",
     "kill_switch_engaged",
     "load_meme_buy_config",
     "run_once",

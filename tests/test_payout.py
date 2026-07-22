@@ -457,6 +457,58 @@ class TestSecret(unittest.TestCase):
         self.assertEqual(headers["ACCESS-PASSPHRASE"], "p")
 
 
+class TestTwoKeyFromEnv(unittest.TestCase):
+    """from_env(role, prefix=...) builds two DIFFERENT, non-interchangeable keys."""
+
+    def _write(self, prefix, marker):
+        env = {}
+        for suffix, part in (("API_KEY_FILE", "k"), ("API_SECRET_FILE", "s"),
+                             ("API_PASSPHRASE_FILE", "p")):
+            handle = tempfile.NamedTemporaryFile("w", delete=False)
+            handle.write("%s-%s\n" % (marker, part))
+            handle.close()
+            self.addCleanup(os.unlink, handle.name)
+            env["%s_%s" % (prefix, suffix)] = handle.name
+        return env
+
+    def test_each_prefix_yields_its_own_credentials_and_role(self):
+        env = {}
+        env.update(self._write("BITGET_SUB", "sub"))
+        env.update(self._write("BITGET_MAIN", "main"))
+        with mock.patch.dict(os.environ, env, clear=False):
+            sub = BitgetPayout.from_env("sub", prefix="BITGET_SUB")
+            main = BitgetPayout.from_env("main", prefix="BITGET_MAIN", max_withdrawal=50)
+
+        self.assertIsNot(sub, main)
+        self.assertEqual(sub.account_role, "sub")
+        self.assertEqual(main.account_role, "main")
+        # Different files -> different key material behind the redaction.
+        self.assertNotEqual(sub._http.api_key, main._http.api_key)
+        self.assertEqual(sub._http.api_key, "sub-k")
+        self.assertEqual(main._http.api_key, "main-k")
+        # ...and neither repr can print any of it.
+        self.assertNotIn("sub-k", "%r %r" % (sub, main))
+
+    def test_the_pair_refuses_to_swap_jobs(self):
+        env = {}
+        env.update(self._write("BITGET_SUB", "sub"))
+        env.update(self._write("BITGET_MAIN", "main"))
+        with mock.patch.dict(os.environ, env, clear=False):
+            sub = BitgetPayout.from_env("sub", prefix="BITGET_SUB", max_withdrawal=1000)
+            main = BitgetPayout.from_env("main", prefix="BITGET_MAIN", max_withdrawal=1000)
+        with patch_http(no_network):
+            with self.assertRaises(WithdrawalBlockedError):
+                sub.withdraw_onchain("USDT", "BEP20", ALLOWED_BEP20, 20, "oid-1",
+                                     ALLOWLIST, dry_run=False)
+            with self.assertRaises(TransferError):
+                main.transfer_sub_to_main("USDT", 20, "oid-1", dry_run=False)
+
+    def test_missing_file_for_a_prefix_is_a_clear_failure(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "BITGET_MAIN_API_KEY_FILE"):
+                BitgetPayout.from_env("main", prefix="BITGET_MAIN")
+
+
 class TestTagChains(unittest.TestCase):
     """A chain that needs a memo/tag must never be paid out: the body has no tag."""
 

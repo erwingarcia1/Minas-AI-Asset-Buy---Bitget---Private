@@ -34,6 +34,8 @@
     "db_path": "data/meme_buy.sqlite3",
     "arrival_timeout_s": 900.0,
     "arrival_poll_interval_s": 15.0,
+    "bitget_sub_prefix": "BITGET_SUB",
+    "bitget_main_prefix": "BITGET_MAIN",
     "chains": {
       "bsc": {
         "enabled": false,
@@ -44,6 +46,8 @@
         "rpc_url": "https://REPLACE-ME.example.invalid/bsc",
         "min_native_balance": 0.005,
         "slippage_bps": 100,
+        "swap_backend": "native",
+        "gasless": false,
         "token_allowlist": []
       },
       "solana": {
@@ -55,6 +59,8 @@
         "rpc_url": "https://REPLACE-ME.example.invalid/solana",
         "min_native_balance": 0.02,
         "slippage_bps": 100,
+        "swap_backend": "native",
+        "gasless": false,
         "token_allowlist": []
       }
     }

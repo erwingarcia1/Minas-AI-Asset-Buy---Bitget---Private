@@ -21,6 +21,8 @@ if ROOT not in sys.path:
 logging.getLogger("chains").addHandler(logging.NullHandler())
 logging.getLogger("chains").propagate = False
 
+_STUB_KEYS = None  # the fallback stand-in, kept for TestStubMirrorsReal
+
 
 # ---------- stand-ins (installed before the modules under test are imported) ----------
 
@@ -58,7 +60,20 @@ def _install_chains_package():
     errors.ChainError, errors.SwapReverted = ChainError, SwapReverted
     errors.InsufficientGas, errors.QuoteStale = InsufficientGas, QuoteStale
     errors.chain_error_family = chain_error_family
-    sys.modules["chains.errors"] = errors
+
+    # Prefer the REAL chains.errors, for the same reason as wallet_keys below.
+    # Installing the stub unconditionally left the process with two distinct
+    # ChainError classes depending on which test file imported first, so
+    # `except ChainError` quietly stopped matching across module boundaries.
+    try:
+        import importlib
+
+        real_errors = importlib.import_module("chains.errors")
+        ChainError = real_errors.ChainError
+        SwapReverted = real_errors.SwapReverted
+        QuoteStale = real_errors.QuoteStale
+    except Exception:
+        sys.modules["chains.errors"] = errors
 
     keys = types.ModuleType("chains.wallet_keys")
 
@@ -88,9 +103,39 @@ def _install_chains_package():
         with open(path, "r", encoding="utf-8") as handle:
             return SecretKey(handle.read().strip(), label=label or env_var)
 
+    def address_from_key(key):
+        """Mirrors chains.wallet_keys.address_from_key."""
+        if not isinstance(key, SecretKey):
+            raise ChainError("KEY_TYPE", "expected a SecretKey, not raw key material")
+        try:
+            from eth_account import Account
+        except ImportError as exc:
+            raise ChainError("DEP_MISSING", f"eth_account is required: {exc}")
+        try:
+            return Account.from_key(key.reveal()).address
+        except Exception as exc:
+            raise ChainError("KEY_INVALID", f"cannot derive address: {type(exc).__name__}")
+
     keys.SecretKey, keys.load_secret_key = SecretKey, load_secret_key
-    sys.modules["chains.wallet_keys"] = keys
-    return ChainError, SwapReverted, QuoteStale, SecretKey
+    keys.address_from_key = address_from_key
+    global _STUB_KEYS
+    _STUB_KEYS = keys
+
+    # Prefer the REAL chains.wallet_keys whenever the repo is present.  This
+    # stub exists only so the file runs standalone, but sys.modules is
+    # process-wide: installing it unconditionally replaced the real module for
+    # every test file that imported it afterwards, which silently turned
+    # tests/test_bsc_swap.py's key-handling tests -- including the ones
+    # asserting a pasted key is refused and that keys cannot be pickled --
+    # into tests of this simplified stand-in.
+    try:
+        import importlib
+
+        real_keys = importlib.import_module("chains.wallet_keys")
+    except Exception:
+        sys.modules["chains.wallet_keys"] = keys
+        return ChainError, SwapReverted, QuoteStale, SecretKey
+    return ChainError, SwapReverted, QuoteStale, real_keys.SecretKey
 
 
 def _install_requests():
@@ -778,3 +823,24 @@ class TestModuleConstants(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestStubMirrorsReal(unittest.TestCase):
+    """The wallet_keys stub above outlives this module inside sys.modules.
+
+    Anything the real module exports but the stub does not will surface as a
+    confusing AttributeError in a *different* test file, and only when the
+    files happen to run in a particular order.  Compare the surfaces directly
+    so the failure lands here instead.
+    """
+
+    def test_public_surface_matches(self):
+        import re as _re
+
+        with open(os.path.join(ROOT, "chains", "wallet_keys.py"), encoding="utf-8") as fh:
+            source = fh.read()
+        real = {n for n in _re.findall(r"^(?:def|class)\s+(\w+)", source, _re.M)
+                if not n.startswith("_")}
+        stub = {n for n in dir(_STUB_KEYS) if not n.startswith("_")}
+        self.assertEqual(real - stub, set(),
+                         "chains.wallet_keys exports these but the stub does not")

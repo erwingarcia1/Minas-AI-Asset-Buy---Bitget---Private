@@ -15,6 +15,10 @@ Safety posture of this CLI
   --status           read-only summary of config / arming / caps / journal
   --check-token      runs ONLY safety.gate.screen_token — read-only HTTP GETs,
                      no exchange calls, no signing, spends nothing
+  --check-credentials  reports whether each role's three credential FILES are
+                     present and readable, and what that role is allowed to do.
+                     ZERO network calls, and the files are never opened, so no
+                     secret value can reach the terminal or a CI log.
   --run-once         REFUSES unless BOTH of:
                        * meme_buy.armed = true in the config file, and
                        * --i-understand-this-spends-real-money on the CLI
@@ -96,6 +100,9 @@ def cmd_status(args) -> int:
     print("  daily cap (USDT) ......... %.8g" % cfg.daily_usdt_cap)
     print("  kill switch file ......... %s" % cfg.kill_switch_file)
     print("  kill switch engaged ...... %s" % caps.kill_switch_engaged(cfg.kill_switch_file))
+    print("  bitget SUB key prefix .... %s (stage 1 transfer)" % cfg.bitget_sub_prefix)
+    print("  bitget MAIN key prefix ... %s (stage 2 withdrawal)" % cfg.bitget_main_prefix)
+    print("      run --check-credentials to see which files are actually present")
 
     for name in caps.SUPPORTED_CHAINS:
         chain_cfg = cfg.chains.get(name)
@@ -106,6 +113,8 @@ def cmd_status(args) -> int:
         print("      withdraw address ..... %s" % chain_cfg.withdraw_address)
         print("      allowlisted tokens ... %d" % len(chain_cfg.token_allowlist))
         print("      slippage (bps) ....... %d" % chain_cfg.slippage_bps)
+        print("      swap backend ......... %s%s"
+              % (chain_cfg.swap_backend, " (gasless)" if chain_cfg.gasless else ""))
 
     db_path = cfg.db_path or DEFAULT_DB_PATH
     print("  journal db ............... %s" % db_path)
@@ -122,6 +131,49 @@ def cmd_status(args) -> int:
 
     print("\n  the spot bot (autobuy.py) is not affected by any of the above")
     return EXIT_OK
+
+
+def cmd_check_credentials(args) -> int:
+    """Are the two Bitget key sets on disk?  Read-only; opens no file, no network.
+
+    Prints PATHS and permissions only.  The credential files themselves are
+    never opened here, so there is no code path by which a key, secret or
+    passphrase could reach stdout, a terminal scrollback or a CI log.
+    """
+    from memebuy import credentials
+
+    # Prefixes are config; if the config is missing or invalid, still answer the
+    # question using the documented defaults rather than refusing outright.
+    sub_prefix, main_prefix = credentials.DEFAULT_SUB_PREFIX, credentials.DEFAULT_MAIN_PREFIX
+    try:
+        cfg = _load_config(args.config)
+    except SystemExit as exc:
+        print("note: using default prefixes (%s)\n" % exc)
+    else:
+        sub_prefix, main_prefix = cfg.bitget_sub_prefix, cfg.bitget_main_prefix
+
+    print("meme-buy credential check")
+    print("  read-only: no network calls, no files opened, no secret values printed\n")
+
+    all_complete = True
+    for role, prefix in ((credentials.ROLE_SUB, sub_prefix), (credentials.ROLE_MAIN, main_prefix)):
+        creds = credentials.inspect_role(role, prefix)
+        all_complete = all_complete and creds.complete
+        print("  %s-role key (prefix %s)" % (role.upper(), prefix))
+        for handle in creds.files:
+            print("    %-34s %s" % (handle.env_var, handle.describe()))
+        print("    status ......................... %s"
+              % ("READY" if creds.complete else
+                 "INCOMPLETE — missing/unreadable: %s" % ", ".join(creds.missing)))
+        for line in creds.may():
+            print("    may ............................ %s" % line)
+        for line in creds.may_not():
+            print("    may NOT ........................ %s" % line)
+        print("")
+
+    print("  a live run needs BOTH: stage 1 (transfer) is signed with the SUB key,")
+    print("  stage 2 (the irreversible withdrawal) with the MAIN key.")
+    return EXIT_OK if all_complete else EXIT_REFUSED
 
 
 def cmd_check_token(args) -> int:
@@ -214,6 +266,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="run ONLY the safety gate on a token; read-only, spends nothing",
     )
     mode.add_argument(
+        "--check-credentials",
+        action="store_true",
+        help="report which Bitget credential files each role has; no network, no secrets printed",
+    )
+    mode.add_argument(
         "--run-once",
         action="store_true",
         help="execute the pipeline once; refuses unless armed in config AND %s" % ACK_FLAG,
@@ -238,6 +295,8 @@ def main(argv=None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    if args.check_credentials:
+        return cmd_check_credentials(args)
     if args.check_token:
         return cmd_check_token(args)
     if args.run_once:
@@ -248,6 +307,7 @@ def main(argv=None) -> int:
     # default: --dry-run
     print("meme-buy CLI — dry-run (default). Nothing was moved.")
     print("  --status                      show config, arming state and caps")
+    print("  --check-credentials           which Bitget key files each role has")
     print("  --check-token CHAIN ADDRESS   safety gate only (read-only)")
     print("  --run-once ...                requires armed config AND %s" % ACK_FLAG)
     print("\nthe spot bot (autobuy.py) is untouched by this subsystem")

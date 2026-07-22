@@ -19,17 +19,30 @@ snapshots the resolved value once at construction and never re-reads it.
 Chain / address format references:
   BSC (BEP20) addresses:   https://ethereum.org/en/developers/docs/accounts/
   Solana account keys:     https://solana.com/docs/core/accounts
+  Bitget Wallet SwapX:     https://web3.bitget.com/en/docs/swapx/quick-start
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Tuple
 
 from . import caps
+from .credentials import DEFAULT_MAIN_PREFIX, DEFAULT_SUB_PREFIX
 
 ARM_ENV_VAR = "MEME_BUY_ARMED"
+
+# Which router executes the swap once the USDT has landed in our own wallet.
+#   native — PancakeSwap V2 on BSC / Jupiter on Solana (chains/{bsc,solana}_swap)
+#   bitget — Bitget Wallet SwapX aggregator            (chains/bitget_swap)
+SWAP_BACKEND_NATIVE = "native"
+SWAP_BACKEND_BITGET = "bitget"
+SWAP_BACKENDS = (SWAP_BACKEND_NATIVE, SWAP_BACKEND_BITGET)
+
+# Env-var prefixes name environment variables, so they must look like one.
+_PREFIX_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 _TOP_KEYS = {
     "armed",
@@ -40,6 +53,8 @@ _TOP_KEYS = {
     "db_path",
     "arrival_timeout_s",
     "arrival_poll_interval_s",
+    "bitget_sub_prefix",
+    "bitget_main_prefix",
     "chains",
 }
 _CHAIN_KEYS = {
@@ -49,6 +64,8 @@ _CHAIN_KEYS = {
     "rpc_url",
     "min_native_balance",
     "slippage_bps",
+    "swap_backend",
+    "gasless",
     "token_allowlist",
 }
 
@@ -66,6 +83,8 @@ class ChainConfig:
     rpc_url: str = ""
     min_native_balance: float = 0.0
     slippage_bps: int = 100
+    swap_backend: str = SWAP_BACKEND_NATIVE
+    gasless: bool = False
     token_allowlist: Tuple[str, ...] = ()
 
 
@@ -79,6 +98,11 @@ class MemeBuyConfig:
     db_path: str = ""
     arrival_timeout_s: float = 900.0
     arrival_poll_interval_s: float = 15.0
+    # Env-var prefixes for the two DIFFERENT Bitget API keys.  They are not
+    # interchangeable: the sub key cannot withdraw, the main key must not be the
+    # transfer source.  See memebuy/credentials.py.
+    bitget_sub_prefix: str = DEFAULT_SUB_PREFIX
+    bitget_main_prefix: str = DEFAULT_MAIN_PREFIX
     chains: Mapping[str, ChainConfig] = field(default_factory=dict)
 
     def chain(self, name: str) -> ChainConfig:
@@ -119,16 +143,61 @@ def _req_str(block: Mapping[str, Any], key: str, where: str) -> str:
     return value.strip()
 
 
+def _env_prefix(block: Mapping[str, Any], key: str, default: str) -> str:
+    """An env-var prefix, e.g. BITGET_MAIN -> BITGET_MAIN_API_KEY_FILE."""
+    value = block.get(key, default)
+    if not isinstance(value, str) or not _PREFIX_RE.match(value.strip()):
+        raise ConfigError(
+            "meme_buy.%s must be an environment-variable prefix matching "
+            "[A-Z][A-Z0-9_]*, got %r" % (key, value)
+        )
+    return value.strip()
+
+
+def _parse_backend(raw: Mapping[str, Any], where: str) -> Tuple[str, bool]:
+    """(swap_backend, gasless).  An unknown backend is a hard config error.
+
+    ``gasless`` only exists in the Bitget SwapX flow (the aggregator sponsors
+    gas).  Accepting gasless=true under the native routers and quietly ignoring
+    it would leave an operator believing a wallet needs no BNB/SOL — and the
+    swap then fails, after the irreversible withdrawal.  So it is rejected.
+    """
+    backend_raw = raw.get("swap_backend", SWAP_BACKEND_NATIVE)
+    if not isinstance(backend_raw, str):
+        raise ConfigError("%s.swap_backend must be a string" % where)
+    backend = backend_raw.strip().lower()
+    if backend not in SWAP_BACKENDS:
+        raise ConfigError(
+            "%s.swap_backend %r is not one of: %s"
+            % (where, backend_raw, ", ".join(SWAP_BACKENDS))
+        )
+    gasless = _req_bool(raw, "gasless", False, where)
+    if gasless and backend != SWAP_BACKEND_BITGET:
+        raise ConfigError(
+            "%s.gasless=true requires swap_backend=%r (it is a Bitget SwapX "
+            "feature); with the %r backend the wallet pays its own gas and the "
+            "flag would be silently ignored"
+            % (where, SWAP_BACKEND_BITGET, backend)
+        )
+    return backend, gasless
+
+
 def _parse_chain(name: str, raw: Any, armed: bool) -> ChainConfig:
     where = "meme_buy.chains.%s" % name
     if not isinstance(raw, Mapping):
         raise ConfigError("%s must be a mapping" % where)
     _reject_unknown(raw, _CHAIN_KEYS, where)
 
+    # Validated even for a disabled chain: a typo'd backend must surface now,
+    # not on the day somebody flips enabled=true.
+    backend, gasless = _parse_backend(raw, where)
+
     enabled = _req_bool(raw, "enabled", False, where)
     if not enabled:
         # A disabled chain is inert; keep whatever is there but never use it.
-        return ChainConfig(name=name, enabled=False)
+        return ChainConfig(
+            name=name, enabled=False, swap_backend=backend, gasless=gasless
+        )
 
     address = _req_str(raw, "withdraw_address", where)
     if not caps.is_valid_address(name, address):
@@ -196,6 +265,8 @@ def _parse_chain(name: str, raw: Any, armed: bool) -> ChainConfig:
         rpc_url=rpc_url,
         min_native_balance=float(min_native),
         slippage_bps=int(slippage),
+        swap_backend=backend,
+        gasless=gasless,
         token_allowlist=tuple(tokens),
     )
 
@@ -235,6 +306,17 @@ def load_meme_buy_config(raw: Any) -> MemeBuyConfig:
     if poll is None or poll <= 0 or poll > timeout:
         raise ConfigError("meme_buy.arrival_poll_interval_s must be > 0 and <= timeout")
 
+    sub_prefix = _env_prefix(block, "bitget_sub_prefix", DEFAULT_SUB_PREFIX)
+    main_prefix = _env_prefix(block, "bitget_main_prefix", DEFAULT_MAIN_PREFIX)
+    if sub_prefix == main_prefix:
+        # Same prefix == same three files == one key playing both roles, which
+        # is exactly the mistake the two-key model exists to prevent.
+        raise ConfigError(
+            "meme_buy.bitget_sub_prefix and bitget_main_prefix must differ "
+            "(they name two DIFFERENT Bitget API keys; a sub key can never "
+            "withdraw and a main key must not be the transfer source)"
+        )
+
     chains_raw = block.get("chains", {})
     if not isinstance(chains_raw, Mapping):
         raise ConfigError("meme_buy.chains must be a mapping")
@@ -255,6 +337,8 @@ def load_meme_buy_config(raw: Any) -> MemeBuyConfig:
         db_path=str(db_path),
         arrival_timeout_s=float(timeout),
         arrival_poll_interval_s=float(poll),
+        bitget_sub_prefix=sub_prefix,
+        bitget_main_prefix=main_prefix,
         chains=chains,
     )
 

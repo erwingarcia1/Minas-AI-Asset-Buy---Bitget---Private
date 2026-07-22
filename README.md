@@ -187,7 +187,7 @@ python -m unittest discover -s tests -v
 
 ---
 
-## On-chain meme buy (v2.1.0)
+## On-chain meme buy (v2.2.0)
 
 A separate, manually invoked pipeline that moves USDT off Bitget onto a wallet
 you control and swaps it for one specific, pre-allowlisted token on BSC or
@@ -210,8 +210,18 @@ Safety posture, in one place:
 * the kill-switch file is checked before every stage
 * every safety check fails closed: missing data is never treated as safe
 
+Two swap backends are selectable per chain: `native` (PancakeSwap V2 on BSC,
+Jupiter V2 on Solana) and `bitget` (Bitget Wallet SwapX, which can sponsor gas
+and remove the BNB/SOL float). **Both sign with a private key held on this
+server** — SwapX is a route provider, not a custody model, so the choice does
+not change key-compromise risk. The SwapX backend is **PROVISIONAL: it has never
+been run against the live API.** The Bitget app's "Onchain" tab is UI-only and
+has no public API, so the withdraw-then-swap flow above is unavoidable. All
+three points are covered in detail in `docs/MEME_BUY.md`.
+
 ```sh
 python3 memebuy_cli.py --status                       # read-only summary
+python3 memebuy_cli.py --check-credentials            # which Bitget key files each role has
 python3 memebuy_cli.py --check-token bsc 0x...        # safety gate only, spends nothing
 python3 memebuy_cli.py --run-once --chain bsc --token 0x... --amount 25 \
     --i-understand-this-spends-real-money             # refuses unless armed

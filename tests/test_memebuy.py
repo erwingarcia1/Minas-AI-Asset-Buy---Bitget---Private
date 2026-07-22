@@ -9,11 +9,16 @@ fake rather than asserted after the fact.
 Run:  python -m unittest tests.test_memebuy -v
 """
 
+import contextlib
+import io
+import json
 import logging
 import os
 import sys
 import tempfile
+import types
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,7 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 logging.getLogger("memebuy").addHandler(logging.NullHandler())
 logging.getLogger("memebuy").propagate = False
 
-from memebuy import caps, config, orchestrator  # noqa: E402
+import memebuy_cli  # noqa: E402
+from memebuy import caps, config, credentials, orchestrator  # noqa: E402
 from memebuy.config import ChainConfig, ConfigError, MemeBuyConfig  # noqa: E402
 from memebuy.orchestrator import Deps, MemeBuyOrchestrator  # noqa: E402
 from memebuy.state import MemeBuyState  # noqa: E402
@@ -112,6 +118,50 @@ class FakeSwap:
         if self.error:
             raise self.error
         return {self.key: "0xswap", "amount_out_min": 1}
+
+
+class FakeBitgetSwap(FakeSwap):
+    """chains.bitget_swap.buy_token: one aggregator, so it is told the chain.
+
+    Like FakeSwap the signature is spelled out — a `**kwargs` tail would not
+    prove the callee honours dry_run, and the orchestrator refuses one.
+    """
+
+    def __call__(self, usdt_amount, slippage_bps, dry_run, chain=None, gasless=False,
+                 token_address=None, mint=None, token_mint=None, recipient=None,
+                 taker=None, rpc_url=None, min_native_balance=None):
+        kwargs = {k: v for k, v in locals().items() if k != "self"}
+        if not dry_run and not self.live_allowed:
+            raise AssertionError("LIVE swap call made while simulating")
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return {"backend": "bitget", self.key: "0xswapx"}
+
+
+class RolePayout(FakePayout):
+    """A payout double that models `account_role`, like the real BitgetPayout.
+
+    Stage 1 must reach the SUB instance and stage 2 the MAIN one; each refuses
+    the other's call exactly as payout/bitget_payout.py does, so a mix-up shows
+    up here instead of after the transfer has already moved money.
+    """
+
+    def __init__(self, account_role, live_allowed=False):
+        super().__init__(live_allowed=live_allowed)
+        self.account_role = account_role
+
+    def transfer_sub_to_main(self, coin, amount, client_oid, dry_run):
+        if self.account_role != "sub":
+            raise AssertionError("transfer signed with a %r key" % self.account_role)
+        return super().transfer_sub_to_main(coin, amount, client_oid, dry_run)
+
+    def withdraw_onchain(self, coin, chain, address, amount, client_oid, allowlist, dry_run):
+        if self.account_role != "main":
+            raise AssertionError("withdrawal signed with a %r key" % self.account_role)
+        return super().withdraw_onchain(
+            coin, chain, address, amount, client_oid, allowlist, dry_run
+        )
 
 
 class FakeVerdict:
@@ -908,6 +958,576 @@ class TestContainment(Fixture):
         )
         self.assertTrue(result.ok, result.reason)
         self.assertTrue(result.dry_run)
+
+
+# ---------- pluggable swap backend ----------
+
+
+class TestSwapBackendConfig(unittest.TestCase):
+    def test_default_backend_is_native(self):
+        cfg = config.load_meme_buy_config(raw_config())
+        self.assertEqual(cfg.chain("bsc").swap_backend, config.SWAP_BACKEND_NATIVE)
+        self.assertFalse(cfg.chain("bsc").gasless)
+
+    def test_bitget_backend_is_accepted(self):
+        cfg = config.load_meme_buy_config(
+            raw_config(chains_over={"bsc": {"swap_backend": "  BitGet ", "gasless": True}})
+        )
+        self.assertEqual(cfg.chain("bsc").swap_backend, config.SWAP_BACKEND_BITGET)
+        self.assertTrue(cfg.chain("bsc").gasless)
+
+    def test_unknown_backend_is_rejected(self):
+        for value in ("uniswap", "", "NATIVE ROUTER", 1, None, True):
+            with self.assertRaises(ConfigError):
+                config.load_meme_buy_config(
+                    raw_config(chains_over={"bsc": {"swap_backend": value}})
+                )
+
+    def test_gasless_with_native_backend_is_rejected(self):
+        with self.assertRaises(ConfigError) as ctx:
+            config.load_meme_buy_config(raw_config(chains_over={"bsc": {"gasless": True}}))
+        self.assertIn("gasless", str(ctx.exception))
+        # Explicit native is just as wrong as the default.
+        with self.assertRaises(ConfigError):
+            config.load_meme_buy_config(
+                raw_config(chains_over={"solana": {"swap_backend": "native", "gasless": True}})
+            )
+
+    def test_gasless_must_be_a_boolean(self):
+        with self.assertRaises(ConfigError):
+            config.load_meme_buy_config(
+                raw_config(chains_over={"bsc": {"swap_backend": "bitget", "gasless": "yes"}})
+            )
+
+    def test_backend_is_validated_even_on_a_disabled_chain(self):
+        # A typo must surface now, not on the day somebody flips enabled=true.
+        with self.assertRaises(ConfigError):
+            config.load_meme_buy_config(
+                raw_config(chains_over={"solana": {"enabled": False, "swap_backend": "jupyter"}})
+            )
+
+
+class TestCredentialPrefixConfig(unittest.TestCase):
+    def test_defaults(self):
+        cfg = config.load_meme_buy_config(raw_config())
+        self.assertEqual(cfg.bitget_sub_prefix, "BITGET_SUB")
+        self.assertEqual(cfg.bitget_main_prefix, "BITGET_MAIN")
+
+    def test_custom_prefixes(self):
+        cfg = config.load_meme_buy_config(
+            raw_config(bitget_sub_prefix="MINAS_SUB1", bitget_main_prefix="MINAS_MAIN")
+        )
+        self.assertEqual(cfg.bitget_sub_prefix, "MINAS_SUB1")
+        self.assertEqual(cfg.bitget_main_prefix, "MINAS_MAIN")
+
+    def test_rejects_prefixes_that_are_not_env_var_names(self):
+        for bad in ("lower", "HAS SPACE", "9LEADING", "", None, 7):
+            with self.assertRaises(ConfigError):
+                config.load_meme_buy_config(raw_config(bitget_main_prefix=bad))
+
+    def test_rejects_one_key_playing_both_roles(self):
+        with self.assertRaises(ConfigError):
+            config.load_meme_buy_config(
+                raw_config(bitget_sub_prefix="BITGET_X", bitget_main_prefix="BITGET_X")
+            )
+
+
+class TestSwapBackendSelection(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.bitget = FakeBitgetSwap("tx_hash")
+
+    def deps(self):
+        return Deps(
+            payout=self.payout,
+            bsc_buy=self.bsc,
+            solana_buy=self.sol,
+            bitget_buy=self.bitget,
+            screen_token=self.gate,
+            balance_probe=self.probe,
+        )
+
+    def test_native_backend_uses_the_native_router(self):
+        result = self.orch().run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(len(self.bsc.calls), 1)
+        self.assertEqual(len(self.bitget.calls), 0)
+        # The native routers know nothing about these two keywords.
+        self.assertNotIn("chain", self.bsc.calls[0])
+        self.assertNotIn("gasless", self.bsc.calls[0])
+
+    def test_bitget_backend_uses_the_bitget_router(self):
+        cfg = self.cfg(chains_over={"bsc": {"swap_backend": "bitget", "gasless": True}})
+        result = MemeBuyOrchestrator(
+            cfg, state=self.state, deps=self.deps(), env={}
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(len(self.bitget.calls), 1)
+        self.assertEqual(len(self.bsc.calls), 0)
+        call = self.bitget.calls[0]
+        self.assertEqual(call["chain"], "bsc")
+        self.assertTrue(call["gasless"])
+        self.assertEqual(call["token_address"], BSC_TOKEN)
+        self.assertTrue(call["dry_run"])
+
+    def test_backend_is_per_chain(self):
+        cfg = self.cfg(chains_over={"solana": {"swap_backend": "bitget"}})
+        orch = MemeBuyOrchestrator(cfg, state=self.state, deps=self.deps(), env={})
+        self.assertTrue(orch.run_once("bsc", BSC_TOKEN, 5.0, client_oid="a").ok)
+        self.assertTrue(orch.run_once("solana", SOL_MINT, 5.0, client_oid="b").ok)
+        self.assertEqual(len(self.bsc.calls), 1)  # native chain untouched
+        self.assertEqual(len(self.bitget.calls), 1)
+        self.assertEqual(self.bitget.calls[0]["chain"], "solana")
+        self.assertEqual(self.bitget.calls[0]["mint"], SOL_MINT)
+        self.assertFalse(self.bitget.calls[0]["gasless"])
+
+    def test_missing_bitget_module_is_a_clean_abort_not_a_crash(self):
+        # chains/bitget_swap.py is a separate deliverable and may not be
+        # deployed.  Its absence must abort this run, never fall back to
+        # another router and never take the process down.
+        self.addCleanup(sys.modules.pop, "chains.bitget_swap", None)
+        sys.modules["chains.bitget_swap"] = None  # makes the import raise
+        cfg = self.cfg(chains_over={"bsc": {"swap_backend": "bitget"}})
+        deps = Deps(payout=self.payout, bsc_buy=self.bsc, screen_token=self.gate,
+                    balance_probe=self.probe)
+        result = MemeBuyOrchestrator(cfg, state=self.state, deps=deps, env={}).run_once(
+            "bsc", BSC_TOKEN, 25.0
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("bitget_swap", result.reason)
+        self.assertEqual(len(self.bsc.calls), 0)  # no silent fallback
+
+    def test_an_unrecognised_backend_aborts_instead_of_using_the_native_router(self):
+        # REGRESSION: _swap_fn only special-cased the exact string "bitget" and
+        # let everything else fall through to the NATIVE (live) router, so a
+        # hand-built ChainConfig (both it and SWAP_BACKENDS are public API) with
+        # "BITGET" or a typo silently routed the trade to PancakeSwap/Jupiter.
+        import dataclasses
+
+        base = self.cfg()
+        for bogus in ("BITGET", "bitgt", "jupiter", "native "):
+            with self.subTest(bogus):
+                broken = dataclasses.replace(base.chains["bsc"], swap_backend=bogus)
+                cfg = dataclasses.replace(base, chains=dict(base.chains, bsc=broken))
+                result = MemeBuyOrchestrator(
+                    cfg, state=MemeBuyState(os.path.join(self.tmp.name, "u.sqlite3")),
+                    deps=self.deps(), env={},
+                ).run_once("bsc", BSC_TOKEN, 25.0, client_oid="u-%s" % bogus.strip())
+                self.assertFalse(result.ok)
+                self.assertIn("refusing to guess a router", result.reason)
+                self.assertEqual(len(self.bsc.calls), 0)
+                self.assertEqual(len(self.bitget.calls), 0)
+
+    def test_bitget_module_is_imported_lazily_when_present(self):
+        import types
+
+        module = types.ModuleType("chains.bitget_swap")
+        recorded = {}
+
+        def buy_token(usdt_amount, slippage_bps, dry_run=True, chain=None,
+                      token_address=None, mint=None, gasless=False, **extra):
+            recorded.update(locals())
+            return {"backend": "bitget", "tx_hash": "0xswapx"}
+
+        module.buy_token = buy_token
+        sys.modules["chains.bitget_swap"] = module
+        self.addCleanup(sys.modules.pop, "chains.bitget_swap", None)
+
+        cfg = self.cfg(chains_over={"bsc": {"swap_backend": "bitget", "gasless": True}})
+        deps = Deps(payout=self.payout, screen_token=self.gate, balance_probe=self.probe)
+        result = MemeBuyOrchestrator(cfg, state=self.state, deps=deps, env={}).run_once(
+            "bsc", BSC_TOKEN, 25.0
+        )
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(recorded["chain"], "bsc")
+        self.assertTrue(recorded["gasless"])
+        self.assertTrue(recorded["dry_run"])
+
+    def test_real_bitget_swap_signature_accepts_what_we_send(self):
+        # Contract guard: chains/bitget_swap.py is written independently, so
+        # catch a keyword rename here rather than at stage 5, after the
+        # irreversible withdrawal.  No call is made — only binding is checked.
+        try:
+            from chains import bitget_swap
+        except Exception:  # pragma: no cover - module not deployed here
+            self.skipTest("chains.bitget_swap is not importable in this environment")
+        cfg = self.cfg(chains_over={"bsc": {"swap_backend": "bitget", "gasless": True}})
+        orch = MemeBuyOrchestrator(cfg, state=self.state, deps=self.deps(), env={})
+        wanted = dict(
+            usdt_amount=25.0, slippage_bps=300, rpc_url="https://x.example/",
+            min_native_balance=0.0, dry_run=True, token_address=BSC_TOKEN,
+            recipient=BSC_WITHDRAW, chain="bsc", gasless=True,
+        )
+        bound = orch._bind_swap_kwargs(
+            bitget_swap.buy_token, wanted, "bsc", "chains.bitget_swap.buy_token"
+        )
+        for key in ("usdt_amount", "slippage_bps", "dry_run", "chain", "gasless",
+                    "token_address"):
+            self.assertIn(key, bound, "bitget_swap.buy_token dropped %r" % key)
+        self.assertTrue(bound["dry_run"])
+
+    def test_bitget_backend_still_must_prove_it_honours_dry_run(self):
+        # Switching backends must not become a way around the dry_run guard.
+        def buy_token(usdt_amount, slippage_bps, chain=None, **kwargs):  # no dry_run!
+            raise AssertionError("must never be called")
+
+        cfg = self.cfg(chains_over={"bsc": {"swap_backend": "bitget"}})
+        deps = Deps(payout=self.payout, bitget_buy=buy_token, screen_token=self.gate,
+                    balance_probe=self.probe)
+        result = MemeBuyOrchestrator(cfg, state=self.state, deps=deps, env={}).run_once(
+            "bsc", BSC_TOKEN, 25.0
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("dry_run", result.reason)
+        self.assertIn("chains.bitget_swap.buy_token", result.reason)
+
+
+# ---------- two-key Bitget credential model ----------
+
+
+@contextlib.contextmanager
+def patched_payout_module(test, payout_cls):
+    """Swap payout.bitget_payout for a double, so no test ever signs or dials out."""
+    module = types.ModuleType("payout.bitget_payout")
+    module.BitgetPayout = payout_cls
+    real = sys.modules.get("payout.bitget_payout")
+    sys.modules["payout.bitget_payout"] = module
+    try:
+        yield module
+    finally:
+        if real is not None:
+            sys.modules["payout.bitget_payout"] = real
+        else:
+            sys.modules.pop("payout.bitget_payout", None)
+
+
+def write_credentials(directory, prefix, secret="SUPER-SECRET-VALUE"):
+    """Three credential files; returns the env mapping that points at them."""
+    env = {}
+    for suffix in ("API_KEY_FILE", "API_SECRET_FILE", "API_PASSPHRASE_FILE"):
+        path = os.path.join(directory, "%s_%s" % (prefix, suffix))
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("%s-%s" % (secret, suffix))
+        env["%s_%s" % (prefix, suffix)] = path
+    return env
+
+
+class TestTwoKeyPayout(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.sub = RolePayout("sub")
+        self.main = RolePayout("main")
+
+    def deps(self):
+        return Deps(
+            payout_sub=self.sub,
+            payout_main=self.main,
+            bsc_buy=self.bsc,
+            solana_buy=self.sol,
+            screen_token=self.gate,
+            balance_probe=self.probe,
+        )
+
+    def test_sub_key_transfers_and_main_key_withdraws(self):
+        result = self.orch().run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertTrue(result.ok, result.reason)
+        self.assertIsNot(self.sub, self.main)  # two DIFFERENT credentials
+        self.assertEqual(self.sub.kinds(), ["transfer"])
+        self.assertEqual(self.main.kinds(), ["withdraw"])
+        self.assertEqual(self.sub.account_role, "sub")
+        self.assertEqual(self.main.account_role, "main")
+
+    def test_live_run_keeps_the_roles_apart(self):
+        self.sub.live_allowed = True
+        self.main.live_allowed = True
+        self.bsc.live_allowed = True
+        orch = MemeBuyOrchestrator(
+            self.live_cfg(), state=self.state, deps=self.deps(), env=ARMED_ENV,
+            clock=self.clock.time, sleep=self.clock.sleep,
+        )
+        result = orch.run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.sub.kinds(), ["transfer"])
+        self.assertEqual(self.main.kinds(), ["withdraw"])
+
+    def test_a_sub_key_in_the_main_slot_is_refused_before_withdrawing(self):
+        deps = self.deps()
+        deps.payout_main = RolePayout("sub")  # the wrong credential entirely
+        result = MemeBuyOrchestrator(
+            self.cfg(), state=self.state, deps=deps, env={}
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertFalse(result.ok)
+        self.assertIn("not interchangeable", result.reason)
+        self.assertEqual(deps.payout_main.calls, [])  # never called
+
+    def test_a_role_mix_up_is_refused_at_stage_0_before_the_transfer(self):
+        # REGRESSION: the role was only checked when stage 2 asked for the MAIN
+        # client, i.e. AFTER stage 1 had already moved real money.  One object
+        # standing in for both roles must be refused before anything is sent.
+        one_key = RolePayout("sub", live_allowed=True)
+        self.bsc.live_allowed = True
+        result = MemeBuyOrchestrator(
+            self.live_cfg(), state=self.state,
+            deps=Deps(payout=one_key, bsc_buy=self.bsc, screen_token=self.gate,
+                      balance_probe=self.probe),
+            env=ARMED_ENV, clock=self.clock.time, sleep=self.clock.sleep,
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.stage, orchestrator.STAGE_SELECT)
+        self.assertIn("not interchangeable", result.reason)
+        self.assertEqual(one_key.calls, [])  # nothing moved, not even stage 1
+
+    def test_both_roles_are_resolved_before_stage_1_even_in_a_dry_run(self):
+        deps = self.deps()
+        deps.payout_sub = RolePayout("main")  # swapped by mistake
+        result = MemeBuyOrchestrator(
+            self.cfg(), state=self.state, deps=deps, env={}
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.stage, orchestrator.STAGE_SELECT)
+        self.assertEqual(deps.payout_sub.calls, [])
+        self.assertEqual(self.main.calls, [])
+        self.assertEqual(len(self.bsc.calls), 0)
+
+    def test_a_main_key_in_the_sub_slot_is_refused_before_transferring(self):
+        deps = self.deps()
+        deps.payout_sub = RolePayout("main")
+        result = MemeBuyOrchestrator(
+            self.cfg(), state=self.state, deps=deps, env={}
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertFalse(result.ok)
+        self.assertEqual(deps.payout_sub.calls, [])
+        self.assertEqual(self.main.calls, [])  # never got as far as stage 2
+
+    def test_production_builds_two_clients_from_two_prefixes(self):
+        built = []
+
+        class Recorder:
+            @staticmethod
+            def from_env(account_role, prefix, **kwargs):
+                built.append(dict(role=account_role, prefix=prefix, **kwargs))
+                return RolePayout(account_role, live_allowed=True)
+
+        cfg = self.live_cfg(bitget_sub_prefix="MINAS_SUB", bitget_main_prefix="MINAS_MAIN")
+        env = dict(ARMED_ENV)
+        env.update(write_credentials(self.tmp.name, "MINAS_SUB"))
+        env.update(write_credentials(self.tmp.name, "MINAS_MAIN"))
+        deps = Deps(bsc_buy=self.bsc, screen_token=self.gate, balance_probe=self.probe)
+        self.bsc.live_allowed = True
+        with patched_payout_module(self, Recorder):
+            result = MemeBuyOrchestrator(
+                cfg, state=self.state, deps=deps, env=env,
+                clock=self.clock.time, sleep=self.clock.sleep,
+            ).run_once("bsc", BSC_TOKEN, 25.0)
+
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([b["role"] for b in built], ["sub", "main"])
+        self.assertEqual([b["prefix"] for b in built], ["MINAS_SUB", "MINAS_MAIN"])
+        # payout/ refuses to withdraw without a per-call ceiling; it is the cap.
+        self.assertEqual(built[1]["max_withdrawal"], cfg.per_trade_usdt_cap)
+        self.assertNotIn("max_withdrawal", built[0])
+
+
+class TestMainCredentialPrecheck(Fixture):
+    """Missing MAIN credentials must fail BEFORE stage 1, not between 1 and 2."""
+
+    def test_live_run_without_main_credentials_never_transfers(self):
+        deps = Deps(payout_sub=self.payout, bsc_buy=self.bsc, screen_token=self.gate,
+                    balance_probe=self.probe)
+        env = dict(ARMED_ENV)  # no BITGET_MAIN_* at all
+        result = MemeBuyOrchestrator(
+            self.live_cfg(), state=self.state, deps=deps, env=env,
+            clock=self.clock.time, sleep=self.clock.sleep,
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+
+        self.assertFalse(result.ok)
+        self.assertIn("BITGET_MAIN_API_KEY_FILE", result.reason)
+        self.assertEqual(self.payout.calls, [])  # stage 1 never ran
+        self.assertEqual(self.state.spent_last_24h(), 0.0)
+
+    def test_unreadable_credential_file_is_not_treated_as_present(self):
+        env = dict(ARMED_ENV)
+        env.update(write_credentials(self.tmp.name, "BITGET_MAIN"))
+        env["BITGET_MAIN_API_SECRET_FILE"] = os.path.join(self.tmp.name, "no-such-file")
+        deps = Deps(payout_sub=self.payout, bsc_buy=self.bsc, screen_token=self.gate,
+                    balance_probe=self.probe)
+        result = MemeBuyOrchestrator(
+            self.live_cfg(), state=self.state, deps=deps, env=env,
+            clock=self.clock.time, sleep=self.clock.sleep,
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertFalse(result.ok)
+        self.assertIn("BITGET_MAIN_API_SECRET_FILE", result.reason)
+        self.assertEqual(self.payout.calls, [])
+
+    def test_dry_run_needs_no_credentials(self):
+        # A simulation signs nothing, so it must not demand key files — and it
+        # must not call from_env(), which would fail on a box with no secrets.
+        built = []
+
+        class Recorder:
+            def __init__(self, account_role="sub", **kwargs):
+                built.append(dict(via="ctor", role=account_role, **kwargs))
+                self.account_role = account_role
+
+            @staticmethod
+            def from_env(account_role, prefix, **kwargs):
+                raise AssertionError("a dry run must not read credential files")
+
+            def transfer_sub_to_main(self, coin, amount, client_oid, dry_run):
+                assert dry_run and self.account_role == "sub"
+                return {"transferId": "T-1"}
+
+            def withdraw_onchain(self, coin, chain, address, amount, client_oid,
+                                 allowlist, dry_run):
+                assert dry_run and self.account_role == "main"
+                return {"orderId": "W-1"}
+
+        with patched_payout_module(self, Recorder):
+            deps = Deps(bsc_buy=self.bsc, screen_token=self.gate, balance_probe=self.probe)
+            result = MemeBuyOrchestrator(
+                self.cfg(), state=self.state, deps=deps, env={}
+            ).run_once("bsc", BSC_TOKEN, 25.0)
+
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([b["role"] for b in built], ["sub", "main"])
+
+    def test_custom_prefix_is_the_one_checked(self):
+        deps = Deps(payout_sub=self.payout, bsc_buy=self.bsc, screen_token=self.gate,
+                    balance_probe=self.probe)
+        cfg = self.live_cfg(bitget_main_prefix="MINAS_MAIN")
+        result = MemeBuyOrchestrator(
+            cfg, state=self.state, deps=deps, env=dict(ARMED_ENV),
+            clock=self.clock.time, sleep=self.clock.sleep,
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertIn("MINAS_MAIN_API_KEY_FILE", result.reason)
+
+
+class TestCredentialInspection(unittest.TestCase):
+    def test_never_opens_the_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = write_credentials(tmp, "BITGET_MAIN", secret="LEAKME")
+            creds = credentials.inspect_role("main", "BITGET_MAIN", env)
+            self.assertTrue(creds.complete)
+            self.assertEqual(creds.missing, ())
+            blob = repr(creds) + " " + " ".join(f.describe() for f in creds.files)
+            self.assertNotIn("LEAKME", blob)
+
+    def test_unset_env_var_is_incomplete(self):
+        creds = credentials.inspect_role("sub", "BITGET_SUB", {})
+        self.assertFalse(creds.complete)
+        self.assertEqual(len(creds.missing), 3)
+
+    def test_roles_state_what_they_may_do(self):
+        sub = credentials.inspect_role("sub", "BITGET_SUB", {})
+        main = credentials.inspect_role("main", "BITGET_MAIN", {})
+        self.assertIn("transfer", " ".join(sub.may()))
+        self.assertIn("withdraw", " ".join(sub.may_not()))
+        self.assertIn("withdraw", " ".join(main.may()))
+        self.assertIn("transfer", " ".join(main.may_not()))
+
+    def test_unknown_role_is_rejected(self):
+        with self.assertRaises(ValueError):
+            credentials.inspect_role("parent", "BITGET_MAIN", {})
+
+
+class TestCheckCredentialsCli(unittest.TestCase):
+    """--check-credentials: no secrets on stdout, and provably no network."""
+
+    SECRET = "DO-NOT-PRINT-THIS-KEY"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.config_path = os.path.join(self.tmp.name, "config.json")
+        with open(self.config_path, "w", encoding="utf-8") as handle:
+            json.dump(raw_config(kill_switch_file="/tmp/stop"), handle)
+
+        # Any socket use at all fails the test: this command must be offline.
+        import socket
+
+        def no_network(*args, **kwargs):
+            raise AssertionError("--check-credentials made a network call")
+
+        for name in ("socket", "create_connection"):
+            patched = unittest.mock.patch.object(socket, name, no_network)
+            patched.start()
+            self.addCleanup(patched.stop)
+
+    def _run(self, env):
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = memebuy_cli.main(["--config", self.config_path, "--check-credentials"])
+        return code, buffer.getvalue()
+
+    def test_reports_readable_files_without_printing_any_secret(self):
+        env = {}
+        env.update(write_credentials(self.tmp.name, "BITGET_SUB", self.SECRET))
+        env.update(write_credentials(self.tmp.name, "BITGET_MAIN", self.SECRET))
+        code, out = self._run(env)
+
+        self.assertEqual(code, 0)
+        self.assertNotIn(self.SECRET, out)
+        self.assertIn("BITGET_SUB_API_KEY_FILE", out)
+        self.assertIn("BITGET_MAIN_API_PASSPHRASE_FILE", out)
+        self.assertIn("READY", out)
+        # It must say plainly what each role is allowed to do.
+        self.assertIn("may NOT", out)
+        self.assertIn("IRREVERSIBLE", out)
+
+    def test_missing_credentials_are_named_and_exit_nonzero(self):
+        env = write_credentials(self.tmp.name, "BITGET_SUB", self.SECRET)
+        code, out = self._run(env)
+        self.assertEqual(code, 1)
+        self.assertNotIn(self.SECRET, out)
+        self.assertIn("INCOMPLETE", out)
+        self.assertIn("BITGET_MAIN_API_KEY_FILE", out)
+
+    def test_honours_configured_prefixes(self):
+        raw = raw_config(
+            kill_switch_file="/tmp/stop",
+            bitget_sub_prefix="MINAS_SUB",
+            bitget_main_prefix="MINAS_MAIN",
+        )
+        with open(self.config_path, "w", encoding="utf-8") as handle:
+            json.dump(raw, handle)
+        code, out = self._run({})
+        self.assertEqual(code, 1)
+        self.assertIn("MINAS_SUB_API_KEY_FILE", out)
+        self.assertIn("MINAS_MAIN_API_KEY_FILE", out)
+
+    def test_a_secret_pasted_into_the_variable_is_never_echoed(self):
+        # REGRESSION: describe() printed the variable's value verbatim whenever
+        # it named no file.  The classic misconfiguration is pasting the SECRET
+        # into {PREFIX}_API_SECRET_FILE instead of a path — and then that value
+        # IS the credential, published to stdout, the CI log and the journal.
+        env = write_credentials(self.tmp.name, "BITGET_SUB", self.SECRET)
+        env.update(write_credentials(self.tmp.name, "BITGET_MAIN", self.SECRET))
+        env["BITGET_MAIN_API_SECRET_FILE"] = self.SECRET  # pasted, not a path
+        code, out = self._run(env)
+        self.assertEqual(code, 1)
+        self.assertNotIn(self.SECRET, out)
+        self.assertIn("BITGET_MAIN_API_SECRET_FILE", out)
+        self.assertIn("NOT SHOWN", out)
+
+    def test_the_orchestrators_refusal_message_does_not_echo_it_either(self):
+        env = write_credentials(self.tmp.name, "BITGET_SUB", self.SECRET)
+        env.update(write_credentials(self.tmp.name, "BITGET_MAIN", self.SECRET))
+        env["BITGET_MAIN_API_KEY_FILE"] = self.SECRET
+        env["MEME_BUY_ARMED"] = "1"
+        cfg = config.load_meme_buy_config(
+            raw_config(armed=True, dry_run=False, kill_switch_file="/tmp/stop",
+                       db_path=os.path.join(self.tmp.name, "j.sqlite3"))
+        )
+        clock = FakeClock()
+        result = MemeBuyOrchestrator(
+            cfg, deps=Deps(bsc_buy=FakeSwap("tx_hash", live_allowed=True),
+                           screen_token=FakeGate(), balance_probe=FakeProbe()),
+            env=env, clock=clock.time, sleep=clock.sleep,
+        ).run_once("bsc", BSC_TOKEN, 25.0)
+        self.assertFalse(result.ok)
+        self.assertNotIn(self.SECRET, result.reason)
+        self.assertIn("BITGET_MAIN_API_KEY_FILE", result.reason)
 
 
 if __name__ == "__main__":

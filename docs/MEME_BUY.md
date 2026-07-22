@@ -45,11 +45,15 @@ than a crash at process start. At the time of writing `payout/` is consumed
 purely through that contract:
 
 ```
-payout.bitget_payout.BitgetPayout
-    .transfer_sub_to_main(coin, amount, client_oid, dry_run)
-    .withdraw_onchain(coin, chain, address, amount, client_oid, allowlist, dry_run)
+payout.bitget_payout.BitgetPayout(account_role="sub"|"main")
+    .transfer_sub_to_main(coin, amount, client_oid, dry_run)      SUB key only
+    .withdraw_onchain(coin, chain, address, amount, client_oid,   MAIN key only
+                      allowlist, dry_run)
     .get_withdrawal_status(client_oid, start_ms, end_ms)
 ```
+
+Two instances are built, from two different env-var prefixes, and they are not
+interchangeable — see §3.
 
 If the module is absent, `--run-once` aborts at stage 1 with `safety gate
 unavailable` / an import error in the journal, and no money moves.
@@ -101,31 +105,65 @@ None of this can be done by code. All of it has to be true before `--run-once`
 will do anything useful, and several items fail *silently* or *irreversibly* if
 skipped. Work top to bottom.
 
-### Bitget
+### Bitget — the two API keys, one checklist each
 
-* [ ] **Main-account KYC completed.** Withdrawals are gated on it. Sub-account
-      KYC does not substitute.
-* [ ] **2FA bound** on the account (Google Authenticator / equivalent). Bitget
-      requires it for withdrawal-permitted keys.
-* [ ] **An ELASTIC IP on the EC2 box.** The current public IP `18.179.57.78` is
-      **not** elastic. Bitget API keys are IP-locked, and a stop/start of the
+The pipeline needs **two different Bitget API keys**. They are not
+interchangeable and neither can do the other's job. Provision them separately,
+tick them separately, and store them under separate env-var prefixes.
+
+**Key 1 — SUB key (stage 1: sub → main transfer)**
+
+* [ ] Created **under the sub-account**, from the main account:
+      *Profile → Sub-account management → (sub-account) → API management*.
+* [ ] Permission: **Transfer only.** Nothing else is needed for stage 1.
+* [ ] **A sub-account key structurally CANNOT withdraw — whatever is ticked in
+      the UI.** Bitget only ever grants sub keys `uta_trade` / `uta_mgt`. Ticking
+      "Withdraw" on a sub key does not enable it; the call fails at the exchange.
+      This is why stage 1 exists at all. `payout/bitget_payout.py` also refuses
+      the wrong role locally, before any network call.
+* [ ] Record key + secret + **passphrase** (Bitget issues all three).
+
+**Key 2 — MAIN key (stage 2: the irreversible on-chain withdrawal)**
+
+* [ ] Created on the **main account**, not a sub-account.
+* [ ] Permissions: **Withdraw + Read.** Read is needed for the per-`clientOid`
+      withdrawal-status lookup that makes resume safe. Do **not** grant Trade.
+* [ ] **IP-allowlisted** to this host, and to a *stable* address — see the next
+      item, which is the one that actually bites.
+* [ ] **EC2 public IP `18.179.57.78` is NOT an Elastic IP.** A stop/start of the
       instance hands you a new public IP; the old one stays in the Bitget
-      allowlist and every withdrawal call then fails with **error 40038** while
-      the rest of the bot looks fine. Allocate an Elastic IP, associate it, and
-      lock the key to that address — before, not after.
-* [ ] **A MAIN-account API key with Withdraw permission, IP-locked to that
-      elastic IP.** Sub-account keys **cannot withdraw**. Bitget requires the
-      funds to be transferred sub -> main first, which is exactly why stage 1
-      exists. A sub-account key with "Withdraw" ticked will still fail.
-* [ ] **Destination addresses added BY HAND to the Bitget withdrawal address
-      book**, one per chain, before the first run. There is no API to add a
-      withdrawal address — that is a security feature, not an omission. An
-      address that is not in the book cannot be withdrawn to no matter what the
-      config says.
+      allowlist and **every withdrawal call then fails with error 40038** while
+      spot trading keeps working, so nothing looks broken. Allocate an Elastic
+      IP, associate it, and lock the key to *that* address — before, not after.
+* [ ] **Destination addresses added BY HAND** to the Bitget withdrawal address
+      book, one per chain, before the first run. **There is no API to add a
+      withdrawal address** (the API is read-only: `GET
+      /api/v3/account/withdraw-address`). That is a security feature, not an
+      omission. An address that is not in the book cannot be withdrawn to, no
+      matter what the config says.
 * [ ] **No security-setting changes for 24 hours before going live.** Changing
       the password, 2FA binding, email or phone freezes withdrawals for 24h;
       attempts during the window return **error 40052**. Do the security work
       first, then wait a day, then arm.
+* [ ] **Main-account KYC completed.** Withdrawals are gated on it; sub-account
+      KYC does not substitute.
+* [ ] **2FA bound** on the main account (Google Authenticator / equivalent).
+      Bitget requires it for withdrawal-permitted keys.
+
+**Both keys**
+
+* [ ] Each of the six secrets lives in **its own `0600`, root-owned file**, and
+      the environment variable holds the **PATH** to that file — never the secret
+      itself:
+
+      BITGET_SUB_API_KEY_FILE          BITGET_MAIN_API_KEY_FILE
+      BITGET_SUB_API_SECRET_FILE       BITGET_MAIN_API_SECRET_FILE
+      BITGET_SUB_API_PASSPHRASE_FILE   BITGET_MAIN_API_PASSPHRASE_FILE
+
+* [ ] Verified with **`python3 memebuy_cli.py --check-credentials`** (§4) — it is
+      read-only, offline, and never opens the files, so it cannot leak a secret
+      into your terminal or a CI log. A live run refuses to start without both
+      key sets anyway; finding out here costs nothing.
 * [ ] Rotate the API key that was pasted into chat during the original
       deployment. Treat it as public.
 
@@ -174,6 +212,142 @@ export SAFETY_ALLOWLIST_FILE=/etc/minas/allowlist.json # a path, not a secret
 export MEME_BUY_ARMED=1                                # arming half; see §4
 ```
 
+### The two Bitget API keys
+
+A Bitget sub-account key **cannot withdraw** — the exchange only grants sub keys
+`uta_trade`/`uta_mgt`. So the pipeline needs two different keys, and the same
+`*_FILE` convention applies to both:
+
+```sh
+# stage 1: sub -> main transfer. Signed with the sub-account's OWN key.
+# Permission: TRANSFER only. A sub key cannot withdraw whatever is ticked.
+export BITGET_SUB_API_KEY_FILE=/run/secrets/bitget_sub.key
+export BITGET_SUB_API_SECRET_FILE=/run/secrets/bitget_sub.secret
+export BITGET_SUB_API_PASSPHRASE_FILE=/run/secrets/bitget_sub.pass
+
+# stage 2: the IRREVERSIBLE on-chain withdrawal. Main-account key.
+# Permissions: WITHDRAW + READ, IP-allowlisted to this host (else 40038).
+export BITGET_MAIN_API_KEY_FILE=/run/secrets/bitget_main.key
+export BITGET_MAIN_API_SECRET_FILE=/run/secrets/bitget_main.secret
+export BITGET_MAIN_API_PASSPHRASE_FILE=/run/secrets/bitget_main.pass
+```
+
+Every one of those six variables holds a **PATH** to a `0600`, root-owned file
+containing that single secret — never the secret itself. See §2 for the
+provisioning checklist and the blast-radius note later in this section for what
+the main key is actually worth to an attacker.
+
+The `BITGET_SUB` / `BITGET_MAIN` prefixes are the defaults; change them with
+`meme_buy.bitget_sub_prefix` / `bitget_main_prefix` in the config. The two must
+differ — one key playing both roles is exactly what this model prevents.
+
+`payout/bitget_payout.py` refuses the wrong role locally, before any network
+call, and `memebuy/orchestrator.py` builds two separate clients and checks the
+role of each before it calls it. A **live** run also verifies both key sets are
+present and readable at stage 0: discovering the main key missing at stage 2
+would leave the USDT parked in the main account with a half-finished run behind
+it. Verify by hand at any time with `--check-credentials` (§4).
+
+### Swap backends
+
+Each chain picks who executes the swap once the USDT has landed in your own
+wallet, via `meme_buy.chains.<chain>.swap_backend`. Any other value is a hard
+config error.
+
+> **The load-bearing fact, before the table:** **both backends still sign with a
+> private key held on this server.** SwapX is a *route provider*, not a custody
+> model — it returns unsigned transaction data and this process signs it with the
+> key loaded from `BSC_PRIVATE_KEY_FILE` / `SOLANA_PRIVATE_KEY_FILE`. Bitget
+> never holds the key and never holds the funds. **Switching `swap_backend` does
+> not reduce key-compromise risk by any amount.** Anyone who can read the key
+> file can drain the wallet under either backend, exactly the same way.
+
+| | `native` (default) | `bitget` |
+|---|---|---|
+| Router | PancakeSwap V2 on BSC (`chains/bsc_swap.py`), Jupiter Swap API V2 on Solana (`chains/solana_swap.py`) | Bitget Wallet Trading API "SwapX" aggregator (`chains/bitget_swap.py`) |
+| Chains | `bsc`, `solana` | `bsc`, `solana` (chain index `56` / `501`) |
+| API key needed? | **No.** Public router contract + public Jupiter API. Only an RPC URL. | **Yes.** Apply at <https://portal-web3.bitget.com>. The application is **not** self-serve end to end — it has a BD/contact step, so budget calendar time, not minutes. Keys are passed as `SecretKey` objects; the client never sees raw strings. |
+| Gas | Wallet pays its own. Keep `min_native_balance` funded: **≥ 0.01 BNB** on BSC, **0.03–0.05 SOL** on Solana (ATA rent for a first-ever buy is 0.00203928 SOL alone). Enforced by `BNB_FLOOR` / `SOL_FLOOR` before anything is signed. | Same as `native` **unless** `gasless: true`. With gasless the aggregator sponsors gas (EIP-7702-style delegation on EVM — you sign EIP-712 typed data instead of a transaction; an internal fee payer on Solana). Requires a **stablecoin input** and an order of **≈ \$5 minimum** (`GASLESS_MIN_USDT`). |
+| Native-balance enforcement | Enforced — the module holds an RPC handle. | **Not enforced.** SwapX holds no node of our own; the result reports `native_balance_checked: false`. Non-gasless means the caller keeps that duty. `min_native_balance` set without `gasless` only logs a warning. |
+| Tax / fee-on-transfer tokens | BSC always uses `swapExactTokensForTokensSupportingFeeOnTransferTokens`, so a taxed token does not revert `Pancake: K`. Budget the buy tax with `buy_tax_bps` or the swap fails `INSUFFICIENT_OUTPUT_AMOUNT`. | Handled by the aggregator's own routing; there is no local `buy_tax_bps` equivalent. The order's `minReceiveAmount` is compared against the amount our quote authorised and the swap is **refused before signing** if the order protects less (`MIN_RECEIVED`). |
+| Verified against the live API? | Yes. | **No — see the warning below.** |
+
+`gasless: true` with `swap_backend: "native"` is **rejected at config load**, not
+ignored — silently dropping it would leave you believing a wallet needs no
+BNB/SOL, and the swap would then fail *after* the irreversible withdrawal.
+
+Whichever backend is configured, the orchestrator still refuses to call a
+`buy_token` that does not take `dry_run` as a real named parameter, so switching
+routers is not a way around the guard.
+
+### PROVISIONAL — the SwapX backend has never met the live API
+
+> ### ⚠️ `swap_backend: "bitget"` IS UNVERIFIED
+>
+> `chains/bitget_swap.py` was **written to the published documentation only**. It
+> has **never been executed against the live Bitget Wallet Trading API.** No
+> request in it has ever received a real response, so **every endpoint path,
+> request/response field name, envelope shape and signing detail in it is
+> provisional** and must be confirmed on first use. The results it returns carry
+> `unverified_integration: true` to make this visible downstream.
+>
+> **Do not arm this backend and walk away.** Exercise it with `--dry-run` first —
+> the dry-run path stops after the read-only `quote` call, before `makeSwapOrder`
+> and before anything is signed, and it returns the exact `intended_call` it
+> would have made.
+
+Where to correct it, so you are not searching:
+
+* **If authentication fails** (401/403, a signature-rejected code, or a "missing
+  header" message): the entire HMAC recipe lives in **one method,
+  `BitgetSwapClient._auth_headers`** — header names (`HEADER_API_KEY`,
+  `HEADER_SIGN`, `HEADER_TIMESTAMP`), the digest encoding (`SIGN_ENCODING`,
+  hex vs base64), and the prehash component order (`SIGN_PARTS`, currently
+  timestamp + METHOD + path + body, modelled on Bitget's CEX v2 scheme). **Fix
+  `_auth_headers` and nothing else.** No call site assembles headers.
+* **If a field is missing or misread**, correct the `WIRE` dict, not the call
+  sites. Every provisional field name is an alias tuple there; the first alias is
+  what we send and reads try each in order.
+* **If a path 404s**, correct `PATHS`. **If the host is wrong**, pass `base_url`.
+* **If the chain id is wrong**, correct `CHAIN_INDEX` (one place).
+
+There is a second host worth knowing about: `https://copenapi.bgwapi.io` is what
+Bitget's own MIT-licensed tools (bitget-wallet-mcp / -cli / -skill) call with
+**no API key**. It is deliberately **not** the default — it is a client-facing
+endpoint that may change without notice, and its terms-of-service position for
+unattended bot use is unclear.
+
+Fail-closed behaviour is already in place regardless: a non-JSON body, a
+non-object `data` member, an absent `data` member, or a business-code failure
+inside an HTTP 200 all raise rather than being read as success. The caller
+contract is the one that matters operationally — an exception with
+`exc.signed is False` was raised **before any signature existed** (definitely not
+sent, safe to retry); `exc.signed is True` means a signature existed, and
+`BitgetSwapUnconfirmed` means **reconcile `exc.order_id` before any retry or you
+may buy twice**.
+
+### What Bitget "Onchain" is NOT
+
+The Bitget **app** has an "Onchain" tab that buys BSC and Solana memecoins
+straight from your spot USDT — no self-custody wallet, no withdrawal, no gas.
+That flow is **UI-only. There is no public API for it.** None.
+
+* The Bitget exchange API exposes exactly four permission scopes — **Read,
+  Trade, Transfer, Withdraw** — and has **no onchain / DEX / Web3 section** of
+  any kind. There is no endpoint that spends a *spot balance* on a DEX token.
+* Bitget Wallet SwapX (the `bitget` backend above) is a **different product**. It
+  is a self-custody DEX aggregator: it cannot see, touch or spend a Bitget
+  exchange balance, and it is not a CEX order route.
+* **No major exchange offers the in-app onchain flow through a documented API.**
+  This was checked; it is not a Bitget-specific gap.
+
+The consequence is structural, not a design preference: **the
+withdraw-then-swap flow this pipeline implements is unavoidable.** The
+irreversible on-chain withdrawal at stage 2 cannot be engineered away by picking
+a different backend or a different exchange. If you find yourself wishing the bot
+could "just buy it the way the app does" — it cannot, and neither can anything
+else that is automatable.
+
 `chains/wallet_keys.py` is the only key loader in the package — do not add a
 second one. It strips trailing whitespace (a `echo >` newline or a k8s secret
 mount), rejects multi-line files, validates the format (`evm` = 32-byte hex,
@@ -218,17 +392,62 @@ than most people check:
 A file has one owner, one mode, and one place to audit. That is the whole
 argument.
 
-### If the wallet ever holds meaningful size
+### Blast radius — what a compromised host actually costs
 
-As of **November 2025, AWS KMS supports both secp256k1 and Ed25519** keys —
-which covers BSC (secp256k1) and Solana (Ed25519) with the same service. That
-makes it possible to hold the signing key in an HSM-backed KMS key and sign
-through the API, so the private key never exists as a file on the instance at
-all, every signature is logged in CloudTrail, and the blast radius of a host
-compromise drops from "keys stolen" to "signatures requested while the attacker
-had access". Nothing in this subsystem uses KMS today; `chains/wallet_keys.py`
-is the single seam where it would be introduced. Consider it the moment the
-wallet balance stops being an amount you would shrug at.
+State it plainly, because the two-key model is often read as being *smaller*
+than it is:
+
+**A main-account key with Withdraw permission means a compromised host can drain
+the exchange balance — not just the hot wallet.** An attacker with code
+execution on the box does not need to steal anything: the credential files are
+readable to the process by design, and the withdrawal endpoint is a single
+authenticated call. The exposure is not "the ~\$25 sitting in the BSC wallet". It
+is **whatever is in the Bitget main account**, up to whatever the exchange lets
+that key move.
+
+Nothing in this repository can change that. The mitigations are exchange-side
+and infrastructure-side:
+
+* **Exchange-side address whitelisting** — the withdrawal address book is
+  manual-only and there is no API to add an entry, so a compromised host can only
+  send funds to an address *you* already wrote down. This is the single most
+  valuable control in the whole design, and it is a Bitget feature, not ours.
+  Keep exactly one address per chain in the book.
+* **A withdrawal cap set on the exchange**, not just `daily_usdt_cap` in the
+  config. Our cap lives in a SQLite file on the same host the attacker owns; the
+  exchange's cap does not.
+* **Keep the main account's balance small.** A key that can withdraw everything
+  is only as dangerous as "everything" is.
+
+### The upgrade path that survives a compromised host
+
+**A remote signer that enforces policy at signing time.** The key never exists on
+the instance; the instance asks for a signature and the *signer* decides. If the
+policy says "USDT → allowlisted router only, ≤ \$X per day", a host with full
+code execution still cannot sign anything else.
+
+* **Turnkey** and **Coinbase CDP server wallets** both do this today, both are
+  **self-serve** (no sales call to get started), both cover **EVM and Solana**,
+  and both support **spend caps and router/contract allowlists enforced at the
+  signing boundary**. That is the property that matters: the guardrail is on the
+  other side of the compromise.
+* `chains/wallet_keys.py` is the single seam where any of this is introduced —
+  it is the only key loader in the package, and the swap modules resolve their
+  key through it at the signing site. Do not add a second loader.
+
+**AWS KMS is a weaker answer, and it is worth being precise about why.** As of
+November 2025 KMS supports both secp256k1 and Ed25519, so it covers BSC and
+Solana with one service, and it genuinely stops **key theft** — the private key
+never exists as a file, and every signature lands in CloudTrail. But **KMS signs
+opaque bytes.** It cannot see that the bytes are a token approval, a router call,
+or a transfer of your entire balance to an attacker's address, so **it does not
+stop draining.** A compromised host with `kms:Sign` can sign anything the wallet
+could have signed. Treat KMS as "the key cannot be exfiltrated and reused later",
+not as "the funds are safe while the box is owned".
+
+Consider the remote-signer move the moment the wallet balance stops being an
+amount you would shrug at — and consider the exchange-side controls *now*,
+because the main key's blast radius does not scale with the wallet.
 
 ---
 
@@ -257,6 +476,7 @@ merged into the real `config.example.json`, not a replacement for it, and the
 $ python3 memebuy_cli.py
 meme-buy CLI — dry-run (default). Nothing was moved.
   --status                      show config, arming state and caps
+  --check-credentials           which Bitget key files each role has
   --check-token CHAIN ADDRESS   safety gate only (read-only)
   --run-once ...                requires armed config AND --i-understand-this-spends-real-money
 
@@ -280,10 +500,14 @@ meme-buy status
   daily cap (USDT) ......... 100
   kill switch file ......... data/MEME_BUY_KILL
   kill switch engaged ...... False
+  bitget SUB key prefix .... BITGET_SUB (stage 1 transfer)
+  bitget MAIN key prefix ... BITGET_MAIN (stage 2 withdrawal)
+      run --check-credentials to see which files are actually present
   chain bsc     ........... enabled
       withdraw address ..... 0x8fA3...c41B
       allowlisted tokens ... 1
       slippage (bps) ....... 100
+      swap backend ......... native
   chain solana  ........... disabled
   journal db ............... data/meme_buy.sqlite3
   spent in last 24h (USDT) . 0
@@ -295,6 +519,32 @@ meme-buy status
 config is armed **and** `MEME_BUY_ARMED=1` is in the environment **and**
 `dry_run` is false. A locked or corrupt journal degrades the spend line to
 `unavailable (...)` rather than crashing the command.
+
+### `--check-credentials`
+
+Read-only, and **offline**: it makes zero network calls and never opens the
+credential files, so no key, secret or passphrase can reach your terminal or a
+CI log. It reports, per role, whether the three files are present and readable,
+and states plainly what that role is allowed to do.
+
+```
+$ python3 memebuy_cli.py --check-credentials --config data/config.json
+meme-buy credential check
+  read-only: no network calls, no files opened, no secret values printed
+
+  SUB-role key (prefix BITGET_SUB)
+    BITGET_SUB_API_KEY_FILE            set -> /run/secrets/bitget_sub.key (readable)
+    BITGET_SUB_API_SECRET_FILE         set -> /run/secrets/bitget_sub.secret (readable)
+    BITGET_SUB_API_PASSPHRASE_FILE     UNSET (must hold the PATH of the secret file)
+    status ......................... INCOMPLETE — missing/unreadable: BITGET_SUB_API_PASSPHRASE_FILE
+    may ............................ transfer USDT from the sub-account up to the main account (stage 1)
+    may NOT ........................ withdraw anything: Bitget never grants a sub-account key withdraw permission, ...
+  ...
+```
+
+Exit code 0 when both roles are ready, 1 when anything is missing. Run it before
+arming: a live run refuses to start without both key sets anyway, and finding
+out here costs nothing.
 
 ### `--check-token CHAIN ADDRESS`
 

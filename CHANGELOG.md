@@ -5,6 +5,91 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-07-21
+
+Adds a second, opt-in swap backend and makes the Bitget credential model
+explicit. **The spot bot is still untouched** and the meme-buy subsystem is
+still manually invoked only.
+
+### Added
+
+* `chains/bitget_swap.py` — swap execution via the Bitget Wallet Trading API
+  ("SwapX"), selectable per chain with
+  `meme_buy.chains.<chain>.swap_backend: "bitget"`. Signature-compatible with
+  `bsc_swap` / `solana_swap`, so the orchestrator can swap one back-end for
+  another. Supports SwapX "NoGas" (`gasless: true`), which removes the need to
+  keep a BNB/SOL float — it requires a stablecoin input and an order of roughly
+  \$5 minimum.
+  * **PROVISIONAL: this module has never been run against the live API.** It is
+    written to the published documentation only, so every endpoint path, field
+    name, envelope shape and signing detail in it must be confirmed on first
+    use. Results carry `unverified_integration: true`. Everything uncertain is
+    isolated so it can be corrected in one place: `PATHS`, `CHAIN_INDEX`, the
+    `WIRE` alias dict, and the entire HMAC recipe in
+    `BitgetSwapClient._auth_headers` — **that one method is what to correct if
+    authentication fails.**
+  * Fail-closed throughout: non-JSON bodies, absent/non-object `data`, and
+    business-code failures inside an HTTP 200 all raise. Errors carry
+    `exc.signed` — `False` means no signature existed and a retry is safe;
+    `BitgetSwapUnconfirmed` means reconcile `exc.order_id` before any retry.
+  * The order's minimum-received is checked against the amount the quote
+    authorised and the swap is refused **before signing** if it protects less.
+* `memebuy/credentials.py` and `memebuy_cli.py --check-credentials` — a
+  read-only, **offline** presence check for the two Bitget API key sets. It
+  never opens the credential files and makes no network calls, so no secret can
+  reach a terminal or a CI log; it reports per role which of the three
+  `*_FILE` variables are set and readable, and states plainly what that role
+  may and may not do. A live run also verifies both key sets at stage 0, so a
+  missing main key can no longer be discovered *between* the transfer and the
+  withdrawal.
+* `meme_buy.chains.<chain>.swap_backend` and `gasless` config keys, plus
+  `meme_buy.bitget_sub_prefix` / `bitget_main_prefix` for the two key sets.
+  `swap_backend` is validated even for a disabled chain, so a typo surfaces
+  before somebody flips `enabled: true`.
+
+### Changed
+
+* `docs/MEME_BUY.md`:
+  * new swap-backend comparison table (chains, API-key requirement and how to
+    get one, gas requirements, tax-token handling) leading with the fact that
+    **both backends still sign with a private key held on the server** — SwapX
+    is a route provider, not a custody model, so switching backends does not
+    reduce key-compromise risk. The one real operational advantage is gasless
+    swaps removing the BNB/SOL float.
+  * a prominent PROVISIONAL warning for the SwapX backend, naming
+    `_auth_headers` as the single method to correct if auth fails.
+  * a new note on what Bitget "Onchain" is **not**: the app's Onchain tab is
+    UI-only with no public API, the exchange API exposes only
+    Read/Trade/Transfer/Withdraw and has no onchain/DEX/Web3 section, and no
+    major exchange offers that flow through a documented API — so the
+    withdraw-then-swap pipeline is unavoidable.
+  * the Bitget prerequisites are now a precise per-key checklist: SUB key =
+    Transfer only (and a sub key structurally cannot withdraw whatever is
+    ticked), MAIN key = Withdraw + Read, IP-allowlisted, with the EC2 public IP
+    `18.179.57.78` called out as **not** elastic (a stop/start breaks
+    withdrawals with error 40038), the manual-only address book, the 24h
+    security-change freeze (error 40052), and main-account KYC + 2FA.
+  * a blast-radius section: a withdraw-capable main key means a compromised host
+    can drain the exchange balance, not just the hot wallet. Exchange-side
+    address whitelisting plus a withdrawal cap is the main mitigation; moving
+    signing to a policy-enforcing remote signer (Turnkey / Coinbase CDP server
+    wallets — self-serve, EVM+Solana, spend caps and router allowlists enforced
+    at signing) is the upgrade path that survives a compromised host. AWS KMS
+    stops key theft but **not** draining, because it signs opaque bytes.
+
+### Safety posture (unchanged, restated)
+
+* `gasless: true` with `swap_backend: "native"` is a hard config error, not an
+  ignored key — silently dropping it would leave an operator believing a wallet
+  needs no BNB/SOL, and the swap would fail *after* the irreversible withdrawal.
+* An injected SwapX client's `gasless` setting can only be turned on by the
+  keyword, never quietly off, so the \$5 gate cannot be bypassed and the signer
+  can never produce EIP-712 typed data for an order built in normal mode.
+* Whichever backend is configured, the orchestrator still refuses to call a
+  `buy_token` that does not take `dry_run` as a real named parameter.
+* Tokens are identified by address/mint only, on both backends. Symbols are
+  attacker-controlled metadata and are never resolved.
+
 ## [2.1.0] - 2026-07-20
 
 New, opt-in subsystem that withdraws USDT from Bitget to a wallet you control

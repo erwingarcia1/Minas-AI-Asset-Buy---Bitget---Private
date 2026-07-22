@@ -17,13 +17,31 @@ that an import error in one of them is a normal, journaled, fail-closed abort
 instead of a crash at process start.
 
 Expected sibling contracts:
-  payout.bitget_payout.BitgetPayout
-      .transfer_sub_to_main(coin, amount, client_oid, dry_run)
+  payout.bitget_payout.BitgetPayout(account_role="sub"|"main")
+      .transfer_sub_to_main(coin, amount, client_oid, dry_run)     SUB key only
       .withdraw_onchain(coin, chain, address, amount, client_oid, allowlist, dry_run)
+                                                                   MAIN key only
       .get_withdrawal_status(client_oid, start_ms, end_ms)
   chains.bsc_swap.buy_token(...)     -> {"tx_hash": ..., "amount_in": ..., ...}
   chains.solana_swap.buy_token(...)  -> {"signature": ..., "in_amount": ..., ...}
+  chains.bitget_swap.buy_token(...)  -> {"backend": "bitget", ...}
   safety.gate.screen_token(chain, address, price_impact_bps=None) -> GateVerdict
+
+TWO KEYS, TWO OBJECTS.  Stage 1 is signed with the SUB account's own key and
+stage 2 with a separate, IP-allowlisted MAIN key: Bitget never grants a
+sub-account key withdraw permission, so one credential cannot do both.  This
+module therefore builds TWO BitgetPayout instances from two different env-var
+prefixes (default BITGET_SUB / BITGET_MAIN) and never uses one where the other
+belongs — payout/ refuses the wrong role locally, and so does _payout() here.
+A live run checks the MAIN credentials at stage 0, before the transfer, because
+discovering them missing after stage 1 leaves funds parked in the main account
+and a human reconciling by hand.
+
+SWAP BACKEND.  Per chain, `swap_backend` picks who executes the swap once the
+USDT has landed in our own wallet: "native" (PancakeSwap V2 / Jupiter) or
+"bitget" (Bitget Wallet SwapX).  Whichever is chosen, the callee must accept
+`dry_run` as a real named parameter — see _bind_swap_kwargs, which refuses a
+signature that cannot prove it honours it.
 
 Bitget endpoints behind the payout contract:
   https://www.bitget.com/api-doc/spot/account/Wallet-Transfer
@@ -50,8 +68,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from . import caps
-from .config import ConfigError, MemeBuyConfig, env_arm_acknowledged
+from . import caps, credentials
+from .config import (
+    SWAP_BACKEND_BITGET,
+    SWAP_BACKEND_NATIVE,
+    SWAP_BACKENDS,
+    ConfigError,
+    MemeBuyConfig,
+    env_arm_acknowledged,
+)
 from .state import DEFAULT_DB_PATH, DuplicateClientOid, MemeBuyState, StateError
 
 log = logging.getLogger("memebuy.orchestrator")
@@ -116,11 +141,21 @@ class RunResult:
 
 @dataclass
 class Deps:
-    """Injection points.  All optional; None means "lazy-import the real one"."""
+    """Injection points.  All optional; None means "lazy-import the real one".
+
+    ``payout_sub`` and ``payout_main`` are the two Bitget keys and are NOT
+    interchangeable.  ``payout`` is the legacy single-object slot: it stands in
+    for both roles and exists so an in-process caller can hand over one test
+    double.  Production leaves all three None and gets two real, role-checked
+    BitgetPayout instances built from two different env-var prefixes.
+    """
 
     payout: Any = None
+    payout_sub: Any = None
+    payout_main: Any = None
     bsc_buy: Optional[Callable[..., Mapping]] = None
     solana_buy: Optional[Callable[..., Mapping]] = None
+    bitget_buy: Optional[Callable[..., Mapping]] = None
     screen_token: Optional[Callable[..., Any]] = None
     balance_probe: Optional[Callable[[str, str], float]] = None
 
@@ -208,6 +243,9 @@ class MemeBuyOrchestrator:
         # switch file, checked before every stage.
         self._armed = bool(cfg.armed) and env_arm_acknowledged(env)
         self._state = state or MemeBuyState(cfg.db_path or DEFAULT_DB_PATH)
+        self._env = env
+        # One client per role, built at most once (from_env opens key files).
+        self._payouts: Dict[str, Any] = {}
         log.info(
             "meme-buy orchestrator constructed: armed=%s dry_run=%s caps=%.8g/%.8g kill_switch=%s",
             self._armed,
@@ -230,12 +268,75 @@ class MemeBuyOrchestrator:
 
     # ---------- lazy sibling resolution ----------
 
-    def _payout(self):
-        if self._deps.payout is not None:
-            return self._deps.payout
+    def _prefix_for(self, role: str) -> str:
+        return (
+            self._cfg.bitget_sub_prefix
+            if role == credentials.ROLE_SUB
+            else self._cfg.bitget_main_prefix
+        )
+
+    def _payout(self, role: str, stage: int):
+        """The payout client for ONE role.  Roles are never interchanged.
+
+        A sub key cannot withdraw and a main key must not be the transfer
+        source, so handing stage 2 the stage 1 object is a credential mix-up
+        that payout/ would reject at the door — but only after the transfer had
+        already moved money.  Verify the role here, before the call.
+        """
+        cached = self._payouts.get(role)
+        if cached is not None:
+            return cached
+        explicit = (
+            self._deps.payout_sub
+            if role == credentials.ROLE_SUB
+            else self._deps.payout_main
+        )
+        if explicit is None and self._deps.payout is not None:
+            explicit = self._deps.payout  # legacy single-object injection
+        if explicit is not None:
+            self._assert_role(explicit, role, stage)
+            self._payouts[role] = explicit
+            return explicit
+
         from payout.bitget_payout import BitgetPayout  # lazy by design
 
-        return BitgetPayout()
+        kwargs: Dict[str, Any] = {}
+        if role == credentials.ROLE_MAIN:
+            # payout/ refuses to withdraw without a per-call ceiling; the
+            # per-trade cap IS that ceiling, so the two cannot drift apart.
+            kwargs["max_withdrawal"] = self._cfg.per_trade_usdt_cap
+        prefix = self._prefix_for(role)
+        creds = credentials.inspect_role(role, prefix, self._env)
+        if self.dry_run and not creds.complete:
+            # A simulation signs nothing, so demanding key files just to print
+            # the intended call would make dry-run useless on a fresh box.  The
+            # client still carries its role, so the role checks still apply.
+            log.info(
+                "[DRY-RUN] %s-role Bitget credentials are incomplete (prefix %s); "
+                "using an unauthenticated client — nothing is signed or sent",
+                role,
+                prefix,
+            )
+            client = BitgetPayout(account_role=role, **kwargs)
+        else:
+            client = BitgetPayout.from_env(account_role=role, prefix=prefix, **kwargs)
+        self._assert_role(client, role, stage)
+        self._payouts[role] = client
+        return client
+
+    @staticmethod
+    def _assert_role(client: Any, role: str, stage: int) -> None:
+        """Refuse an object that says it holds the other account's key."""
+        actual = getattr(client, "account_role", None)
+        if actual is None:  # an injected double that does not model roles
+            return
+        if str(actual).strip().lower() != role:
+            raise Abort(
+                "stage %d needs the %s-role Bitget key but was handed a %r-role "
+                "client; the two credentials are not interchangeable"
+                % (stage, role, actual),
+                stage,
+            )
 
     def _screen_token(self) -> Callable[..., Any]:
         if self._deps.screen_token is not None:
@@ -244,7 +345,42 @@ class MemeBuyOrchestrator:
 
         return screen_token
 
-    def _swap_fn(self, chain: str) -> Callable[..., Mapping]:
+    def _swap_label(self, chain: str, backend: str) -> str:
+        if backend == SWAP_BACKEND_BITGET:
+            return "chains.bitget_swap.buy_token"
+        return "chains.%s_swap.buy_token" % chain
+
+    def _swap_fn(self, chain: str, backend: str = SWAP_BACKEND_NATIVE):
+        """The configured backend's buy_token, or a clean abort.
+
+        chains/bitget_swap.py is a separate deliverable and may simply not be
+        deployed; importing it lazily turns its absence into a journaled abort
+        at this stage rather than an ImportError at process start that would
+        take the spot bot's own module import down with it.
+        """
+        stage = STAGE_SWAP_BSC if chain == caps.CHAIN_BSC else STAGE_SWAP_SOLANA
+        if backend not in SWAP_BACKENDS:
+            # load_meme_buy_config rejects these, but ChainConfig is public and
+            # hand-constructible.  An unrecognised router must abort, never fall
+            # off the end of this chain of ifs into the live native one.
+            raise Abort(
+                "swap_backend %r for %s is not one of %s; refusing to guess a router"
+                % (backend, chain, ", ".join(SWAP_BACKENDS)),
+                stage,
+            )
+        if backend == SWAP_BACKEND_BITGET:
+            if self._deps.bitget_buy is not None:
+                return self._deps.bitget_buy
+            try:
+                from chains.bitget_swap import buy_token  # lazy by design
+            except Exception as exc:
+                raise Abort(
+                    "swap_backend='bitget' is configured for %s but "
+                    "chains.bitget_swap is unavailable (%s); refusing to fall "
+                    "back to another router" % (chain, exc),
+                    stage,
+                )
+            return buy_token
         if chain == caps.CHAIN_BSC:
             if self._deps.bsc_buy is not None:
                 return self._deps.bsc_buy
@@ -281,6 +417,50 @@ class MemeBuyOrchestrator:
                 stage,
                 status="killed",
             )
+
+    def _check_credentials(self) -> None:
+        """Both Bitget keys must be on disk BEFORE stage 1 moves anything.
+
+        Only a live run needs them (a dry run signs nothing), and an injected
+        payout object supplies its own credentials.  Otherwise: discovering the
+        MAIN key missing at stage 2 leaves the USDT sitting in the main account
+        with a half-finished run behind it, so check both roles up front and say
+        exactly which environment variable is wrong.
+        """
+        deps = self._deps
+        if not self.dry_run:
+            for role, injected in (
+                (credentials.ROLE_SUB, deps.payout_sub or deps.payout),
+                (credentials.ROLE_MAIN, deps.payout_main or deps.payout),
+            ):
+                if injected is not None:
+                    continue
+                creds = credentials.inspect_role(role, self._prefix_for(role), self._env)
+                if not creds.complete:
+                    raise Abort(
+                        credentials.missing_report(creds)
+                        + " Refusing to start: stage %d would fail after money had "
+                        "already moved."
+                        % (
+                            STAGE_TRANSFER
+                            if role == credentials.ROLE_SUB
+                            else STAGE_WITHDRAW
+                        ),
+                        STAGE_SELECT,
+                    )
+        # Build and role-verify BOTH clients here, in both modes.  _payout()
+        # checks the role, but stage 2 only reaches it after stage 1 has already
+        # transferred: a mix-up found there is one found after money moved.  The
+        # message still names the stage that needs the key; the abort is stage 0,
+        # where nothing has happened.
+        for role, stage in (
+            (credentials.ROLE_SUB, STAGE_TRANSFER),
+            (credentials.ROLE_MAIN, STAGE_WITHDRAW),
+        ):
+            try:
+                self._payout(role, stage)
+            except Abort as exc:
+                raise Abort(exc.reason, STAGE_SELECT, exc.status)
 
     def _log_intent(self, call: str, dry: Optional[bool] = None, **params: Any) -> None:
         prefix = "[DRY-RUN] would call" if (self.dry_run if dry is None else dry) else "calling"
@@ -425,6 +605,8 @@ class MemeBuyOrchestrator:
             log.exception("could not journal failure for run %s", run_id)
 
     def _pipeline_inner(self, ctx: Dict[str, Any], from_stage: int) -> RunResult:
+        # Before stage 1, never between stage 1 and stage 2.
+        self._check_credentials()
         if from_stage <= STAGE_TRANSFER:
             self._stage(ctx, STAGE_TRANSFER, self._stage_transfer)
         if from_stage <= STAGE_WITHDRAW:
@@ -468,7 +650,9 @@ class MemeBuyOrchestrator:
     # ---------- stage 1: sub -> main ----------
 
     def _stage_transfer(self, ctx) -> Dict[str, Any]:
-        payout = self._payout()
+        # SUB key: the endpoint takes no fromUserId, so it can only ever move
+        # this sub-account's own balance up to the main account.
+        payout = self._payout(credentials.ROLE_SUB, STAGE_TRANSFER)
         oid = ctx["transfer_oid"]
         self._persist_before_spend(ctx, STAGE_TRANSFER, transfer_client_oid=oid)
         self._log_intent(
@@ -507,7 +691,9 @@ class MemeBuyOrchestrator:
         if not ctx["dry"]:
             ctx["baseline"] = self._read_balance(ctx["chain"], address)
 
-        payout = self._payout()
+        # MAIN key, from the IP-allowlisted host.  A sub key is refused by
+        # payout/ outright — Bitget never grants it withdraw permission.
+        payout = self._payout(credentials.ROLE_MAIN, STAGE_WITHDRAW)
         oid = ctx["withdraw_oid"]
         self._persist_before_spend(ctx, STAGE_WITHDRAW, withdraw_client_oid=oid)
         self._log_intent(
@@ -643,7 +829,9 @@ class MemeBuyOrchestrator:
     def _stage_swap(self, ctx) -> Dict[str, Any]:
         chain_cfg = ctx["chain_cfg"]
         stage = STAGE_SWAP_BSC if ctx["chain"] == caps.CHAIN_BSC else STAGE_SWAP_SOLANA
-        buy = self._swap_fn(ctx["chain"])
+        backend = chain_cfg.swap_backend or SWAP_BACKEND_NATIVE
+        label = self._swap_label(ctx["chain"], backend)
+        buy = self._swap_fn(ctx["chain"], backend)
         amount = self._spendable(ctx, stage)
         wanted = dict(
             usdt_amount=amount,
@@ -661,10 +849,15 @@ class MemeBuyOrchestrator:
             wanted["mint"] = ctx["token"]
             # Passing taker explicitly means a dry run never opens the key file.
             wanted["taker"] = chain_cfg.withdraw_address
-        kwargs = self._bind_swap_kwargs(buy, wanted, ctx["chain"])
-        self._log_intent(
-            "chains.%s_swap.buy_token" % ctx["chain"], dry=ctx["dry"], **kwargs
-        )
+        if backend == SWAP_BACKEND_BITGET:
+            # One aggregator serves both chains, so it must be told which one;
+            # it is also the only backend that can sponsor gas.  The token is
+            # still passed under its chain's own keyword (token_address on BSC,
+            # mint on Solana) — never both, so the callee cannot pick the wrong.
+            wanted["chain"] = ctx["chain"]
+            wanted["gasless"] = bool(chain_cfg.gasless)
+        kwargs = self._bind_swap_kwargs(buy, wanted, ctx["chain"], label)
+        self._log_intent(label, dry=ctx["dry"], **kwargs)
         # A broadcast tx cannot be un-sent, and a timed-out swap may still land.
         # Record the attempt BEFORE it happens so a resume refuses to repeat it.
         self._state.advance(ctx["run_id"], stage, status="running")
@@ -695,7 +888,9 @@ class MemeBuyOrchestrator:
             raise Abort("nothing arrived to swap (delta %r)" % (arrived,), stage)
         return amount
 
-    def _bind_swap_kwargs(self, fn, wanted: Dict[str, Any], chain: str) -> Dict[str, Any]:
+    def _bind_swap_kwargs(
+        self, fn, wanted: Dict[str, Any], chain: str, label: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Pass only what the swap function actually accepts — or refuse.
 
         The chains/ package is written independently, so its exact keyword
@@ -712,14 +907,18 @@ class MemeBuyOrchestrator:
         broadcasts anyway.  The safety-critical names must therefore appear as
         real, named parameters no matter what the tail looks like, and a
         callable we cannot introspect at all is refused outright.
+
+        This applies identically to every backend: swapping the configured
+        router must not be a way around the dry_run proof.
         """
         stage = STAGE_SWAP_BSC if chain == caps.CHAIN_BSC else STAGE_SWAP_SOLANA
+        label = label or ("chains.%s_swap.buy_token" % chain)
         try:
             params = inspect.signature(fn).parameters
         except (TypeError, ValueError) as exc:  # C builtins / exotic callables
             raise Abort(
-                "chains.%s_swap.buy_token signature cannot be inspected (%s); its "
-                "handling of dry_run cannot be proven" % (chain, exc),
+                "%s signature cannot be inspected (%s); its handling of dry_run "
+                "cannot be proven" % (label, exc),
                 stage,
             )
         named = {
@@ -731,8 +930,7 @@ class MemeBuyOrchestrator:
         for required in ("dry_run", "usdt_amount", "slippage_bps"):
             if required not in named:
                 raise Abort(
-                    "chains.%s_swap.buy_token does not accept %r; refusing to call it"
-                    % (chain, required),
+                    "%s does not accept %r; refusing to call it" % (label, required),
                     stage,
                 )
         if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
@@ -753,8 +951,8 @@ class MemeBuyOrchestrator:
         ]
         if unfilled:
             raise Abort(
-                "chains.%s_swap.buy_token requires %s, which the orchestrator does "
-                "not hold" % (chain, ", ".join(unfilled)),
+                "%s requires %s, which the orchestrator does not hold"
+                % (label, ", ".join(unfilled)),
                 stage,
             )
         return kwargs
@@ -826,7 +1024,8 @@ class MemeBuyOrchestrator:
         self._state.journal(run_id, stage, "resume", {"status": row["status"]})
 
         if stage >= STAGE_WITHDRAW and row["withdraw_client_oid"]:
-            payout = self._payout()
+            # Withdrawal records live under the MAIN key that submitted them.
+            payout = self._payout(credentials.ROLE_MAIN, STAGE_WITHDRAW)
             resp = self._lookup_withdrawal(payout, str(row["withdraw_client_oid"]))
             state_str = str(_pick(resp, "status", "state") or "").lower()
             if state_str not in ("success", "successful", "finished", "completed"):
