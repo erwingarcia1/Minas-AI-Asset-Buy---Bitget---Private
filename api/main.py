@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from api.config import enforce_production_secrets, settings
 from api.database import init_db, close_db, get_db
+from api.services.logger import (
+    request_logging_middleware, setup_logging, unhandled_exception_handler)
+
+setup_logging()
 
 # Lifespan context manager
 @asynccontextmanager
@@ -32,6 +36,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Request tracing + access log (outermost: times everything below it)
+app.middleware("http")(request_logging_middleware)
+
+# Unhandled exceptions: JSON 500 with request id, no stack trace to the client
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
 
 # Security headers on every response
 @app.middleware("http")

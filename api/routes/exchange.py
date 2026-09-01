@@ -16,6 +16,9 @@ from api.database import get_db
 from api.models import APIKey, User
 from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
 
+import logging
+logger = logging.getLogger("autobuy.exchange")
+
 router = APIRouter()
 
 SUPPORTED_EXCHANGES = {"binance"}
@@ -130,6 +133,8 @@ async def add_or_update_key(
 
     await db.commit()
     await db.refresh(key)
+    logger.info("api_key_upserted", extra={"user_id": str(current_user.id),
+                                           "exchange": payload.exchange})
     return _to_response(key)
 
 
@@ -218,3 +223,5 @@ async def delete_key(
         raise HTTPException(status_code=404, detail="API key not found")
     await db.delete(key)
     await db.commit()
+    logger.info("api_key_deleted", extra={"user_id": str(current_user.id),
+                                          "key_id": str(key_id)})

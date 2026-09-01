@@ -26,6 +26,26 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
 )
 
+# Slow-query surfacing: anything over 1s is worth a warning line.
+import logging
+import time as _time
+
+_slow_log = logging.getLogger("autobuy.db")
+
+
+@event.listens_for(engine.sync_engine, "before_cursor_execute")
+def _q_start(conn, cursor, statement, parameters, context, executemany):
+    context._query_start = _time.perf_counter()
+
+
+@event.listens_for(engine.sync_engine, "after_cursor_execute")
+def _q_end(conn, cursor, statement, parameters, context, executemany):
+    elapsed = _time.perf_counter() - getattr(context, "_query_start", _time.perf_counter())
+    if elapsed > 1.0:
+        _slow_log.warning("slow_query", extra={
+            "duration_s": round(elapsed, 2), "statement": statement[:200]})
+
+
 # Base for models
 Base = declarative_base()
 
