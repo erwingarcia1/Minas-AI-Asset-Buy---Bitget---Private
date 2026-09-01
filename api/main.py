@@ -29,12 +29,38 @@ async def lifespan(app: FastAPI):
     await close_db()
     print("✓ Database closed")
 
+OPENAPI_TAGS = [
+    {"name": "auth", "description": "Registration, login, JWT lifecycle (refresh, logout, password change)."},
+    {"name": "user", "description": "Profile management. `kyc_status` is read-only here — it is owned by the KYC flow."},
+    {"name": "kyc", "description": "Sumsub identity verification: widget token, status sync, review webhook."},
+    {"name": "exchange", "description": "Exchange API keys: encrypted at rest, masked on read, verified against Binance."},
+    {"name": "purchases", "description": "Recurring purchase schedules (DCA). Amounts in USDT; executed by the scheduler."},
+    {"name": "transactions", "description": "Execution history with pagination, filters, and aggregate statistics."},
+    {"name": "dashboard", "description": "Holdings, upcoming purchases, and investment analytics."},
+    {"name": "webhooks", "description": "Inbound provider callbacks."},
+    {"name": "test-purchase", "description": "TEMPORARY manual execution endpoints — removed before launch."},
+]
+
 # Create FastAPI app
 app = FastAPI(
     title="AutoBuy Crypto API",
-    description="Automated crypto purchasing platform",
-    version="1.0.0",
-    lifespan=lifespan
+    version="0.2.0",
+    description=(
+        "Automated cryptocurrency purchasing platform: schedule recurring "
+        "USDT buys (daily/weekly/biweekly/monthly), executed on Binance with "
+        "KYC gating, encrypted key storage, and full transaction history.\n\n"
+        "All protected endpoints expect `Authorization: Bearer <access token>`. "
+        "Validation failures return **422**; rate limits return **429** with "
+        "`Retry-After`. Full guides: `docs/API.md`, `docs/DEPLOYMENT.md`."
+    ),
+    contact={"name": "AutoBuy support", "email": "support@minastech.ca"},
+    license_info={"name": "MIT"},
+    servers=[
+        {"url": "http://localhost:8000", "description": "Development"},
+        {"url": "https://api.autobuy.app", "description": "Production"},
+    ],
+    openapi_tags=OPENAPI_TAGS,
+    lifespan=lifespan,
 )
 
 # Rate limiting (slowapi): default 60/min per key, stricter limits per route
