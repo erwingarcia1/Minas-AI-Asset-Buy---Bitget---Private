@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "AutoBuy",
+    "slug": "autobuy",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "autobuy",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router"],
+    "ios": { "bundleIdentifier": "ca.minastech.autobuy" },
+    "android": { "package": "ca.minastech.autobuy" }
+  }
+}
