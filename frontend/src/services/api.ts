@@ -112,6 +112,36 @@ export const transactions = {
     api.get<TransactionStats>("/api/transactions/stats/summary").then((r) => r.data),
 };
 
+export interface PerformanceHolding {
+  crypto: string; total_amount: number; invested_usdt: number;
+  average_buy_price: number; current_price?: number | null;
+  market_value?: number | null; unrealized_pnl_usdt?: number | null;
+  unrealized_pnl_pct?: number | null;
+}
+export interface Performance {
+  price_available: boolean; holdings: PerformanceHolding[];
+  total_invested_usdt: number; total_market_value?: number | null;
+  total_pnl_usdt?: number | null; total_pnl_pct?: number | null;
+  best_performer?: string | null; worst_performer?: string | null;
+}
+export interface RecurringProjection {
+  schedules: { crypto: string; frequency: string; amount_usdt: number; monthly_usdt: number }[];
+  expected_monthly_usdt: number; projected_annual_usdt: number;
+}
+export interface VolatilityEntry {
+  crypto: string; volatility_30d_pct?: number | null; level: string; recommendation: string;
+}
+
+export const analytics = {
+  performance: () => api.get<Performance>("/api/analytics/performance").then((r) => r.data),
+  recurring: () => api.get<RecurringProjection>("/api/analytics/recurring").then((r) => r.data),
+  volatility: () =>
+    api.get<{ entries: VolatilityEntry[] }>("/api/analytics/volatility").then((r) => r.data),
+  comparison: () =>
+    api.get<{ entries: unknown[]; diversification_score: number }>("/api/analytics/comparison")
+      .then((r) => r.data),
+};
+
 export const dashboard = {
   get: () => api.get<Dashboard>("/api/dashboard/").then((r) => r.data),
   getStats: () => api.get<QuickStats>("/api/dashboard/stats").then((r) => r.data),

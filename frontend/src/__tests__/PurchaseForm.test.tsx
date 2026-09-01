@@ -18,7 +18,7 @@ describe("validateAmount", () => {
 });
 
 describe("PurchaseForm", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it("submits a valid schedule", async () => {
     vi.mocked(purchases.create).mockResolvedValue({ id: "p1" } as never);
