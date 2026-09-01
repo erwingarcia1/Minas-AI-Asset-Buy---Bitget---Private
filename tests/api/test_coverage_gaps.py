@@ -1,0 +1,272 @@
+"""Focused tests for branches the main suites don't reach."""
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import httpx
+import pytest
+from jose import jwt
+
+import api.routes.kyc as kyc_mod
+from api.auth import create_access_token
+from api.config import settings
+from api.models import User
+from api.services.sumsub_client import SumsubError
+from tests.api.conftest import auth_headers
+
+
+# ---------------------------------------------------------------- app lifespan
+
+async def test_lifespan_and_service_endpoints(monkeypatch):
+    from asgi_lifespan import LifespanManager
+    from api.main import app
+    monkeypatch.setattr(settings, "scheduler_enabled", True)
+    async with LifespanManager(app):
+        from api.services.recurring_scheduler import scheduler
+        assert scheduler.running
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as c:
+            h = (await c.get("/health")).json()
+            assert h["status"] == "healthy" and h["scheduler"]["running"] is True
+            root = (await c.get("/")).json()
+            assert root["docs"] == "/docs"
+    assert not scheduler.running, "shutdown must stop the scheduler"
+
+
+async def test_init_db_skipped_in_production(monkeypatch):
+    import api.database as dbm
+    monkeypatch.setenv("API_ENV", "production")
+    called = []
+    class Boom:
+        def begin(self):
+            called.append(1)
+            raise AssertionError("must not touch the engine in production")
+    monkeypatch.setattr(dbm, "engine", Boom())
+    await dbm.init_db()
+    assert not called
+
+
+# ---------------------------------------------------------------- auth refresh
+
+async def test_refresh_happy_path_rotates_tokens(client, user):
+    from api.routes.auth import _create_refresh_token
+    refresh = _create_refresh_token(str(user.id))
+    async with client as c:
+        r = await c.post("/api/auth/refresh", json={"refresh_token": refresh})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["access_token"] and body["refresh_token"]
+
+
+async def test_refresh_for_deleted_user_401(client):
+    from api.routes.auth import _create_refresh_token
+    refresh = _create_refresh_token(str(uuid.uuid4()))
+    async with client as c:
+        assert (await c.post("/api/auth/refresh",
+                             json={"refresh_token": refresh})).status_code == 401
+
+
+async def test_token_without_sub_and_bad_uuid_rejected(client, user):
+    def forged(claims):
+        claims.setdefault("exp", datetime.now(timezone.utc) + timedelta(minutes=5))
+        return jwt.encode(claims, settings.secret_key, algorithm=settings.algorithm)
+    async with client as c:
+        for token in (forged({}), forged({"sub": "not-a-uuid"})):
+            r = await c.get("/api/user/profile",
+                            headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 401
+
+
+# ---------------------------------------------------------------- kyc routes
+
+class FakeSumsub:
+    configured = True
+    def __init__(self, *a, **k): pass
+    async def create_applicant(self, external_id, email): return "applicant-xyz"
+    async def get_access_token(self, external_id): return "sdk-token-abc"
+    async def get_applicant_status(self, applicant_id): return "verified"
+
+
+class UnconfiguredSumsub(FakeSumsub):
+    configured = False
+
+
+class BrokenSumsub(FakeSumsub):
+    async def create_applicant(self, *a): raise SumsubError("boom")
+    async def get_applicant_status(self, *a): raise SumsubError("boom")
+
+
+async def test_kyc_initiate_creates_applicant(client, db, user, monkeypatch):
+    monkeypatch.setattr(kyc_mod, "SumsubClient", FakeSumsub)
+    user.kyc_status = "pending"
+    await db.commit()
+    async with client as c:
+        r = await c.post("/api/kyc/initiate", headers=auth_headers(user))
+    assert r.status_code == 200
+    assert r.json() == {"access_token": "sdk-token-abc", "applicant_id": "applicant-xyz"}
+    await db.refresh(user)
+    assert user.kyc_sumsub_id == "applicant-xyz"
+
+
+async def test_kyc_initiate_when_already_verified_400(client, user, monkeypatch):
+    monkeypatch.setattr(kyc_mod, "SumsubClient", FakeSumsub)
+    async with client as c:  # conftest user is verified
+        assert (await c.post("/api/kyc/initiate",
+                             headers=auth_headers(user))).status_code == 400
+
+
+async def test_kyc_unconfigured_503(client, db, user, monkeypatch):
+    monkeypatch.setattr(kyc_mod, "SumsubClient", UnconfiguredSumsub)
+    user.kyc_status = "pending"
+    user.kyc_sumsub_id = "applicant-1"
+    await db.commit()
+    async with client as c:
+        assert (await c.post("/api/kyc/initiate", headers=auth_headers(user))).status_code == 503
+    from api.main import app
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        assert (await c.get("/api/kyc/status", headers=auth_headers(user))).status_code == 503
+
+
+async def test_kyc_status_syncs_from_provider(client, db, user, monkeypatch):
+    monkeypatch.setattr(kyc_mod, "SumsubClient", FakeSumsub)
+    user.kyc_status = "pending"
+    user.kyc_sumsub_id = "applicant-1"
+    await db.commit()
+    async with client as c:
+        r = await c.get("/api/kyc/status", headers=auth_headers(user))
+    assert r.json() == {"kyc_status": "verified"}
+    await db.refresh(user)
+    assert user.kyc_status == "verified"
+
+
+async def test_kyc_status_without_applicant_returns_stored(client, db, user):
+    user.kyc_status = "pending"
+    user.kyc_sumsub_id = None
+    await db.commit()
+    async with client as c:
+        assert (await c.get("/api/kyc/status",
+                            headers=auth_headers(user))).json() == {"kyc_status": "pending"}
+
+
+async def test_kyc_provider_outage(client, db, user, monkeypatch):
+    monkeypatch.setattr(kyc_mod, "SumsubClient", BrokenSumsub)
+    user.kyc_status = "pending"
+    user.kyc_sumsub_id = "applicant-1"
+    await db.commit()
+    async with client as c:
+        r = await c.get("/api/kyc/status", headers=auth_headers(user))
+        assert r.status_code == 200 and r.json() == {"kyc_status": "pending"}  # stale, not error
+    from api.main import app
+    user.kyc_sumsub_id = None
+    await db.commit()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        assert (await c.post("/api/kyc/initiate", headers=auth_headers(user))).status_code == 502
+
+
+async def test_kyc_webhook_unknown_applicant_ok(client, monkeypatch):
+    import hashlib, hmac as hmac_mod, json
+    monkeypatch.setattr(settings, "sumsub_webhook_secret", "whsec")
+    body = json.dumps({"applicantId": "who-dis", "reviewStatus": "completed",
+                       "reviewResult": {"reviewAnswer": "GREEN"}}).encode()
+    sig = hmac_mod.new(b"whsec", body, hashlib.sha256).hexdigest()
+    async with client as c:
+        r = await c.post("/api/kyc/webhook", content=body,
+                         headers={"x-payload-digest": sig, "content-type": "application/json"})
+    assert r.status_code == 200 and r.json() == {"received": True}
+
+
+# ---------------------------------------------------------------- exchange list/delete
+
+async def test_list_and_delete_own_key(client, db, user, binance_key):
+    H = auth_headers(user)
+    async with client as c:
+        keys = (await c.get("/api/exchange/keys", headers=H)).json()
+        assert len(keys) == 1 and keys[0]["api_key_masked"].count(".") == 3
+        assert (await c.delete(f"/api/exchange/keys/{binance_key.id}", headers=H)).status_code == 204
+        assert (await c.get("/api/exchange/keys", headers=H)).json() == []
+
+
+# ---------------------------------------------------------------- purchases list/get
+
+async def test_purchase_list_and_get(client, user, purchase):
+    H = auth_headers(user)
+    async with client as c:
+        listed = (await c.get("/api/purchases/", headers=H)).json()
+        assert len(listed) == 1 and listed[0]["id"] == str(purchase.id)
+        got = (await c.get(f"/api/purchases/{purchase.id}", headers=H)).json()
+        assert got["crypto"] == "BTC"
+        empty = await c.put(f"/api/purchases/{purchase.id}", headers=H, json={})
+        assert empty.status_code == 400
+
+
+# ---------------------------------------------------------------- test-purchase routes
+
+async def test_manual_execute_route(client, db, user, purchase, binance_key, monkeypatch):
+    from api.services import purchase_service as ps_mod
+    from tests.api.test_purchase_service import FakeBinance
+    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+    H = auth_headers(user)
+    async with client as c:
+        r = await c.post(f"/test-purchase/execute/{purchase.id}", headers=H)
+        assert r.status_code == 200
+        assert r.json()["status"] == "completed" and r.json()["exchange_rate"] == 50000.0
+        missing = await c.post(f"/test-purchase/execute/{uuid.uuid4()}", headers=H)
+        assert missing.status_code == 404
+
+
+async def test_balance_route(client, db, user, binance_key, monkeypatch):
+    class FakeBal:
+        def __init__(self, *a, **k): pass
+        def get_account_balance(self, coin): return 12.5
+    monkeypatch.setattr("api.routes.test_purchase.BinanceClient", FakeBal)
+    H = auth_headers(user)
+    async with client as c:
+        r = await c.get("/test-purchase/balance/btc", headers=H)
+    assert r.json() == {"symbol": "BTC", "balance": 12.5}
+
+
+async def test_balance_route_no_key_404(client, user):
+    async with client as c:
+        assert (await c.get("/test-purchase/balance/btc",
+                            headers=auth_headers(user))).status_code == 404
+
+
+# ---------------------------------------------------------------- misc branches
+
+async def test_resend_webhook_stub(client):
+    async with client as c:
+        r = await c.post("/api/webhooks/resend", json={"type": "email.bounced"})
+    assert r.status_code == 202 and r.json() == {"received": True}
+
+
+def test_binance_account_info_and_balance(monkeypatch):
+    import api.services.binance_client as bc_mod
+    class FakeLegacy:
+        def __init__(self, **kw): pass
+        def _request(self, method, path, params=None, auth=False):
+            return {"canTrade": True, "canWithdraw": False, "permissions": ["SPOT"]}
+        def get_spot_available(self, coin): return 3.14
+    monkeypatch.setattr(bc_mod, "_LegacyClient", lambda **kw: FakeLegacy())
+    c = bc_mod.BinanceClient("k", "s")
+    assert c.get_account_info() == {"can_trade": True, "can_withdraw": False,
+                                    "permissions": ["SPOT"]}
+    assert c.get_account_balance("BTC") == 3.14
+
+
+async def test_email_send_real_path(monkeypatch):
+    import api.services.email_service as em
+    sent = []
+    def handler(request):
+        sent.append(request)
+        return httpx.Response(200, json={"id": "email-1"})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(em.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    svc = em.EmailService(api_key="rk_test")
+    assert await svc._send("a@b.co", "Hi", "<p>x</p>", "x") is True
+    assert sent and b"a@b.co" in sent[0].content
+
+    def fail_handler(request):
+        return httpx.Response(422, json={"message": "invalid from"})
+    monkeypatch.setattr(em.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(fail_handler), **kw))
+    assert await svc._send("a@b.co", "Hi", "<p>x</p>", "x") is False

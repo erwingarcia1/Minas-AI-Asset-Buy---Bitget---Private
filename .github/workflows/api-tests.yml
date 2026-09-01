@@ -1,0 +1,43 @@
+name: API tests
+
+on:
+  push:
+    branches: ["*"]
+    paths: ["api/**", "tests/api/**", "alembic/**", "requirements.txt", ".github/workflows/api-tests.yml"]
+  pull_request:
+    paths: ["api/**", "tests/api/**", "alembic/**", "requirements.txt"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: autobuy
+          POSTGRES_PASSWORD: autobuy_password
+          POSTGRES_DB: autobuy_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U autobuy" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Run API test suite with coverage gate
+        run: pytest tests/api -q --cov=api --cov-fail-under=85
+        env:
+          PYTHONPATH: .
+          SCHEDULER_ENABLED: "0"

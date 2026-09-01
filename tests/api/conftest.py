@@ -1,5 +1,6 @@
 import uuid
 
+import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -49,3 +50,14 @@ async def binance_key(db, user):
     db.add(k)
     await db.commit()
     return k
+
+
+def auth_headers(user) -> dict:
+    from api.auth import create_access_token
+    return {"Authorization": f"Bearer {create_access_token(str(user.id)).access_token}"}
+
+
+@pytest.fixture
+def client():
+    from api.main import app
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
