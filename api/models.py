@@ -19,6 +19,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     kyc_status = Column(String(50), default="pending")  # pending, verified, rejected
     kyc_sumsub_id = Column(String(255), nullable=True)
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     

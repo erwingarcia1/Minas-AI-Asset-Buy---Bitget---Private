@@ -1,7 +1,7 @@
 """Authentication routes: register, login, verify, refresh."""
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError, jwt
@@ -13,7 +13,10 @@ from api.auth import Token, create_access_token, hash_password, verify_password,
 from api.config import settings
 from api.database import get_db
 from api.models import User
-from api.routes.user import UTCModel
+from api.routes.user import UTCModel, get_current_user
+
+import logging
+logger = logging.getLogger("autobuy.auth")
 
 router = APIRouter()
 
@@ -28,29 +31,30 @@ COMMON_PASSWORDS = {
 }
 
 
+def validate_password_strength(value: str) -> str:
+    problems = []
+    if not any(c.islower() for c in value):
+        problems.append("a lowercase letter")
+    if not any(c.isupper() for c in value):
+        problems.append("an uppercase letter")
+    if not any(c.isdigit() for c in value):
+        problems.append("a digit")
+    if not any(not c.isalnum() for c in value):
+        problems.append("a special character")
+    if problems:
+        raise ValueError("password must contain " + ", ".join(problems))
+    # normalize away case and decoration so "Password123!" still matches
+    base = "".join(c for c in value.lower() if c.isalnum())
+    if value.lower() in COMMON_PASSWORDS or base in COMMON_PASSWORDS:
+        raise ValueError("password is too common")
+    return value
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
 
-    @field_validator("password")
-    @classmethod
-    def _strength(cls, value):
-        problems = []
-        if not any(c.islower() for c in value):
-            problems.append("a lowercase letter")
-        if not any(c.isupper() for c in value):
-            problems.append("an uppercase letter")
-        if not any(c.isdigit() for c in value):
-            problems.append("a digit")
-        if not any(not c.isalnum() for c in value):
-            problems.append("a special character")
-        if problems:
-            raise ValueError("password must contain " + ", ".join(problems))
-        # normalize away case and decoration so "Password123!" still matches
-        base = "".join(c for c in value.lower() if c.isalnum())
-        if value.lower() in COMMON_PASSWORDS or base in COMMON_PASSWORDS:
-            raise ValueError("password is too common")
-        return value
+    _strength = field_validator("password")(validate_password_strength)
 
 
 class LoginRequest(BaseModel):
@@ -90,15 +94,35 @@ class RefreshRequest(BaseModel):
 # --------------------------------------------------------------------------
 
 def _create_refresh_token(user_id: str) -> str:
-    """Create a long-lived refresh token (marked with type=refresh)."""
+    """Create a long-lived refresh token (type=refresh, revocable via jti)."""
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "type": "refresh",
+        "jti": uuid4().hex,
         "iat": now,
         "exp": now + timedelta(days=settings.refresh_token_expire_days),
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+REVOKED_PREFIX = "revoked-refresh:"
+
+
+async def _is_revoked(jti: str) -> bool:
+    from api.services.redis_client import get_redis
+    try:
+        return bool(await get_redis().exists(REVOKED_PREFIX + jti))
+    except Exception:
+        logger.warning("revocation check unavailable (Redis down); allowing token")
+        return False
+
+
+async def _revoke(jti: str, exp_ts: int) -> None:
+    from api.services.redis_client import get_redis
+    import time as _time
+    ttl = max(int(exp_ts - _time.time()), 1)
+    await get_redis().setex(REVOKED_PREFIX + jti, ttl, "1")
 
 
 def _token_pair(user_id: str) -> TokenResponse:
@@ -135,6 +159,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email.lower()))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
+        logger.warning("failed login attempt", extra={"email": payload.email.lower()})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -173,8 +198,56 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     except (ValueError, TypeError):
         raise invalid
 
+    jti = decoded.get("jti")
+    if jti and await _is_revoked(jti):
+        raise invalid
+
     # Make sure the user still exists before minting new tokens.
     result = await db.execute(select(User).where(User.id == user_id))
-    if result.scalar_one_or_none() is None:
+    user = result.scalar_one_or_none()
+    if user is None:
         raise invalid
+    if user.password_changed_at is not None and decoded.get("iat") is not None:
+        issued = datetime.fromtimestamp(decoded["iat"], tz=timezone.utc)
+        if issued < user.password_changed_at:
+            raise invalid
     return _token_pair(str(user_id))
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(payload: LogoutRequest):
+    """Revoke a refresh token. The short-lived access token simply expires."""
+    try:
+        decoded = jwt.decode(
+            payload.refresh_token, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if decoded.get("type") != "refresh" or not decoded.get("jti"):
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    await _revoke(decoded["jti"], int(decoded.get("exp", 0)))
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+    _strength = field_validator("new_password")(validate_password_strength)
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change the password and invalidate every token issued before now."""
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    current_user.password_hash = hash_password(payload.new_password)
+    current_user.password_changed_at = datetime.now(timezone.utc)
+    await db.commit()
+    logger.info("password changed", extra={"user_id": str(current_user.id)})

@@ -1,13 +1,14 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from api.config import settings
+from api.config import enforce_production_secrets, settings
 from api.database import init_db, close_db, get_db
 
 # Lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    enforce_production_secrets(settings)
     await init_db()
     print("✓ Database initialized")
     if settings.scheduler_enabled:
@@ -31,6 +32,20 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Security headers on every response
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if settings.api_env == "production":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
 
 # Add CORS middleware
 app.add_middleware(

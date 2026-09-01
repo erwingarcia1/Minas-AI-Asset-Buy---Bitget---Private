@@ -26,8 +26,10 @@ SUPPORTED_EXCHANGES = {"binance"}
 # --------------------------------------------------------------------------
 
 def _fernet() -> Fernet:
-    """Fernet instance keyed off the app SECRET_KEY (sha256 -> urlsafe b64)."""
-    digest = hashlib.sha256(settings.secret_key.encode()).digest()
+    """Fernet keyed off ENCRYPTION_KEY (falling back to SECRET_KEY in dev),
+    sha256-derived to a urlsafe-b64 32-byte key."""
+    material = settings.encryption_key or settings.secret_key
+    digest = hashlib.sha256(material.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
 
 

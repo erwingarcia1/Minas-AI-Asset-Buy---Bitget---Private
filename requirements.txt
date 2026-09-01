@@ -26,6 +26,9 @@ passlib[argon2]==1.7.4
 # Scheduling
 apscheduler==3.10.4
 
+# Redis (rate limiting, token revocation, locks)
+redis==5.0.1
+
 # KYC (Sumsub)
 #sumsub-python-sdk==1.0.0
 

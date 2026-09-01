@@ -6,7 +6,13 @@ from pydantic import BaseModel
 from api.config import settings
 
 # Password hashing context
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["argon2"],
+    deprecated="auto",
+    argon2__time_cost=2,
+    argon2__memory_cost=65536,
+    argon2__parallelism=1,
+)
 
 # Token schemas
 class Token(BaseModel):

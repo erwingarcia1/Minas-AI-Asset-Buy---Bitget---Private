@@ -79,6 +79,10 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise unauthorized
+    if user.password_changed_at is not None and payload.get("iat") is not None:
+        issued = datetime.fromtimestamp(payload["iat"], tz=timezone.utc)
+        if issued < user.password_changed_at:
+            raise unauthorized  # token predates the last password change
     return user
 
 
