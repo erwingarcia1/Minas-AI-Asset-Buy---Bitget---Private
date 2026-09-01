@@ -1,0 +1,35 @@
+# AutoBuy Crypto Platform API image.
+# (The legacy sub-account bot keeps the root ./Dockerfile; this one is the
+# FastAPI platform: build with  docker build -f Dockerfile.api -t autobuy-api .)
+FROM python:3.12-slim
+
+RUN useradd --create-home --shell /usr/sbin/nologin autobuy
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# The platform reuses the legacy exchange clients at the repo root.
+COPY binance_client.py exchange_errors.py ./
+COPY api/ api/
+COPY alembic/ alembic/
+COPY alembic.ini .
+COPY scripts/ scripts/
+COPY deployment/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && chown -R autobuy /app
+
+USER autobuy
+EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status == 200 else 1)"
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["gunicorn", "api.main:app", \
+     "--workers", "4", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--bind", "0.0.0.0:8000", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--timeout", "60", \
+     "--graceful-timeout", "30"]

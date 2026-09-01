@@ -1,0 +1,31 @@
+# STUB -- full Kubernetes deployment is Phase 4+ work. Placeholders only;
+# docker-compose (profile "prod") is the supported deployment today.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autobuy-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: autobuy-api }
+  template:
+    metadata:
+      labels: { app: autobuy-api }
+    spec:
+      containers:
+        - name: api
+          image: autobuy-api:latest   # push to your registry first
+          ports: [{ containerPort: 8000 }]
+          envFrom:
+            - secretRef: { name: autobuy-secrets }      # TODO create
+            - configMapRef: { name: autobuy-config }    # TODO create
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autobuy-api
+spec:
+  selector: { app: autobuy-api }
+  ports: [{ port: 80, targetPort: 8000 }]

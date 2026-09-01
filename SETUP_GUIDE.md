@@ -73,3 +73,31 @@ alembic upgrade head # apply the real fixes (002+)
 |---|---|
 | `001` | Baseline: users, api_keys, recurring_purchases, transactions |
 | `002` | `transactions.recurring_purchase_id` FK → `ON DELETE SET NULL` (deleting a schedule no longer destroys its transaction history) · all datetime columns → `timestamptz` (existing values interpreted as UTC) · index on `transactions (user_id, created_at)` |
+
+## Production deployment
+
+The platform ships as a container (`Dockerfile.api` — the root `Dockerfile`
+still belongs to the legacy bot). The entrypoint applies migrations, then
+serves with **gunicorn + 4 uvicorn workers** (single-worker serving serializes
+~15–30ms of CPU per request; 4 workers took p95 from 1.6s to ~250ms in our
+load check).
+
+```bash
+# one-off build + run
+docker build -f Dockerfile.api -t autobuy-api:latest .
+docker run -p 8000:8000 -e API_ENV=production \
+  -e DATABASE_URL=... -e REDIS_URL=... \
+  -e SECRET_KEY=... -e ENCRYPTION_KEY=... autobuy-api:latest
+
+# or the full stack (reads SECRET_KEY/ENCRYPTION_KEY from .env — required)
+docker compose --profile prod up -d --build
+docker compose --profile monitoring up -d   # optional Prometheus on :9090
+```
+
+Production refuses to boot on a default/short `SECRET_KEY` or missing
+`ENCRYPTION_KEY`. Orders are **simulated** unless `AUTOBUY_DRY_RUN=0`.
+
+- Reverse proxy/TLS: `deployment/nginx.conf` (keeps `/metrics` private)
+- Metrics + alert thresholds + runbook: `docs/ALERTING.md`
+- Dev in-container reload: `docker-compose.dev.yml` override
+- Kubernetes: `deployment/kubernetes.yaml` is a stub; compose is the supported path

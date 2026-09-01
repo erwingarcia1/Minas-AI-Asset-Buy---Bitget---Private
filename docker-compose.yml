@@ -34,3 +34,49 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:
+
+  # ------------------------------------------------------------------
+  # Platform API (production profile):
+  #   docker compose --profile prod up -d --build
+  # Dev runs uvicorn on the host against the postgres/redis above, or use
+  # docker-compose.dev.yml as an override for in-container reload.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: autobuy-api:latest
+    container_name: autobuy_api
+    profiles: ["prod"]
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      API_ENV: production
+      DATABASE_URL: postgresql+asyncpg://autobuy:autobuy_password@postgres:5432/autobuy_db
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:?set in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set in .env}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SUMSUB_APP_TOKEN: ${SUMSUB_APP_TOKEN:-}
+      SUMSUB_SECRET_KEY: ${SUMSUB_SECRET_KEY:-}
+      SUMSUB_WEBHOOK_SECRET: ${SUMSUB_WEBHOOK_SECRET:-}
+      AUTOBUY_DRY_RUN: ${AUTOBUY_DRY_RUN:-1}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Optional metrics scraper:  docker compose --profile monitoring up -d
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: autobuy_prometheus
+    profiles: ["monitoring"]
+    volumes:
+      - ./deployment/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"

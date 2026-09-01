@@ -1,0 +1,11 @@
+# Development override: in-container live reload against the compose DB.
+#   docker compose --profile prod -f docker-compose.yml -f docker-compose.dev.yml up api
+services:
+  api:
+    volumes:
+      - ./api:/app/api
+      - ./alembic:/app/alembic
+    environment:
+      API_ENV: development
+      AUTOBUY_DRY_RUN: "1"
+    command: ["uvicorn", "api.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
