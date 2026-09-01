@@ -1,6 +1,6 @@
 # AutoBuy Crypto Platform — Production Readiness Report
 
-**Report generated:** 2026-09-01 · **Version:** 0.3.0 · **Target launch window:** Oct 26–30, 2026
+**Report generated:** 2026-09-01 · **Version:** 0.4.1 · **Target launch window:** Oct 26–30, 2026
 **Status:** 🟡 **Staging-ready now — production launch gated on the prerequisites checklist below**
 
 ## Phase completion status
@@ -33,12 +33,20 @@
 - [x] Email campaigns: welcome, first purchase, weekly digest, milestones (Jinja2, 7 templates × HTML+text)
 - [x] Advanced analytics: live P&L, diversification, spend projections, volatility-based DCA guidance
 
+### Phase 5: Enterprise Features ✅ COMPLETE (Sprints 5–6)
+- [x] Advanced purchases: limit orders (fail-closed price gates, expiry), DCA bands, one-time buys, spend-neutral volatility-adaptive DCA, rebalancing plans with buy-only drift detection
+- [x] Mobile app implemented (auth, dashboard, purchases, activity, settings; offline cache + queued sync)
+- [x] Admin dashboard: RBAC, stats, user management (suspend/delete/KYC-override with audit), transaction audit + CSV, live alerts, scheduler pause/resume
+- [x] Notifications: Twilio SMS + FCM push (credential-gated), preferences, quiet hours with critical override, audit history
+- [x] Tax reporting (FIFO lots, CSV + PDF) and annualized-ROI performance reports
+- [x] Integrations: multi-exchange execution (Bitget/Bybit/OKX via the proven legacy clients), HMAC-signed outbound webhooks, Slack ops alerts
+
 ## Test & quality metrics
 
 | Metric | Value |
 |---|---|
-| API tests | **152 passed** (+2 perf tests run per-process) |
-| Frontend tests | 9 passed · TypeScript strict, clean |
+| API tests | **190 passed** (+2 perf tests run per-process) |
+| Frontend tests | 9 web + 7 mobile logic · TypeScript strict, clean |
 | Coverage | **93%** on `api/` (CI gate at 85%, GitHub Actions with Postgres+Redis services) |
 | Security | bandit clean at high severity; secrets provably absent from logs |
 | Load (4 workers) | p50 18ms / **p95 245ms** @ 10 concurrent; 1,000-purchase scheduler backlog in 32s, zero duplicates |
