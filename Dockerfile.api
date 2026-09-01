@@ -15,6 +15,7 @@ COPY api/ api/
 COPY alembic/ alembic/
 COPY alembic.ini .
 COPY scripts/ scripts/
+COPY templates/ templates/
 COPY deployment/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && chown -R autobuy /app
 
