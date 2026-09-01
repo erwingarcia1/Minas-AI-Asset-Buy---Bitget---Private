@@ -7,7 +7,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "typecheck": "tsc --noEmit",
-    "build": "eas build"
+    "build": "eas build",
+    "test": "vitest run __tests__"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "~1.23.1",
@@ -23,7 +24,8 @@
   "devDependencies": {
     "@babel/core": "^7.24.0",
     "@types/react": "~18.2.66",
-    "typescript": "~5.4.3"
+    "typescript": "~5.4.3",
+    "vitest": "^1.4.0"
   },
   "private": true
 }

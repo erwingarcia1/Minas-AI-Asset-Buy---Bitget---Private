@@ -58,6 +58,34 @@ async function cachedGet<T>(path: string): Promise<T> {
   }
 }
 
+import { withRetry } from "./logic";
+
+const QUEUE_KEY = "autobuy.sync-queue";
+
+/** Queue a failed mutation for later background sync. */
+export async function enqueueForSync(method: string, path: string, body: unknown): Promise<void> {
+  const raw = (await AsyncStorage.getItem(QUEUE_KEY)) ?? "[]";
+  const queue = JSON.parse(raw) as { method: string; path: string; body: unknown }[];
+  queue.push({ method, path, body });
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue.slice(-50)));
+}
+
+/** Replay queued mutations (call on app start / connectivity regained). */
+export async function flushSyncQueue(): Promise<number> {
+  const raw = (await AsyncStorage.getItem(QUEUE_KEY)) ?? "[]";
+  const queue = JSON.parse(raw) as { method: string; path: string; body: unknown }[];
+  const remaining: typeof queue = [];
+  for (const item of queue) {
+    try {
+      await withRetry(() => api.request({ method: item.method, url: item.path, data: item.body }));
+    } catch {
+      remaining.push(item);
+    }
+  }
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+  return queue.length - remaining.length;
+}
+
 export const auth = {
   login: async (email: string, password: string) => {
     const { data } = await api.post<TokenPair>("/api/auth/login", { email, password });
