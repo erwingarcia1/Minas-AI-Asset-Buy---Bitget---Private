@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     
     # Sumsub (KYC)
     sumsub_app_token: str = os.getenv("SUMSUB_APP_TOKEN", "")
+    sumsub_secret_key: str = os.getenv("SUMSUB_SECRET_KEY", "")
+    sumsub_webhook_secret: str = os.getenv("SUMSUB_WEBHOOK_SECRET", "")
+    sumsub_level_name: str = os.getenv("SUMSUB_LEVEL_NAME", "basic-kyc-level")
     sumsub_api_url: str = os.getenv("SUMSUB_API_URL", "https://api.sumsub.com")
     
     # JWT

@@ -103,17 +103,9 @@ class UserPublicProfile(UTCModel):
 
 
 class ProfileUpdateRequest(BaseModel):
+    # kyc_status is intentionally absent: it is owned by the KYC flow
+    # (api/routes/kyc.py) and must never be user-writable.
     email: Optional[EmailStr] = None
-    kyc_status: Optional[str] = None
-
-    @field_validator("kyc_status")
-    @classmethod
-    def _valid_kyc(cls, value):
-        if value is not None and value not in VALID_KYC_STATUSES:
-            raise ValueError(
-                f"kyc_status must be one of: {', '.join(sorted(VALID_KYC_STATUSES))}"
-            )
-        return value
 
 
 # --------------------------------------------------------------------------
@@ -133,7 +125,7 @@ async def update_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """Update the authenticated user's email and/or KYC status."""
-    if payload.email is None and payload.kyc_status is None:
+    if payload.email is None:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     if payload.email is not None:
@@ -143,9 +135,6 @@ async def update_profile(
             if existing.scalar_one_or_none() is not None:
                 raise HTTPException(status_code=400, detail="Email already in use")
             current_user.email = new_email
-
-    if payload.kyc_status is not None:
-        current_user.kyc_status = payload.kyc_status
 
     current_user.updated_at = to_db_datetime(utc_now())
     await db.commit()
