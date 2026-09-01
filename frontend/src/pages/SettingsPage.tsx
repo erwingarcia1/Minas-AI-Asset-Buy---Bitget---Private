@@ -1,5 +1,6 @@
 import APIKeys from "../components/Settings/APIKeys";
 import KYC from "../components/Settings/KYC";
+import Reports from "../components/Reports";
 import Profile from "../components/Settings/Profile";
 
 export default function SettingsPage() {
@@ -8,6 +9,7 @@ export default function SettingsPage() {
       <Profile />
       <APIKeys />
       <KYC />
+      <Reports />
     </div>
   );
 }

@@ -134,6 +134,8 @@ app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 app.include_router(purchases.router, prefix="/api/purchases", tags=["purchases"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+from api.routes import reports
+app.include_router(reports.router, prefix="/api/reports", tags=["dashboard"])
 from api.routes import notifications
 app.include_router(notifications.router, prefix="/api/notifications", tags=["user"])
 from api.routes import admin
