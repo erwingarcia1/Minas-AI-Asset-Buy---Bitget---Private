@@ -1,13 +1,5 @@
-import Holdings from "../components/Dashboard/Holdings";
-import Stats from "../components/Dashboard/Stats";
-import PurchaseHistory from "../components/Dashboard/PurchaseHistory";
+import Dashboard from "../components/Dashboard/Dashboard";
 
 export default function DashboardPage() {
-  return (
-    <div className="space-y-6 p-6">
-      <Stats />
-      <Holdings />
-      <PurchaseHistory />
-    </div>
-  );
+  return <div className="p-6"><Dashboard /></div>;
 }
