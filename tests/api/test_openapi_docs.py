@@ -34,6 +34,7 @@ async def test_openapi_schema_valid_and_complete():
         for path, ops in spec["paths"].items()
         for method, op in ops.items()
         if method in ("get", "post", "put", "delete", "patch")
+        and not path.startswith("/test-only")   # injected by the logging tests
         and not (op.get("description") or op.get("summary"))
     ]
     assert undocumented == [], f"undocumented operations: {undocumented}"
@@ -46,5 +47,5 @@ async def test_all_router_endpoints_have_docstrings():
     from fastapi.routing import APIRoute
     missing = [r.path for r in app.routes
                if isinstance(r, APIRoute) and not (r.endpoint.__doc__ or "").strip()
-               and r.path not in ("/metrics",)]
+               and r.path != "/metrics" and not r.path.startswith("/test-only")]
     assert missing == [], f"routes lacking docstrings: {missing}"
