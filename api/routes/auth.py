@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,9 +22,35 @@ router = APIRouter()
 # Schemas
 # --------------------------------------------------------------------------
 
+COMMON_PASSWORDS = {
+    "password", "password1", "password123", "12345678", "123456789", "1234567890",
+    "qwerty123", "letmein123", "admin123", "welcome123", "iloveyou1", "sunshine1",
+}
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def _strength(cls, value):
+        problems = []
+        if not any(c.islower() for c in value):
+            problems.append("a lowercase letter")
+        if not any(c.isupper() for c in value):
+            problems.append("an uppercase letter")
+        if not any(c.isdigit() for c in value):
+            problems.append("a digit")
+        if not any(not c.isalnum() for c in value):
+            problems.append("a special character")
+        if problems:
+            raise ValueError("password must contain " + ", ".join(problems))
+        # normalize away case and decoration so "Password123!" still matches
+        base = "".join(c for c in value.lower() if c.isalnum())
+        if value.lower() in COMMON_PASSWORDS or base in COMMON_PASSWORDS:
+            raise ValueError("password is too common")
+        return value
 
 
 class LoginRequest(BaseModel):

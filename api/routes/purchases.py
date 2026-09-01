@@ -4,10 +4,11 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.config import settings
 from api.database import get_db
 from api.models import RecurringPurchase, User
 from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
@@ -15,6 +16,43 @@ from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
 router = APIRouter()
 
 VALID_FREQUENCIES = {"daily", "weekly", "biweekly", "monthly"}
+
+# Binance SPOT effective minimum; sanity ceiling against fat-finger schedules.
+MIN_AMOUNT_USDT = 10.0
+MAX_AMOUNT_USDT = 1_000_000.0
+
+# Address shape per chain. Deliberately permissive within each chain's format —
+# this catches wrong-chain and mangled addresses, not typos within a valid shape.
+ADDRESS_PATTERNS = {
+    "BTC": r"^(1|3)[a-km-zA-HJ-NP-Z1-9]{25,34}$|^bc1[a-z0-9]{25,90}$",
+    "ETH": r"^0x[a-fA-F0-9]{40}$",
+    "BNB": r"^0x[a-fA-F0-9]{40}$|^bnb1[a-z0-9]{38}$",
+    "SOL": r"^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+    "XRP": r"^r[1-9A-HJ-NP-Za-km-z]{24,34}$",
+    "ADA": r"^addr1[a-z0-9]{50,120}$",
+    "DOGE": r"^D[a-km-zA-HJ-NP-Z1-9]{25,34}$",
+    "LTC": r"^(L|M)[a-km-zA-HJ-NP-Z1-9]{26,33}$|^ltc1[a-z0-9]{25,90}$",
+}
+
+
+def supported_cryptos() -> set:
+    return {c.strip().upper() for c in settings.supported_cryptos.split(",") if c.strip()}
+
+
+def validate_crypto(value: str) -> str:
+    value = value.strip().upper()
+    allowed = supported_cryptos()
+    if value not in allowed:
+        raise ValueError(f"crypto must be one of: {', '.join(sorted(allowed))}")
+    return value
+
+
+def validate_withdrawal_address(crypto: str, address: str) -> None:
+    """Raises ValueError when `address` does not fit `crypto`'s address format."""
+    import re
+    pattern = ADDRESS_PATTERNS.get(crypto.upper())
+    if pattern and not re.match(pattern, address):
+        raise ValueError(f"withdrawal_address is not a valid {crypto.upper()} address")
 
 
 def _validate_frequency(value: str) -> str:
@@ -32,32 +70,38 @@ def _validate_frequency(value: str) -> str:
 
 class PurchaseCreate(BaseModel):
     crypto: str = Field(min_length=2, max_length=10)
-    amount_usdt: float = Field(gt=0)
+    amount_usdt: float = Field(ge=MIN_AMOUNT_USDT, le=MAX_AMOUNT_USDT)
     frequency: str
     withdrawal_address: Optional[str] = Field(default=None, max_length=255)
 
     @field_validator("crypto")
     @classmethod
-    def _upper(cls, value):
-        return value.strip().upper()
+    def _crypto(cls, value):
+        return validate_crypto(value)
 
     @field_validator("frequency")
     @classmethod
     def _freq(cls, value):
         return _validate_frequency(value)
 
+    @model_validator(mode="after")
+    def _address_matches_crypto(self):
+        if self.withdrawal_address:
+            validate_withdrawal_address(self.crypto, self.withdrawal_address)
+        return self
+
 
 class PurchaseUpdate(BaseModel):
     crypto: Optional[str] = Field(default=None, min_length=2, max_length=10)
-    amount_usdt: Optional[float] = Field(default=None, gt=0)
+    amount_usdt: Optional[float] = Field(default=None, ge=MIN_AMOUNT_USDT, le=MAX_AMOUNT_USDT)
     frequency: Optional[str] = None
     withdrawal_address: Optional[str] = Field(default=None, max_length=255)
     enabled: Optional[bool] = None
 
     @field_validator("crypto")
     @classmethod
-    def _upper(cls, value):
-        return value.strip().upper() if value is not None else value
+    def _crypto(cls, value):
+        return validate_crypto(value) if value is not None else value
 
     @field_validator("frequency")
     @classmethod
@@ -107,6 +151,17 @@ async def create_purchase(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a recurring purchase; the first buy is scheduled for tomorrow."""
+    dup = (await db.execute(
+        select(RecurringPurchase).where(
+            RecurringPurchase.user_id == current_user.id,
+            RecurringPurchase.crypto == payload.crypto,
+            RecurringPurchase.enabled.is_(True),
+        ))).scalars().first()
+    if dup is not None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"An active {payload.crypto} schedule already exists (id {dup.id}); "
+                   "edit or disable it instead of creating a duplicate")
     purchase = RecurringPurchase(
         user_id=current_user.id,
         crypto=payload.crypto,
@@ -161,6 +216,12 @@ async def update_purchase(
         raise HTTPException(status_code=400, detail="No fields to update")
     for field, value in updates.items():
         setattr(purchase, field, value)
+    if purchase.withdrawal_address:
+        try:
+            validate_withdrawal_address(purchase.crypto, purchase.withdrawal_address)
+        except ValueError as exc:
+            await db.rollback()
+            raise HTTPException(status_code=422, detail=str(exc))
     purchase.updated_at = to_db_datetime(utc_now())
 
     await db.commit()

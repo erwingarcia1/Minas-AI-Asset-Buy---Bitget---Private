@@ -21,7 +21,7 @@ def _validate_status(value: str) -> str:
     value = value.lower()
     if value not in VALID_STATUSES:
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=f"status must be one of: {', '.join(sorted(VALID_STATUSES))}",
         )
     return value

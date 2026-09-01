@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     
+    # Trading
+    supported_cryptos: str = os.getenv(
+        "SUPPORTED_CRYPTOS", "BTC,ETH,SOL,BNB,XRP,ADA,DOGE,LTC")
+
     # Scheduler
     scheduler_enabled: bool = os.getenv("SCHEDULER_ENABLED", "1") not in ("0", "false", "no")
     scheduler_poll_seconds: int = int(os.getenv("SCHEDULER_POLL_SECONDS", "60"))
