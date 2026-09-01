@@ -10,8 +10,17 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     print("✓ Database initialized")
+    if settings.scheduler_enabled:
+        from api.services.recurring_scheduler import scheduler
+        scheduler.poll_seconds = settings.scheduler_poll_seconds
+        scheduler.dry_run = settings.autobuy_dry_run
+        scheduler.start()
+        print(f"✓ Scheduler started (dry_run={settings.autobuy_dry_run})")
     yield
     # Shutdown
+    if settings.scheduler_enabled:
+        from api.services.recurring_scheduler import scheduler
+        scheduler.stop()
     await close_db()
     print("✓ Database closed")
 
@@ -36,10 +45,16 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     """Health check endpoint for monitoring."""
+    from api.services.recurring_scheduler import scheduler
     return {
         "status": "healthy",
         "environment": settings.api_env,
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "scheduler": {
+            "running": scheduler.running,
+            "dry_run": scheduler.dry_run,
+            "last_tick_at": scheduler.last_tick_at.isoformat() if scheduler.last_tick_at else None,
+        },
     }
 
 # Root endpoint

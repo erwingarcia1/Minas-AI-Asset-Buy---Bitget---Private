@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     
+    # Scheduler
+    scheduler_enabled: bool = os.getenv("SCHEDULER_ENABLED", "1") not in ("0", "false", "no")
+    scheduler_poll_seconds: int = int(os.getenv("SCHEDULER_POLL_SECONDS", "60"))
+    # Live trading is opt-in: orders are simulated unless AUTOBUY_DRY_RUN=0.
+    autobuy_dry_run: bool = os.getenv("AUTOBUY_DRY_RUN", "1") not in ("0", "false", "no")
+
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     
