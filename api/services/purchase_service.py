@@ -75,6 +75,8 @@ class PurchaseService:
                                  APIKey.exchange == "binance"))).scalar_one_or_none()
         if key is None:
             return await fail("no Binance API key on file")
+        if not key.verified:
+            return await fail("Binance API key not verified — verify it under Exchange settings")
 
         client = BinanceClient(decrypt_value(key.encrypted_api_key),
                                decrypt_value(key.encrypted_api_secret))

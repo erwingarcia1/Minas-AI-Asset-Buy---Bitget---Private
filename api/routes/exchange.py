@@ -145,6 +145,62 @@ async def list_keys(
     return [_to_response(k) for k in result.scalars().all()]
 
 
+class KeyVerifyResponse(BaseModel):
+    verified: bool
+    result: str  # ok | invalid_key | no_trade_permission | error
+    detail: str
+    withdrawal_permission_warning: bool = False
+
+
+@router.post("/keys/{key_id}/verify", response_model=KeyVerifyResponse)
+async def verify_key(
+    key_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check the stored key against Binance and mark it verified if usable."""
+    import asyncio
+    from api.services.binance_client import BinanceClient, BinanceClientError
+
+    result = await db.execute(
+        select(APIKey).where(APIKey.id == key_id, APIKey.user_id == current_user.id)
+    )
+    key = result.scalar_one_or_none()
+    if key is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    client = BinanceClient(
+        decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret))
+    try:
+        info = await asyncio.to_thread(client.get_account_info)
+    except BinanceClientError as exc:
+        key.verified = False
+        await db.commit()
+        invalid = str(exc.code) in ("-2014", "-2015", "-1022")
+        return KeyVerifyResponse(
+            verified=False,
+            result="invalid_key" if invalid else "error",
+            detail=("Key rejected by Binance — wrong key/secret, or this server's IP "
+                    "is not on the key's allowlist") if invalid else str(exc),
+        )
+
+    if not info["can_trade"] or "SPOT" not in info["permissions"]:
+        key.verified = False
+        await db.commit()
+        return KeyVerifyResponse(
+            verified=False, result="no_trade_permission",
+            detail="Key authenticates but lacks spot trading permission")
+
+    key.verified = True
+    key.updated_at = to_db_datetime(utc_now())
+    await db.commit()
+    return KeyVerifyResponse(
+        verified=True, result="ok",
+        detail="Key verified: spot trading enabled",
+        withdrawal_permission_warning=info["can_withdraw"],
+    )
+
+
 @router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_key(
     key_id: UUID,

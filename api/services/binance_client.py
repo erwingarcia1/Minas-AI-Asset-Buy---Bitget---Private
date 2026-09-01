@@ -31,6 +31,19 @@ class BinanceClient:
         except ExchangeAPIError as exc:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
 
+    def get_account_info(self) -> dict:
+        """Account trade/withdraw permissions (authenticated). Used to verify keys."""
+        try:
+            data = self._client._request(
+                "GET", "/api/v3/account", params={"omitZeroBalances": "true"}, auth=True)
+            return {
+                "can_trade": bool(data.get("canTrade")),
+                "can_withdraw": bool(data.get("canWithdraw")),
+                "permissions": data.get("permissions") or [],
+            }
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(str(exc), str(getattr(exc, "code", "BINANCE"))) from exc
+
     def get_account_balance(self, coin: str) -> float:
         """Available (free) spot balance of `coin` (authenticated)."""
         try:

@@ -44,7 +44,8 @@ async def purchase(db, user):
 async def binance_key(db, user):
     k = APIKey(user_id=user.id, exchange="binance",
                encrypted_api_key=encrypt_value("test-api-key-000001"),
-               encrypted_api_secret=encrypt_value("test-api-secret-01"))
+               encrypted_api_secret=encrypt_value("test-api-secret-01"),
+               verified=True)
     db.add(k)
     await db.commit()
     return k
