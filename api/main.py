@@ -75,6 +75,8 @@ app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 app.include_router(purchases.router, prefix="/api/purchases", tags=["purchases"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+from api.routes import webhooks
+app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
 
 # TEMPORARY (remove in Phase 3): manual purchase-execution routes for testing
 from api.routes import test_purchase

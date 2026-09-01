@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.models import APIKey, RecurringPurchase, Transaction, User
 from api.routes.exchange import decrypt_value
 from api.services.binance_client import BinanceClient, BinanceClientError
+from api.services.email_service import email_service
 
 logger = logging.getLogger("autobuy.purchase")
 
@@ -110,4 +111,11 @@ class PurchaseService:
         self.db.add(tx)
         await self.db.commit()
         await self.db.refresh(tx)
+        try:
+            user = (await self.db.execute(
+                select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user is not None:
+                await email_service.send_purchase_notification(user.email, purchase, tx)
+        except Exception:
+            logger.exception("purchase notification email failed (tx %s)", tx.id)
         return tx
