@@ -20,7 +20,7 @@ class User(Base):
     kyc_status = Column(String(50), default="pending")  # pending, verified, rejected
     kyc_sumsub_id = Column(String(255), nullable=True)
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=utcnow)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     
     # Relationships
@@ -47,6 +47,10 @@ class APIKey(Base):
 
 class RecurringPurchase(Base):
     __tablename__ = "recurring_purchases"
+    __table_args__ = (
+        # the scheduler's due-purchases scan
+        Index("ix_recurring_purchases_enabled_next", "enabled", "next_purchase_date"),
+    )
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -70,6 +74,9 @@ class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
         Index("ix_transactions_user_id_created_at", "user_id", "created_at"),
+        Index("ix_transactions_user_id_status", "user_id", "status"),
+        Index("ix_transactions_executed_at", "executed_at"),
+        Index("ix_transactions_binance_order_id", "binance_order_id"),
     )
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

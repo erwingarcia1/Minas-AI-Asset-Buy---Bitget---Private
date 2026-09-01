@@ -1,5 +1,7 @@
 import os
 os.environ.setdefault("RATE_LIMIT_ENABLED", "0")
+os.environ.setdefault("AUTOBUY_DB_POOL", "null")  # pooled conns pin to one event loop
+os.environ.setdefault("RESEND_API_KEY", "")  # never attempt real email sends from tests
 
 import uuid
 

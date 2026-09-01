@@ -1,6 +1,5 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.pool import NullPool
 from sqlalchemy import event
 import os
 from dotenv import load_dotenv
@@ -12,12 +11,18 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://autobuy:autobuy_password@localhost:5432/autobuy_db"
 )
 
-# Create async engine
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    poolclass=NullPool,  # Use NullPool for better async compatibility
-)
+# Real connection pool by default (NullPool reconnects on every session,
+# which dominates latency under load). Tests set AUTOBUY_DB_POOL=null because
+# pooled asyncpg connections are bound to the event loop that created them
+# and pytest-asyncio gives every test a fresh loop.
+if os.getenv("AUTOBUY_DB_POOL", "").lower() == "null":
+    from sqlalchemy.pool import NullPool
+    _pool_kwargs = {"poolclass": NullPool}
+else:
+    _pool_kwargs = {"pool_size": 20, "max_overflow": 10,
+                    "pool_recycle": 3600, "pool_pre_ping": True}
+
+engine = create_async_engine(DATABASE_URL, echo=False, **_pool_kwargs)
 
 # Session factory
 AsyncSessionLocal = async_sessionmaker(

@@ -72,7 +72,7 @@ class TransactionStats(BaseModel):
 @limiter.limit("30/minute", key_func=user_or_ip_key)
 async def list_transactions(
     request: Request,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status_filter: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
@@ -133,7 +133,7 @@ async def transaction_stats(
 @router.get("/crypto/{crypto}", response_model=List[TransactionResponse])
 async def transactions_by_crypto(
     crypto: str,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -155,7 +155,7 @@ async def transactions_by_crypto(
 @router.get("/status/{tx_status}", response_model=List[TransactionResponse])
 async def transactions_by_status(
     tx_status: str,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

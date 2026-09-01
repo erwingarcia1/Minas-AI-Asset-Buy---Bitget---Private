@@ -21,7 +21,8 @@ class EmailService:
         self.from_email = from_email or settings.support_email
 
     async def _send(self, to: str, subject: str, html: str, text: str) -> bool:
-        if not self.api_key:
+        if not self.api_key or self.api_key.startswith("your_"):
+            # unset or the .env.example placeholder: treat as unconfigured
             logger.info("email skipped (no RESEND_API_KEY): to=%s subject=%r", to, subject)
             return False
         try:

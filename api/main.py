@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from api.config import enforce_production_secrets, settings
 from api.database import init_db, close_db, get_db
 from api.services.logger import (
-    request_logging_middleware, setup_logging, unhandled_exception_handler)
+    platform_middleware, setup_logging, unhandled_exception_handler)
 
 setup_logging()
 
@@ -48,37 +48,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 
-# Oversized payloads are refused before any parsing (1MB default)
-@app.middleware("http")
-async def body_size_guard(request, call_next):
-    length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > settings.max_body_bytes:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=413,
-                            content={"detail": "Request body too large"})
-    return await call_next(request)
-
-
-# Request tracing + access log (outermost: times everything below it)
-app.middleware("http")(request_logging_middleware)
+# Tracing + body-size guard + security headers, one middleware pass
+app.middleware("http")(platform_middleware)
 
 # Unhandled exceptions: JSON 500 with request id, no stack trace to the client
 app.add_exception_handler(Exception, unhandled_exception_handler)
-
-
-# Security headers on every response
-@app.middleware("http")
-async def security_headers(request, call_next):
-    response = await call_next(request)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("X-XSS-Protection", "1; mode=block")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
-    if settings.api_env == "production":
-        response.headers.setdefault(
-            "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-    return response
-
 
 # Add CORS middleware
 app.add_middleware(

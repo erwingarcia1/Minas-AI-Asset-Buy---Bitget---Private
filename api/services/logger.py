@@ -43,17 +43,39 @@ def setup_logging() -> None:
 access_logger = logging.getLogger("autobuy.access")
 
 
-async def request_logging_middleware(request, call_next):
-    """Assign a request id, time the request, and log its completion."""
+async def platform_middleware(request, call_next):
+    """One pass for request tracing, body-size guard, and security headers.
+
+    Kept as a single BaseHTTPMiddleware: each stacked instance costs an anyio
+    task group per request, which under load is pure serialized CPU.
+    """
+    from api.config import settings
+
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
     token = request_id_var.set(request_id)
     start = time.perf_counter()
     try:
-        response = await call_next(request)
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > settings.max_body_bytes:
+            from fastapi.responses import JSONResponse
+            response = JSONResponse(status_code=413,
+                                    content={"detail": "Request body too large"})
+        else:
+            response = await call_next(request)
     finally:
         request_id_var.reset(token)
+
     duration_ms = round((time.perf_counter() - start) * 1000, 1)
-    response.headers["X-Request-ID"] = request_id
+    headers = response.headers
+    headers["X-Request-ID"] = request_id
+    headers.setdefault("X-Content-Type-Options", "nosniff")
+    headers.setdefault("X-Frame-Options", "DENY")
+    headers.setdefault("X-XSS-Protection", "1; mode=block")
+    headers.setdefault("Referrer-Policy", "no-referrer")
+    if settings.api_env == "production":
+        headers.setdefault("Strict-Transport-Security",
+                           "max-age=31536000; includeSubDomains")
+
     level = logging.WARNING if response.status_code >= 400 else logging.INFO
     access_logger.log(level, "request_completed", extra={
         "method": request.method, "path": request.url.path,
