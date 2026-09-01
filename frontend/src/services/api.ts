@@ -149,3 +149,37 @@ export const dashboard = {
     api.get<Timeline>("/api/dashboard/analytics/timeline", { params: { days } })
       .then((r) => r.data),
 };
+
+export interface AdminStats {
+  total_users: number; verified_users: number; suspended_users: number;
+  total_invested_usdt: number; total_transactions: number;
+  failed_transactions_24h: number; active_purchases: number;
+  signups_7d: number; volume_7d_usdt: number;
+}
+export interface AdminUserRow {
+  id: string; email: string; role: string; kyc_status: string;
+  suspended: boolean; created_at: string; invested_usdt: number;
+}
+export interface AdminTxRow {
+  id: string; user_id: string; crypto: string; cost_usdt: number;
+  status: string; error_message?: string | null; created_at: string;
+}
+export interface AdminAlert {
+  name: string; severity: "ok" | "warning" | "critical"; value: string; detail: string;
+}
+
+export const admin = {
+  stats: () => api.get<AdminStats>("/api/admin/stats").then((r) => r.data),
+  users: (q = "", limit = 50, offset = 0) =>
+    api.get<{ items: AdminUserRow[]; total: number }>("/api/admin/users",
+      { params: { q: q || undefined, limit, offset } }).then((r) => r.data),
+  suspend: (id: string) => api.post(`/api/admin/users/${id}/suspend`),
+  unsuspend: (id: string) => api.post(`/api/admin/users/${id}/unsuspend`),
+  removeUser: (id: string, confirm: string) =>
+    api.delete(`/api/admin/users/${id}`, { params: { confirm } }),
+  transactions: (params: { status_filter?: string; user_id?: string;
+                           limit?: number; offset?: number } = {}) =>
+    api.get<{ items: AdminTxRow[]; total: number }>("/api/admin/transactions",
+      { params }).then((r) => r.data),
+  alerts: () => api.get<AdminAlert[]>("/api/admin/alerts").then((r) => r.data),
+};

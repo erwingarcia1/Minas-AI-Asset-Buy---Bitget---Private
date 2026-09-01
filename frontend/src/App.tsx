@@ -5,6 +5,7 @@ import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import AdminPage from "./pages/AdminPage";
 import PurchasesPage from "./pages/PurchasesPage";
 import SettingsPage from "./pages/SettingsPage";
 import { isLoggedIn } from "./services/auth";
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/purchases" element={<PurchasesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/admin" element={<AdminPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

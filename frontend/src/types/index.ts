@@ -3,6 +3,7 @@
 export interface User {
   id: string;
   email: string;
+  role?: "user" | "admin";
   kyc_status: "pending" | "verified" | "rejected";
   kyc_sumsub_id?: string | null;
   created_at: string;

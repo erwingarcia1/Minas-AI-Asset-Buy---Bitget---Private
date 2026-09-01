@@ -117,6 +117,8 @@ class PurchaseService:
 
         if not purchase.enabled:
             return await fail("purchase is disabled")
+        if user.suspended:
+            return await fail("account suspended")
         if user.kyc_status != "verified":
             return await fail("KYC not verified")
 
