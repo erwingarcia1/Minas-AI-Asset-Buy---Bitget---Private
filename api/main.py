@@ -134,6 +134,8 @@ app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 app.include_router(purchases.router, prefix="/api/purchases", tags=["purchases"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+from api.routes import advanced
+app.include_router(advanced.router, prefix="/api/advanced", tags=["purchases"])
 from api.routes import analytics
 app.include_router(analytics.router, prefix="/api/analytics", tags=["dashboard"])
 from api.routes import kyc

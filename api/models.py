@@ -60,6 +60,18 @@ class RecurringPurchase(Base):
     next_purchase_date = Column(DateTime(timezone=True), nullable=False)
     withdrawal_address = Column(String(255), nullable=True)
     enabled = Column(Boolean, default=True)
+    # Advanced purchase behavior (issue #25):
+    # recurring       -- plain DCA (default)
+    # one_time        -- executes once, then disables itself
+    # limit_order     -- one-shot, executes only once price <= limit_price
+    # rebalancing     -- member of a target-allocation plan
+    purchase_type = Column(String(20), nullable=False, default="recurring")
+    limit_price = Column(Float, nullable=True)      # execute only at/below this price
+    min_price = Column(Float, nullable=True)        # DCA band floor (skip below)
+    max_price = Column(Float, nullable=True)        # DCA band ceiling (skip above)
+    volatility_enabled = Column(Boolean, nullable=False, default=False)
+    target_allocation = Column(Float, nullable=True)  # percent, for rebalancing plans
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # limit orders
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     

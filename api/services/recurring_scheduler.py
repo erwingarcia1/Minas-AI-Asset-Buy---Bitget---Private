@@ -19,7 +19,8 @@ from api.models import RecurringPurchase
 from api.services.metrics import (
     active_purchases_total, scheduler_consecutive_failures,
     scheduler_job_duration_seconds)
-from api.services.purchase_service import PurchaseService
+from api.services.purchase_service import (
+    HIGH_VOLATILITY_PCT, PurchaseService, PurchaseSkipped)
 
 logger = logging.getLogger("autobuy.scheduler")
 
@@ -103,6 +104,20 @@ class RecurringScheduler:
                     text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
                 await lock_conn.commit()
 
+    async def _next_due(self, purchase, now: datetime) -> datetime:
+        """Frequency advancement, halved in high volatility for adaptive DCA
+        (the executor halves the amount to keep spend constant)."""
+        nxt = next_run_after(purchase.frequency, purchase.next_purchase_date)
+        if purchase.volatility_enabled and purchase.amount_usdt / 2 >= 10:
+            import api.services.market_data as market_mod
+            vol = await market_mod.market_data.get_volatility_30d(purchase.crypto)
+            if vol is not None and vol >= HIGH_VOLATILITY_PCT:
+                half = (nxt - purchase.next_purchase_date) / 2
+                nxt = purchase.next_purchase_date + half
+        while nxt <= now:
+            nxt = next_run_after(purchase.frequency, nxt)
+        return nxt
+
     def _register_result(self, ok: bool) -> None:
         self.consecutive_failures = 0 if ok else self.consecutive_failures + 1
         scheduler_consecutive_failures.set(self.consecutive_failures)
@@ -129,6 +144,14 @@ class RecurringScheduler:
 
             service = PurchaseService(db)
             for purchase in due:
+                # expired limit orders retire without executing
+                if (purchase.expires_at is not None
+                        and purchase.expires_at <= now):
+                    purchase.enabled = False
+                    logger.info("purchase %s expired unexecuted", purchase.id)
+                    await db.commit()
+                    processed += 1
+                    continue
                 try:
                     tx = await service.execute_purchase(
                         purchase.user_id, purchase.id,
@@ -137,13 +160,18 @@ class RecurringScheduler:
                     logger.exception("purchase %s: unexpected executor error", purchase.id)
                     continue
 
+                if isinstance(tx, PurchaseSkipped):
+                    # price gate held: not a failure -- re-check hourly
+                    purchase.next_purchase_date = now + FAILURE_RETRY
+                    await db.commit()
+                    processed += 1
+                    continue
+
                 self._register_result(tx.status == "completed")
                 if tx.status == "completed":
                     # advance from the due date; skip any missed intervals so a
                     # long outage cannot trigger a catch-up buying spree
-                    nxt = next_run_after(purchase.frequency, purchase.next_purchase_date)
-                    while nxt <= now:
-                        nxt = next_run_after(purchase.frequency, nxt)
+                    nxt = await self._next_due(purchase, now)
                     purchase.next_purchase_date = nxt
                 else:
                     # failed: retry in an hour, not on the next 60s tick

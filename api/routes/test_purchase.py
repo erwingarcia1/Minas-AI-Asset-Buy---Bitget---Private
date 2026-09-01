@@ -35,10 +35,16 @@ async def execute_purchase(
 ):
     """Execute one of the caller's recurring purchases right now."""
     try:
-        return await PurchaseService(db).execute_purchase(
+        result = await PurchaseService(db).execute_purchase(
             current_user.id, purchase_id, dry_run=dry_run)
     except PurchaseNotFound:
         raise HTTPException(status_code=404, detail="Recurring purchase not found")
+    from api.services.purchase_service import PurchaseSkipped
+    if isinstance(result, PurchaseSkipped):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=200,
+                            content={"skipped": True, "reason": result.reason})
+    return result
 
 
 @router.get("/balance/{coin}")
