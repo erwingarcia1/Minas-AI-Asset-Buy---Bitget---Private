@@ -38,6 +38,8 @@ class TransactionResponse(UTCModel):
     amount_crypto: float
     cost_usdt: float
     binance_order_id: Optional[str] = None
+    exchange_rate: Optional[float] = None
+    executed_at: Optional[datetime] = None
     status: str
     error_message: Optional[str] = None
     created_at: datetime

@@ -61,6 +61,10 @@ app.include_router(purchases.router, prefix="/api/purchases", tags=["purchases"]
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 
+# TEMPORARY (remove in Phase 3): manual purchase-execution routes for testing
+from api.routes import test_purchase
+app.include_router(test_purchase.router, prefix="/test-purchase", tags=["test-purchase"])
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

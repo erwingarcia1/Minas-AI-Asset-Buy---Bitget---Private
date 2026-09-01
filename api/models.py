@@ -82,6 +82,8 @@ class Transaction(Base):
     amount_crypto = Column(Float, nullable=False)
     cost_usdt = Column(Float, nullable=False)
     binance_order_id = Column(String(255), nullable=True)
+    exchange_rate = Column(Float, nullable=True)  # quote/base price at execution
+    executed_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(50), default="pending")  # pending, completed, failed
     error_message = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
