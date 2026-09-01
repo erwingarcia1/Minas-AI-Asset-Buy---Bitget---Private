@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Welcome to AutoBuy{% endblock %}
+{% block body %}
+<p>Hi {{ name }},</p>
+<p>Your account is ready. Three steps to your first automated purchase:</p>
+<ol>
+  <li>Verify your identity (KYC) from Settings</li>
+  <li>Add a Binance API key with <b>spot trading only</b> — no withdrawal permission</li>
+  <li>Create a recurring purchase schedule</li>
+</ol>
+<p>We buy on your schedule and email you every receipt.</p>
+{% endblock %}

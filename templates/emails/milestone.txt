@@ -1,0 +1,3 @@
+Hi {{ name }}, you just crossed {{ milestone }} USDT of total automated investment.
+
+Consistency is the whole game — your schedules did this one buy at a time.

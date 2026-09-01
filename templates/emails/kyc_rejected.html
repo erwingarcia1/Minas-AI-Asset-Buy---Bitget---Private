@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Identity verification unsuccessful{% endblock %}
+{% block body %}
+<p>Hi {{ name }}, we couldn't verify your identity with the documents provided.</p>
+<p>This is sometimes a photo-quality issue. You can retry from Settings, or contact
+<a href="mailto:{{ support_email }}">{{ support_email }}</a> and we'll help you through it.</p>
+{% endblock %}

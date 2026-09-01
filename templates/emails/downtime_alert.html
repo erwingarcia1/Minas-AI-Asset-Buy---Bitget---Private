@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Scheduled maintenance{% endblock %}
+{% block body %}
+<p>AutoBuy will be down for maintenance from <b>{{ start }}</b> to <b>{{ end }}</b> (UTC).</p>
+<p>Purchases due during the window run automatically as soon as we're back — schedules
+are never skipped, and a downtime window never causes double buys.</p>
+{% endblock %}

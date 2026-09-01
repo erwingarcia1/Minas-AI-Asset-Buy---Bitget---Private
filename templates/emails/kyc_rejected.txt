@@ -1,0 +1,3 @@
+Hi {{ name }}, we couldn't verify your identity with the documents provided.
+
+This is sometimes a photo-quality issue. You can retry from Settings, or contact {{ support_email }} and we'll help you through it.

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}🎉 Your first purchase is done{% endblock %}
+{% block body %}
+<p>Congratulations — your automation just made its first buy:</p>
+<p style="font-size:18px;"><b>{{ amount_crypto }} {{ crypto }}</b> for {{ cost_usdt }} USDT at {{ exchange_rate }}</p>
+<p>Order {{ order_id }}. From here on it runs on schedule; every execution lands in your history and inbox.</p>
+{% endblock %}

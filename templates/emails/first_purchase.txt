@@ -1,0 +1,5 @@
+Congratulations — your automation just made its first buy:
+
+{{ amount_crypto }} {{ crypto }} for {{ cost_usdt }} USDT at {{ exchange_rate }} (order {{ order_id }})
+
+From here on it runs on schedule; every execution lands in your history and inbox.

@@ -1,0 +1,3 @@
+Hi {{ name }}, your identity verification is approved.
+
+Your scheduled purchases can now execute. Nothing else to do — your next due schedule will run automatically.

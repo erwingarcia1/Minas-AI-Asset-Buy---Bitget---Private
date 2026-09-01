@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Your week at AutoBuy{% endblock %}
+{% block body %}
+<p>Hi {{ name }}, here's what your automation did this week:</p>
+<table style="width:100%;border-collapse:collapse;font-size:14px;">
+  <tr style="text-align:left;color:#5a6763;"><th style="padding:4px 8px;">Crypto</th><th>Bought</th><th>Spent (USDT)</th></tr>
+  {% for row in rows %}
+  <tr><td style="padding:4px 8px;"><b>{{ row.crypto }}</b></td><td>{{ row.amount }}</td><td>{{ row.cost }}</td></tr>
+  {% endfor %}
+</table>
+<p><b>Total: {{ total_usdt }} USDT</b> across {{ count }} purchase(s){% if failed %} · {{ failed }} failed (see your dashboard){% endif %}.</p>
+{% endblock %}

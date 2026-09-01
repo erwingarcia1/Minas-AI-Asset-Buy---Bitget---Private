@@ -120,6 +120,9 @@ class PurchaseService:
                 select(User).where(User.id == user_id))).scalar_one_or_none()
             if user is not None:
                 await email_service.send_purchase_notification(user.email, purchase, tx)
+                if status == "completed":
+                    from api.services.email_campaigns import after_purchase_completed
+                    await after_purchase_completed(self.db, user, tx)
         except Exception:
             logger.exception("purchase notification email failed (tx %s)", tx.id)
         return tx

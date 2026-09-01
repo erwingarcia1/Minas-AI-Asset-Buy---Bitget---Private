@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
@@ -142,7 +142,8 @@ def _token_pair(user_id: str) -> TokenResponse:
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
-async def register(request: Request, payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(request: Request, payload: RegisterRequest,
+                   background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     """Register a new user with email and password."""
     email = payload.email.lower()
     existing = await db.execute(select(User).where(User.email == email))
@@ -153,6 +154,8 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    from api.services.email_campaigns import send_welcome
+    background.add_task(send_welcome, user.email)
     return user
 
 

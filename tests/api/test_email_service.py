@@ -11,13 +11,14 @@ class CapturingEmail(EmailService):
         super().__init__(api_key="test-key")
         self.sent = []
 
-    async def _send(self, to, subject, html, text):
-        self.sent.append({"to": to, "subject": subject, "text": text})
+    async def _send(self, to, subject, html, text, template="generic"):
+        self.sent.append({"to": to, "subject": subject, "text": text,
+                          "template": template})
         return True
 
 
 class ExplodingEmail(EmailService):
-    async def _send(self, to, subject, html, text):
+    async def _send(self, to, subject, html, text, template="generic"):
         raise RuntimeError("resend is down")
 
 
