@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     twilio_from_number: str = os.getenv("TWILIO_FROM_NUMBER", "")
     fcm_server_key: str = os.getenv("FCM_SERVER_KEY", "")
 
+    # Slack ops alerts (incoming webhook URL; unset = disabled)
+    slack_webhook_url: str = os.getenv("SLACK_WEBHOOK_URL", "")
+
     # Rate limiting
     rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "1") not in ("0", "false", "no")
     max_body_bytes: int = int(os.getenv("MAX_BODY_BYTES", str(1024 * 1024)))

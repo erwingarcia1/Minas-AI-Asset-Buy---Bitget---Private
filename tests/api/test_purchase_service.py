@@ -11,10 +11,14 @@ class FakeBinance:
     """Stands in for api.services.binance_client.BinanceClient."""
     last = None
 
-    def __init__(self, api_key, api_secret):
+    def __init__(self, api_key, api_secret, passphrase="", exchange="binance"):
         FakeBinance.last = self
         self.api_key = api_key
+        self.exchange = exchange
         self.calls = []
+
+    def spot_symbol(self, base, quote="USDT"):
+        return f"{base}{quote}"
 
     def execute_order(self, symbol, usdt_amount, dry_run=True, client_oid=None):
         self.calls.append((symbol, usdt_amount, dry_run, client_oid))
@@ -53,7 +57,7 @@ async def test_dry_run_creates_completed_transaction(db, user, purchase, binance
 async def test_missing_api_key_records_failed(db, user, purchase, fake_binance):
     tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
     assert tx.status == "failed"
-    assert "no Binance API key" in tx.error_message
+    assert "no binance API key" in tx.error_message
     assert tx.binance_order_id is None
 
 

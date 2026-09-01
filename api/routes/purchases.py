@@ -70,8 +70,12 @@ def _validate_frequency(value: str) -> str:
 # Schemas
 # --------------------------------------------------------------------------
 
+VALID_EXCHANGES = {"binance", "bitget", "bybit", "okx"}
+
+
 class PurchaseCreate(BaseModel):
     crypto: str = Field(min_length=2, max_length=10)
+    exchange: str = Field(default="binance")
     amount_usdt: float = Field(ge=MIN_AMOUNT_USDT, le=MAX_AMOUNT_USDT)
     frequency: str
     withdrawal_address: Optional[str] = Field(default=None, max_length=255)
@@ -80,6 +84,14 @@ class PurchaseCreate(BaseModel):
     @classmethod
     def _crypto(cls, value):
         return validate_crypto(value)
+
+    @field_validator("exchange")
+    @classmethod
+    def _exchange(cls, value):
+        value = value.lower()
+        if value not in VALID_EXCHANGES:
+            raise ValueError(f"exchange must be one of: {', '.join(sorted(VALID_EXCHANGES))}")
+        return value
 
     @field_validator("frequency")
     @classmethod
@@ -114,6 +126,7 @@ class PurchaseUpdate(BaseModel):
 class PurchaseResponse(UTCModel):
     id: UUID
     crypto: str
+    exchange: str = "binance"
     amount_usdt: float
     frequency: str
     next_purchase_date: datetime
@@ -169,6 +182,7 @@ async def create_purchase(
     purchase = RecurringPurchase(
         user_id=current_user.id,
         crypto=payload.crypto,
+        exchange=payload.exchange,
         amount_usdt=payload.amount_usdt,
         frequency=payload.frequency,
         withdrawal_address=payload.withdrawal_address,

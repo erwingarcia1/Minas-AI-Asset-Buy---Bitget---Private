@@ -8,10 +8,23 @@ run them via `asyncio.to_thread`.
 """
 import uuid
 
-from binance_client import BinanceClient as _LegacyClient
+from binance_client import BinanceClient as _LegacyBinance
+from bitget_client import BitgetClient as _LegacyBitget
+from bybit_client import BybitClient as _LegacyBybit
+from okx_client import OKXClient as _LegacyOKX
 from exchange_errors import ExchangeAPIError
 
 from api.services.metrics import time_binance
+
+LEGACY_CLIENTS = {
+    "binance": _LegacyBinance,
+    "bitget": _LegacyBitget,
+    "bybit": _LegacyBybit,
+    "okx": _LegacyOKX,
+}
+
+# kept for existing imports/monkeypatches
+_LegacyClient = _LegacyBinance
 
 
 class BinanceClientError(Exception):
@@ -23,8 +36,22 @@ class BinanceClientError(Exception):
 
 
 class BinanceClient:
-    def __init__(self, api_key: str, api_secret: str):
-        self._client = _LegacyClient(api_key=api_key, api_secret=api_secret)
+    """Venue-agnostic wrapper (name kept for compatibility): all four legacy
+    clients share the same normalized interface, so `exchange` just picks
+    which one signs the calls and which symbol format applies."""
+
+    def __init__(self, api_key: str, api_secret: str, passphrase: str = "",
+                 exchange: str = "binance"):
+        self.exchange = exchange
+        if exchange == "binance":
+            self._client = _LegacyClient(api_key=api_key, api_secret=api_secret)
+        else:
+            legacy = LEGACY_CLIENTS[exchange]
+            self._client = legacy(api_key=api_key, api_secret=api_secret,
+                                  passphrase=passphrase)
+
+    def spot_symbol(self, base: str, quote: str = "USDT") -> str:
+        return type(self._client).spot_symbol(base, quote)
 
     def get_price(self, symbol: str) -> float:
         """Current spot price for a symbol like 'BTCUSDT'."""
@@ -99,3 +126,6 @@ class BinanceClient:
             raise
         except ExchangeAPIError as exc:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
+
+
+ExchangeClient = BinanceClient  # preferred name going forward

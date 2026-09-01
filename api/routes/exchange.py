@@ -23,7 +23,7 @@ from api.services.rate_limit import limiter, user_or_ip_key
 
 router = APIRouter()
 
-SUPPORTED_EXCHANGES = {"binance"}
+SUPPORTED_EXCHANGES = {"binance", "bitget", "bybit", "okx"}
 
 
 # --------------------------------------------------------------------------
@@ -68,6 +68,7 @@ class APIKeyCreate(BaseModel):
     exchange: str = Field(default="binance")
     api_key: str = Field(min_length=8, max_length=256)
     api_secret: str = Field(min_length=8, max_length=256)
+    passphrase: str = Field(default="", max_length=256)  # OKX requires one
 
     @field_validator("exchange")
     @classmethod
@@ -111,6 +112,9 @@ async def add_or_update_key(
     db: AsyncSession = Depends(get_db),
 ):
     """Add a new API key for an exchange, or update the existing one."""
+    if payload.exchange == "okx" and not payload.passphrase:
+        raise HTTPException(status_code=422,
+                            detail="OKX API keys require their passphrase")
     result = await db.execute(
         select(APIKey).where(
             APIKey.user_id == current_user.id, APIKey.exchange == payload.exchange
@@ -124,12 +128,16 @@ async def add_or_update_key(
             exchange=payload.exchange,
             encrypted_api_key=encrypt_value(payload.api_key),
             encrypted_api_secret=encrypt_value(payload.api_secret),
+            encrypted_passphrase=(encrypt_value(payload.passphrase)
+                                  if payload.passphrase else None),
             verified=False,
         )
         db.add(key)
     else:
         key.encrypted_api_key = encrypt_value(payload.api_key)
         key.encrypted_api_secret = encrypt_value(payload.api_secret)
+        key.encrypted_passphrase = (encrypt_value(payload.passphrase)
+                                    if payload.passphrase else None)
         key.verified = False  # re-verify after any credential change
         key.updated_at = to_db_datetime(utc_now())
 
@@ -181,9 +189,18 @@ async def verify_key(
         raise HTTPException(status_code=404, detail="API key not found")
 
     client = BinanceClient(
-        decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret))
+        decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
+        passphrase=(decrypt_value(key.encrypted_passphrase)
+                    if key.encrypted_passphrase else ""),
+        exchange=key.exchange)
     try:
-        info = await asyncio.to_thread(client.get_account_info)
+        if key.exchange == "binance":
+            info = await asyncio.to_thread(client.get_account_info)
+        else:
+            # other venues: an authenticated balance call proves the key works
+            # (per-permission introspection is Binance-specific)
+            await asyncio.to_thread(client.get_account_balance, "USDT")
+            info = {"can_trade": True, "can_withdraw": False, "permissions": ["SPOT"]}
     except BinanceClientError as exc:
         key.verified = False
         await db.commit()

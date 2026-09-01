@@ -109,7 +109,8 @@ class PurchaseService:
         user = (await self.db.execute(
             select(User).where(User.id == user_id))).scalar_one()
 
-        symbol = f"{purchase.crypto.upper()}USDT"
+        venue = purchase.exchange or "binance"
+        symbol = f"{purchase.crypto.upper()}USDT"  # refined per venue below
 
         async def fail(reason: str) -> Transaction:
             return await self._record(purchase, user_id, symbol, 0.0, purchase.amount_usdt,
@@ -124,9 +125,9 @@ class PurchaseService:
 
         key = (await self.db.execute(
             select(APIKey).where(APIKey.user_id == user_id,
-                                 APIKey.exchange == "binance"))).scalar_one_or_none()
+                                 APIKey.exchange == venue))).scalar_one_or_none()
         if key is None:
-            return await fail("no Binance API key on file")
+            return await fail(f"no {venue} API key on file")
         if not key.verified:
             return await fail("Binance API key not verified — verify it under Exchange settings")
 
@@ -136,8 +137,13 @@ class PurchaseService:
             return PurchaseSkipped(purchase, skip_reason)
 
         amount = await effective_amount(purchase)
-        client = BinanceClient(decrypt_value(key.encrypted_api_key),
-                               decrypt_value(key.encrypted_api_secret))
+        client = BinanceClient(
+            decrypt_value(key.encrypted_api_key),
+            decrypt_value(key.encrypted_api_secret),
+            passphrase=(decrypt_value(key.encrypted_passphrase)
+                        if key.encrypted_passphrase else ""),
+            exchange=venue)
+        symbol = client.spot_symbol(purchase.crypto)
         client_oid = f"ab-{purchase.id.hex[:12]}-{datetime.now(timezone.utc):%Y%m%d%H%M}"
         try:
             order = await asyncio.to_thread(
@@ -200,4 +206,13 @@ class PurchaseService:
                         include_email=False)
         except Exception:
             logger.exception("purchase notification email failed (tx %s)", tx.id)
+        try:
+            from api.services.webhook_service import dispatch
+            await dispatch(self.db, user_id, f"purchase.{status}", {
+                "transaction_id": str(tx.id), "crypto": tx.crypto,
+                "amount_crypto": tx.amount_crypto, "cost_usdt": tx.cost_usdt,
+                "status": status, "error": error,
+            })
+        except Exception:
+            logger.exception("webhook dispatch failed (tx %s)", tx.id)
         return tx

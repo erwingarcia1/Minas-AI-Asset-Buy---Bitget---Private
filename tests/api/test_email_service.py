@@ -47,7 +47,7 @@ async def test_failed_purchase_email(db, user, purchase, capture):
     assert tx.status == "failed"
     mail = capture.sent[0]
     assert mail["subject"].startswith("✗ Purchase failed")
-    assert "no Binance API key" in mail["text"]
+    assert "no binance API key" in mail["text"]
 
 
 async def test_email_failure_never_breaks_purchase(db, user, purchase, binance_key, monkeypatch):

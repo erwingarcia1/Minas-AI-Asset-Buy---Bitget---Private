@@ -126,6 +126,11 @@ class RecurringScheduler:
                 "ALERT: %d consecutive purchase executions failed -- check Binance "
                 "connectivity, key validity, and account balances",
                 self.consecutive_failures)
+            import asyncio as _asyncio
+            from api.services.slack_service import send_slack
+            _asyncio.get_event_loop().create_task(send_slack(
+                f":rotating_light: AutoBuy: {self.consecutive_failures} consecutive "
+                "purchase executions failed — see the runbook (docs/ALERTING.md)"))
 
     async def _process_due(self) -> int:
         import time as _time
