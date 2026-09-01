@@ -20,7 +20,20 @@ class EmailService:
         self.api_key = api_key or settings.resend_api_key
         self.from_email = from_email or settings.support_email
 
-    async def _send(self, to: str, subject: str, html: str, text: str) -> bool:
+    async def _send(self, to: str, subject: str, html: str, text: str,
+                    template: str = "generic") -> bool:
+        import time as _time
+        from api.services.metrics import email_send_duration_seconds, emails_total
+        start = _time.perf_counter()
+        try:
+            ok = await self._send_inner(to, subject, html, text)
+        finally:
+            email_send_duration_seconds.labels(template).observe(
+                _time.perf_counter() - start)
+        emails_total.labels(template, "ok" if ok else "failed").inc()
+        return ok
+
+    async def _send_inner(self, to: str, subject: str, html: str, text: str) -> bool:
         if not self.api_key or self.api_key.startswith("your_"):
             # unset or the .env.example placeholder: treat as unconfigured
             logger.info("email skipped (no RESEND_API_KEY): to=%s subject=%r", to, subject)

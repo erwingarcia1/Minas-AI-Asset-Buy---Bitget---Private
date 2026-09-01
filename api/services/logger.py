@@ -76,6 +76,13 @@ async def platform_middleware(request, call_next):
         headers.setdefault("Strict-Transport-Security",
                            "max-age=31536000; includeSubDomains")
 
+    if request.url.path not in ("/metrics", "/health"):
+        from api.services.metrics import record_http
+        # route template (not raw path) keeps label cardinality bounded
+        route = request.scope.get("route")
+        label_path = getattr(route, "path", request.url.path)
+        record_http(request.method, label_path, response.status_code, duration_ms / 1000)
+
     level = logging.WARNING if response.status_code >= 400 else logging.INFO
     access_logger.log(level, "request_completed", extra={
         "method": request.method, "path": request.url.path,

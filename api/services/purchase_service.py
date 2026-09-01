@@ -113,6 +113,8 @@ class PurchaseService:
         self.db.add(tx)
         await self.db.commit()
         await self.db.refresh(tx)
+        from api.services.metrics import transactions_total
+        transactions_total.labels(status, purchase.crypto.upper()).inc()
         try:
             user = (await self.db.execute(
                 select(User).where(User.id == user_id))).scalar_one_or_none()

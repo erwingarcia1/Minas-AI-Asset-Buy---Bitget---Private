@@ -12,11 +12,19 @@ from typing import Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select, text
 
+from sqlalchemy import func
+
 from api.database import AsyncSessionLocal, engine
 from api.models import RecurringPurchase
+from api.services.metrics import (
+    active_purchases_total, scheduler_consecutive_failures,
+    scheduler_job_duration_seconds)
 from api.services.purchase_service import PurchaseService
 
 logger = logging.getLogger("autobuy.scheduler")
+
+# Consecutive execution failures before a CRITICAL alert log fires.
+FAILURE_ALERT_THRESHOLD = 5
 
 ADVISORY_LOCK_KEY = 0x41427579  # "ABuy"
 FAILURE_RETRY = timedelta(hours=1)
@@ -52,6 +60,7 @@ class RecurringScheduler:
         self.poll_seconds = poll_seconds
         self.dry_run = dry_run
         self.last_tick_at: Optional[datetime] = None
+        self.consecutive_failures = 0
         self._scheduler: Optional[AsyncIOScheduler] = None
 
     @property
@@ -91,10 +100,24 @@ class RecurringScheduler:
                     text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
                 await lock_conn.commit()
 
+    def _register_result(self, ok: bool) -> None:
+        self.consecutive_failures = 0 if ok else self.consecutive_failures + 1
+        scheduler_consecutive_failures.set(self.consecutive_failures)
+        if self.consecutive_failures == FAILURE_ALERT_THRESHOLD:
+            logger.critical(
+                "ALERT: %d consecutive purchase executions failed -- check Binance "
+                "connectivity, key validity, and account balances",
+                self.consecutive_failures)
+
     async def _process_due(self) -> int:
+        import time as _time
+        tick_start = _time.perf_counter()
         now = datetime.now(timezone.utc)
         processed = 0
         async with AsyncSessionLocal() as db:
+            active_purchases_total.set((await db.execute(
+                select(func.count(RecurringPurchase.id)).where(
+                    RecurringPurchase.enabled.is_(True)))).scalar_one())
             due = (await db.execute(
                 select(RecurringPurchase).where(
                     RecurringPurchase.enabled.is_(True),
@@ -111,6 +134,7 @@ class RecurringScheduler:
                     logger.exception("purchase %s: unexpected executor error", purchase.id)
                     continue
 
+                self._register_result(tx.status == "completed")
                 if tx.status == "completed":
                     # advance from the due date; skip any missed intervals so a
                     # long outage cannot trigger a catch-up buying spree
@@ -123,6 +147,8 @@ class RecurringScheduler:
                     purchase.next_purchase_date = now + FAILURE_RETRY
                 await db.commit()
                 processed += 1
+        scheduler_job_duration_seconds.labels("tick").observe(
+            _time.perf_counter() - tick_start)
         if processed:
             logger.info("tick processed %d due purchase(s)", processed)
         return processed

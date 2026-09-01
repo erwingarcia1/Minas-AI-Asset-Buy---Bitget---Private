@@ -80,6 +80,16 @@ async def health_check():
         },
     }
 
+# Prometheus metrics
+@app.get("/metrics", include_in_schema=False)
+@limiter.exempt
+async def metrics():
+    from fastapi.responses import Response
+    from api.services.metrics import render_latest
+    payload, content_type = render_latest()
+    return Response(content=payload, media_type=content_type)
+
+
 # Root endpoint
 @app.get("/")
 async def root():

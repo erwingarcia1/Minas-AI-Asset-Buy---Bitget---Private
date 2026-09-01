@@ -11,6 +11,8 @@ import uuid
 from binance_client import BinanceClient as _LegacyClient
 from exchange_errors import ExchangeAPIError
 
+from api.services.metrics import time_binance
+
 
 class BinanceClientError(Exception):
     """Normalized failure from any Binance interaction."""
@@ -27,7 +29,8 @@ class BinanceClient:
     def get_price(self, symbol: str) -> float:
         """Current spot price for a symbol like 'BTCUSDT'."""
         try:
-            return self._client.get_ticker_price(symbol)
+            with time_binance("get_price"):
+                return self._client.get_ticker_price(symbol)
         except ExchangeAPIError as exc:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
 
@@ -47,7 +50,8 @@ class BinanceClient:
     def get_account_balance(self, coin: str) -> float:
         """Available (free) spot balance of `coin` (authenticated)."""
         try:
-            return self._client.get_spot_available(coin)
+            with time_binance("get_balance"):
+                return self._client.get_spot_available(coin)
         except ExchangeAPIError as exc:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
 
@@ -78,7 +82,8 @@ class BinanceClient:
                     "MIN_NOTIONAL",
                 )
 
-            order = self._client.place_market_buy(symbol, usdt_amount, client_oid=client_oid)
+            with time_binance("place_order"):
+                order = self._client.place_market_buy(symbol, usdt_amount, client_oid=client_oid)
             executed_base = float(order.get("executedQty") or 0)
             executed_quote = float(order.get("cummulativeQuoteQty") or 0)
             if executed_base <= 0:
