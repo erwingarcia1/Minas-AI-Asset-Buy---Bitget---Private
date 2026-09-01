@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_db
 from api.models import Transaction, User
 from api.routes.user import UTCModel, get_current_user
+from fastapi import Request
+from api.services.rate_limit import limiter, user_or_ip_key
 
 router = APIRouter()
 
@@ -67,7 +69,9 @@ class TransactionStats(BaseModel):
 # --------------------------------------------------------------------------
 
 @router.get("/", response_model=TransactionListResponse)
+@limiter.limit("30/minute", key_func=user_or_ip_key)
 async def list_transactions(
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     status_filter: Optional[str] = Query(None),

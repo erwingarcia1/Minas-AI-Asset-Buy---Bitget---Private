@@ -37,6 +37,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Rate limiting (slowapi): default 60/min per key, stricter limits per route
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
+from api.services.rate_limit import limiter
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+
+# Oversized payloads are refused before any parsing (1MB default)
+@app.middleware("http")
+async def body_size_guard(request, call_next):
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > settings.max_body_bytes:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=413,
+                            content={"detail": "Request body too large"})
+    return await call_next(request)
+
+
 # Request tracing + access log (outermost: times everything below it)
 app.middleware("http")(request_logging_middleware)
 
@@ -69,6 +91,7 @@ app.add_middleware(
 
 # Health check endpoint
 @app.get("/health")
+@limiter.exempt
 async def health_check():
     """Health check endpoint for monitoring."""
     from api.services.recurring_scheduler import scheduler

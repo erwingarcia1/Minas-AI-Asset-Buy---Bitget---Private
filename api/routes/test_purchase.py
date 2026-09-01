@@ -16,6 +16,8 @@ from api.models import APIKey, User
 from api.routes.exchange import decrypt_value
 from api.routes.transactions import TransactionResponse
 from api.routes.user import get_current_user
+from fastapi import Request
+from api.services.rate_limit import limiter, user_or_ip_key
 from api.services.binance_client import BinanceClient, BinanceClientError
 from api.services.purchase_service import PurchaseNotFound, PurchaseService
 
@@ -23,7 +25,9 @@ router = APIRouter()
 
 
 @router.post("/execute/{purchase_id}", response_model=TransactionResponse)
+@limiter.limit("1/minute", key_func=user_or_ip_key)
 async def execute_purchase(
+    request: Request,
     purchase_id: UUID,
     dry_run: bool = Query(True),
     current_user: User = Depends(get_current_user),

@@ -18,6 +18,8 @@ from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
 
 import logging
 logger = logging.getLogger("autobuy.exchange")
+from fastapi import Request
+from api.services.rate_limit import limiter, user_or_ip_key
 
 router = APIRouter()
 
@@ -160,7 +162,9 @@ class KeyVerifyResponse(BaseModel):
 
 
 @router.post("/keys/{key_id}/verify", response_model=KeyVerifyResponse)
+@limiter.limit("3/minute", key_func=user_or_ip_key)
 async def verify_key(
+    request: Request,
     key_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

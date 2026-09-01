@@ -1,3 +1,6 @@
+import os
+os.environ.setdefault("RATE_LIMIT_ENABLED", "0")
+
 import uuid
 
 import httpx

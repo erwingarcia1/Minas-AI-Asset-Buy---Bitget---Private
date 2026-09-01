@@ -41,3 +41,5 @@ jobs:
         env:
           PYTHONPATH: .
           SCHEDULER_ENABLED: "0"
+          RATE_LIMIT_ENABLED: "0"
+          REDIS_URL: redis://localhost:6379/0

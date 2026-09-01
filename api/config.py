@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     supported_cryptos: str = os.getenv(
         "SUPPORTED_CRYPTOS", "BTC,ETH,SOL,BNB,XRP,ADA,DOGE,LTC")
 
+    # Rate limiting
+    rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "1") not in ("0", "false", "no")
+    max_body_bytes: int = int(os.getenv("MAX_BODY_BYTES", str(1024 * 1024)))
+
     # Scheduler
     scheduler_enabled: bool = os.getenv("SCHEDULER_ENABLED", "1") not in ("0", "false", "no")
     scheduler_poll_seconds: int = int(os.getenv("SCHEDULER_POLL_SECONDS", "60"))

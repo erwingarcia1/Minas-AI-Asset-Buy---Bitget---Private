@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_db
 from api.models import RecurringPurchase, Transaction, User
 from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
+from fastapi import Request
+from api.services.rate_limit import limiter, user_or_ip_key
 
 router = APIRouter()
 
@@ -114,7 +116,9 @@ async def _monthly_average(db: AsyncSession, user_id) -> float:
 # --------------------------------------------------------------------------
 
 @router.get("/", response_model=DashboardResponse)
+@limiter.limit("10/minute", key_func=user_or_ip_key)
 async def dashboard(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

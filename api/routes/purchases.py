@@ -9,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
+from fastapi import Request
+from api.services.rate_limit import limiter, user_or_ip_key
 from api.database import get_db
 from api.models import RecurringPurchase, User
 from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
@@ -145,7 +147,9 @@ async def _get_owned_purchase(
 # --------------------------------------------------------------------------
 
 @router.post("/", response_model=PurchaseResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute", key_func=user_or_ip_key)
 async def create_purchase(
+    request: Request,
     payload: PurchaseCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

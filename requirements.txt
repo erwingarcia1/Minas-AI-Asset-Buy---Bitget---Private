@@ -28,6 +28,7 @@ apscheduler==3.10.4
 
 # Redis (rate limiting, token revocation, locks)
 redis==5.0.1
+slowapi==0.1.9
 
 # KYC (Sumsub)
 #sumsub-python-sdk==1.0.0

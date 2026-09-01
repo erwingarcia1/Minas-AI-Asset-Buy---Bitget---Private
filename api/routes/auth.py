@@ -14,6 +14,8 @@ from api.config import settings
 from api.database import get_db
 from api.models import User
 from api.routes.user import UTCModel, get_current_user
+from fastapi import Request
+from api.services.rate_limit import limiter, is_locked_out, register_failed_login, clear_failed_logins
 
 import logging
 logger = logging.getLogger("autobuy.auth")
@@ -139,7 +141,8 @@ def _token_pair(user_id: str) -> TokenResponse:
 # --------------------------------------------------------------------------
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user with email and password."""
     email = payload.email.lower()
     existing = await db.execute(select(User).where(User.email == email))
@@ -154,22 +157,33 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def login(request: Request, payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate with email/password and receive access + refresh tokens."""
+    locked_for = await is_locked_out(payload.email)
+    if locked_for:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Account locked after repeated failed logins. Try again in {locked_for // 60 + 1} minutes.",
+            headers={"Retry-After": str(locked_for)},
+        )
     result = await db.execute(select(User).where(User.email == payload.email.lower()))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
         logger.warning("failed login attempt", extra={"email": payload.email.lower()})
+        await register_failed_login(payload.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    await clear_failed_logins(payload.email)
     return _token_pair(str(user.id))
 
 
 @router.post("/verify", response_model=VerifyResponse)
-async def verify(payload: VerifyRequest):
+@limiter.limit("10/minute")
+async def verify(request: Request, payload: VerifyRequest):
     """Verify an access token; returns validity and the user id it belongs to."""
     data = verify_token(payload.token)
     if data is None or data.user_id is None:
@@ -178,7 +192,8 @@ async def verify(payload: VerifyRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def refresh(request: Request, payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """Exchange a valid refresh token for a new access + refresh token pair."""
     invalid = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -219,7 +234,8 @@ class LogoutRequest(BaseModel):
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(payload: LogoutRequest):
+@limiter.limit("10/minute")
+async def logout(request: Request, payload: LogoutRequest):
     """Revoke a refresh token. The short-lived access token simply expires."""
     try:
         decoded = jwt.decode(
