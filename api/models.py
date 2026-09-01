@@ -21,6 +21,10 @@ class User(Base):
     kyc_sumsub_id = Column(String(255), nullable=True)
     role = Column(String(20), nullable=False, default="user")  # user | admin
     suspended = Column(Boolean, nullable=False, default=False)
+    phone_number = Column(String(32), nullable=True)          # E.164
+    phone_verified = Column(Boolean, nullable=False, default=False)
+    device_token = Column(String(255), nullable=True)         # FCM registration token
+    notification_preferences = Column(String(500), nullable=True)  # JSON blob
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -114,3 +118,19 @@ class Transaction(Base):
     # Relationships
     user = relationship("User", back_populates="transactions")
     recurring_purchase = relationship("RecurringPurchase", back_populates="transactions")
+
+
+class Notification(Base):
+    """Audit log of every outbound notification attempt, all channels."""
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_user_id_created_at", "user_id", "created_at"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    channel = Column(String(10), nullable=False)   # email | sms | push
+    template = Column(String(50), nullable=False)
+    subject = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False)    # sent | failed | skipped_pref | skipped_quiet
+    created_at = Column(DateTime(timezone=True), default=utcnow)

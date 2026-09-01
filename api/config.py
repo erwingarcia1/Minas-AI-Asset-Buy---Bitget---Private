@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     supported_cryptos: str = os.getenv(
         "SUPPORTED_CRYPTOS", "BTC,ETH,SOL,BNB,XRP,ADA,DOGE,LTC")
 
+    # SMS (Twilio) + push (FCM) -- unset means the channel is a no-op
+    twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+    twilio_auth_token: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_from_number: str = os.getenv("TWILIO_FROM_NUMBER", "")
+    fcm_server_key: str = os.getenv("FCM_SERVER_KEY", "")
+
     # Rate limiting
     rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "1") not in ("0", "false", "no")
     max_body_bytes: int = int(os.getenv("MAX_BODY_BYTES", str(1024 * 1024)))

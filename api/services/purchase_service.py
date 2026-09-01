@@ -180,9 +180,24 @@ class PurchaseService:
                 select(User).where(User.id == user_id))).scalar_one_or_none()
             if user is not None:
                 await email_service.send_purchase_notification(user.email, purchase, tx)
+                from api.services.notifications import (
+                    LARGE_TRANSACTION_USDT, dispatcher)
                 if status == "completed":
                     from api.services.email_campaigns import after_purchase_completed
                     await after_purchase_completed(self.db, user, tx)
+                    large = tx.cost_usdt >= LARGE_TRANSACTION_USDT
+                    await dispatcher.notify(
+                        self.db, user, template="purchase_executed",
+                        subject=f"Bought {tx.crypto}",
+                        body=(f"{tx.amount_crypto:.8f} {tx.crypto} for "
+                              f"{tx.cost_usdt:.2f} USDT"),
+                        critical=large, include_email=False)
+                else:
+                    await dispatcher.notify(
+                        self.db, user, template="purchase_failed",
+                        subject=f"Purchase failed: {tx.crypto}",
+                        body=str(error)[:200], critical=True,
+                        include_email=False)
         except Exception:
             logger.exception("purchase notification email failed (tx %s)", tx.id)
         return tx
