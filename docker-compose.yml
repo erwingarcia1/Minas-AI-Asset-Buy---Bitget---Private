@@ -1,4 +1,15 @@
-version: '3.8'
+# AutoBuy platform stack (API + Postgres + Redis [+ Prometheus]).
+#
+# The project is pinned to "autobuy-platform" so these services can NEVER
+# collide with the legacy trading bot's compose project ("autobuy",
+# docker-compose.legacy.yml) when both run on the same server. Never run
+# `docker compose --remove-orphans` against the legacy project — it would
+# delete the live bot's containers.
+#
+#   docker compose up -d                          # dev: Postgres + Redis only
+#   docker compose --profile prod up -d --build   # production: + the API
+#   docker compose --profile monitoring up -d     # + Prometheus on :9090
+name: autobuy-platform
 
 services:
   postgres:
@@ -6,10 +17,12 @@ services:
     container_name: autobuy_postgres
     environment:
       POSTGRES_USER: autobuy
-      POSTGRES_PASSWORD: autobuy_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autobuy_password}
       POSTGRES_DB: autobuy_db
     ports:
-      - "5432:5432"
+      # Loopback only — this box also holds live exchange keys; published
+      # container ports bypass ufw, so never expose the datastores publicly.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +35,7 @@ services:
     image: redis:7-alpine
     container_name: autobuy_redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -30,11 +43,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-volumes:
-  postgres_data:
-  redis_data:
-  prometheus_data:
 
   # ------------------------------------------------------------------
   # Platform API (production profile):
@@ -53,10 +61,13 @@ volumes:
       - "8000:8000"
     environment:
       API_ENV: production
-      DATABASE_URL: postgresql+asyncpg://autobuy:autobuy_password@postgres:5432/autobuy_db
+      DATABASE_URL: postgresql+asyncpg://autobuy:${POSTGRES_PASSWORD:-autobuy_password}@postgres:5432/autobuy_db
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:?set in .env}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set in .env}
+      # Empty values are rejected by the app's production boot guard (and by
+      # scripts/deploy.sh before it ever starts this service); interpolation
+      # stays lax so the dev stack (postgres+redis) parses without a .env.
+      SECRET_KEY: ${SECRET_KEY:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       SUMSUB_APP_TOKEN: ${SUMSUB_APP_TOKEN:-}
@@ -80,3 +91,8 @@ volumes:
       - prometheus_data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:

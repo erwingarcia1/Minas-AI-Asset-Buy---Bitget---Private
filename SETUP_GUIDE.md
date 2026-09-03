@@ -5,14 +5,14 @@ setup in [README.md](README.md).)
 
 ## Prerequisites
 
-- Python 3.12, Docker + docker-compose
+- Python 3.12, Docker + the compose plugin (`docker compose`)
 - `cp .env.example .env` and fill in values (`SECRET_KEY` at minimum)
 
 ## Run the dev stack
 
 ```bash
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
-docker-compose up -d                  # Postgres 16 + Redis 7
+docker compose up -d                  # Postgres 16 + Redis 7
 ./venv/bin/alembic upgrade head       # apply database migrations
 ./venv/bin/uvicorn api.main:app --reload --port 8000
 ```

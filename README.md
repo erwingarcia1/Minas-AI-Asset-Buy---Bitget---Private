@@ -140,15 +140,21 @@ are blocked but the venues you do use may still work.
 
 ### 4. Run it 24/7
 
-**Docker** (config mounted read-only, secrets from `.env`, auto-restart):
+**Docker** (config mounted read-only, secrets from `.env`, auto-restart).
+The bot + web UI live in `docker-compose.legacy.yml` (the root
+`docker-compose.yml` now belongs to the platform API), so always pass `-f`:
 
 ```bash
-cp config.example.json config.json && nano config.json   # use ${VAR} refs
+mkdir -p data && cp config.example.json data/config.json
+nano data/config.json                                    # use ${VAR} refs
 nano .env                                                # VAR=value lines
-docker compose run --rm autobuy --once --dry-run         # sanity check
-docker compose up -d
-docker compose logs -f
+docker compose -f docker-compose.legacy.yml run --rm autobuy --once --dry-run
+docker compose -f docker-compose.legacy.yml up -d
+docker compose -f docker-compose.legacy.yml logs -f
 ```
+
+(The containers read `./data/config.json` — a `config.json` at the repo root
+is only used by bare `python autobuy.py` runs.)
 
 **systemd** (no Docker): see `deploy/autobuy.service` — install notes are in
 the unit file's header comments.
@@ -156,6 +162,88 @@ the unit file's header comments.
 **Alibaba Cloud**: full ECS walkthrough (region choice, security groups,
 EIP whitelisting, both Docker and systemd paths) in
 [`deploy/ALIBABA_CLOUD.md`](deploy/ALIBABA_CLOUD.md).
+
+## Deploying to the AWS server (Tokyo EC2)
+
+The production box is an Ubuntu EC2 instance in `ap-northeast-1` running the
+bot + admin web UI (and, optionally, the platform API stack). The repo is
+checked out at `~/autobuy` on the server, and the server pulls from GitHub
+with its own **deploy key** (`~/.ssh/github_deploy`) — no tokens needed.
+
+### SSH into the server
+
+The private key `Minas-AI-Guardian-Execution-Key-Tokyo.pem` sits in the repo
+root on your machine (it is gitignored — never commit it, and keep it
+`chmod 600`):
+
+```bash
+ssh -i Minas-AI-Guardian-Execution-Key-Tokyo.pem \
+    ubuntu@ec2-18-179-57-78.ap-northeast-1.compute.amazonaws.com
+
+# or the shortcut, which also runs one-off commands:
+bash scripts/server_ssh.sh
+bash scripts/server_ssh.sh 'sudo docker ps'
+```
+
+### Deploy the latest code — one command from your laptop
+
+```bash
+bash scripts/remote_deploy.sh --check    # read-only: show what would change
+bash scripts/remote_deploy.sh           # pull + rebuild + restart the live bot
+```
+
+This streams `scripts/deploy.sh` over SSH and runs it on the server, so it
+works even when the server's checkout predates these scripts.
+
+### Or deploy from a shell on the server
+
+```bash
+cd ~/autobuy
+bash scripts/deploy.sh            # update the bot + web UI (the live stack)
+bash scripts/deploy.sh --check    # read-only preview
+bash scripts/deploy.sh platform   # also/instead deploy the platform API stack
+bash scripts/deploy.sh all        # both stacks
+```
+
+What `deploy.sh` does, in order:
+
+1. Points `origin` at the SSH deploy-key URL (one-time; the box was cloned
+   over HTTPS) and fetches.
+2. Refuses to deploy a commit that's missing the bot-stack files (catches a
+   partial push), then **fast-forward-only** updates the checkout — it also
+   refuses if the server has local commits (use `--force` to discard them;
+   `.env`, `data/` and `secrets/` are gitignored and never touched either
+   way).
+3. Deploys the stack you asked for:
+   * **bot** — keeps the current image tagged `bitget-autobuy:rollback`,
+     builds the new one, smoke-tests it with a `--once --dry-run` pass
+     **before** touching the live containers, then restarts bot + web UI and
+     watches 30s for crash loops — rolling back to the previous image
+     automatically if the new one is unhealthy. The client registry (`data/`)
+     and API keys (`.env`) survive every deploy.
+   * **platform** — runs the API + Postgres + Redis under a separate compose
+     project (`autobuy-platform`) so it can never displace the bot's
+     containers; refuses to start unless `SECRET_KEY`/`ENCRYPTION_KEY` are in
+     `.env`, and waits for `/health` (migrations apply at boot).
+4. Prunes dangling images older than 48h so rebuilds don't fill the disk
+   (the tagged rollback image always survives).
+
+### Useful commands on the server
+
+```bash
+sudo docker compose -f docker-compose.legacy.yml logs -f autobuy   # watch the bot
+sudo docker compose -f docker-compose.legacy.yml logs -f webapp    # watch the UI
+sudo docker compose -f docker-compose.legacy.yml up -d autobuy     # after .env edits
+sudo docker ps                                                     # everything running
+```
+
+Note: after editing `.env` use `up -d` (recreates the container), **not**
+`restart` — a plain restart keeps the old environment and your new API keys
+would silently never be injected. Config changes applied from the web UI
+need neither: the bot hot-reloads `data/config.json` within one poll cycle.
+
+`.env` on the server is root-owned on purpose; edit it with `sudo nano .env`.
+Back up `data/` and `.env` — everything else is reproducible from the repo.
 
 ## Adding a client via the web UI
 

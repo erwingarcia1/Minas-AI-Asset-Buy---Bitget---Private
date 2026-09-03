@@ -8,6 +8,13 @@ docker compose --profile prod up -d --build              # API + Postgres + Redi
 docker compose --profile monitoring up -d                # + Prometheus (:9090)
 ```
 
+The compose project is pinned to `autobuy-platform` (top-level `name:` in
+docker-compose.yml), so these commands are safe to run on the production box
+where the legacy bot's project (`autobuy`, docker-compose.legacy.yml) is also
+running — the two stacks can never displace each other's containers. Never
+run `--remove-orphans` against the legacy project. On the server, deploys go
+through `scripts/deploy.sh platform` (see the README's AWS section).
+
 The entrypoint applies Alembic migrations, then serves via **gunicorn with 4
 uvicorn workers** (measured: p95 245ms @10 concurrent vs 1.6s single-worker).
 The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse them.

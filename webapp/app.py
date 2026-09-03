@@ -9,7 +9,7 @@ whose values live only in the server's .env file.
 Meant to be reached over Tailscale only; never publish its port to the
 public internet. An optional shared password can be set via WEB_PASSWORD.
 
-Run:  python -m webapp.app        (or the `webapp` docker compose service)
+Run:  python -m webapp.app  (or the `webapp` service in docker-compose.legacy.yml)
 """
 
 import csv

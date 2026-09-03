@@ -1,0 +1,90 @@
+# Legacy sub-account auto-buy bot + admin web UI.
+#
+# These services were dropped from docker-compose.yml when the platform API
+# stack moved in; this file restores them unchanged so the live deployment
+# stays manageable. Run with an explicit -f:
+#
+#     docker compose -f docker-compose.legacy.yml up -d --build
+#     docker compose -f docker-compose.legacy.yml logs -f autobuy
+#
+# `name: autobuy` pins the compose project so these services adopt the
+# containers already running on the server (project "autobuy") no matter what
+# the checkout directory is called. The platform API stack is deployed under a
+# different project name (see scripts/deploy.sh) and never collides with this.
+name: autobuy
+
+services:
+  # The trading bot. Reads its config from the shared ./data volume and
+  # hot-reloads it whenever the web UI applies changes.
+  autobuy:
+    build: .
+    image: bitget-autobuy:latest
+    container_name: bitget-autobuy
+    restart: unless-stopped
+    environment:
+      AUTOBUY_CONFIG: /app/data/config.json
+    volumes:
+      - ./data:/app/data
+    # Secrets live in .env only, referenced from config.json as ${VAR}.
+    env_file:
+      - .env
+    logging: &logrotate
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Admin web UI (client registry). Published on localhost only — expose it
+  # to your VAs through Tailscale (`tailscale serve`), never publicly.
+  webapp:
+    build: .
+    image: bitget-autobuy:latest
+    container_name: bitget-autobuy-webapp
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "webapp.app"]
+    environment:
+      BIND: 0.0.0.0
+      DATA_DIR: /app/data
+      AUTOBUY_CONFIG: /app/data/config.json
+      # Optional shared password for the UI (set in .env): WEB_PASSWORD
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    logging: *logrotate
+
+# ---------------------------------------------------------------------------
+# On-chain meme-buy subsystem — wallet signing keys.
+#
+# INTENTIONALLY COMMENTED OUT. Compose validates `secrets: file:` at `up` time,
+# so an active block pointing at files that do not exist yet would make
+# `docker compose up` fail and take the running spot bot down with it. Create
+# the key files FIRST, then uncomment.
+#
+#   install -d -m 700 -o root -g root ./secrets
+#   printf '%s' '<key>' | sudo tee ./secrets/bsc_private_key >/dev/null
+#   sudo chmod 600 ./secrets/bsc_private_key       # repeat for solana_private_key
+#   echo 'secrets/' >> .gitignore
+#
+# Outside Swarm these are BIND-MOUNTS, not encrypted secrets: the files sit in
+# cleartext on the host disk and land in EBS snapshots. What this does buy is
+# removing the env-var exposure paths (`docker inspect`, /proc/<pid>/environ,
+# the container's config.v2.json) and per-service scoping. The code takes a
+# PATH, never a key value — see chains/wallet_keys.py.
+#
+# secrets:
+#   bsc_private_key:
+#     file: ./secrets/bsc_private_key
+#   solana_private_key:
+#     file: ./secrets/solana_private_key
+#
+# Then add to whichever service actually signs (NOT the spot bot):
+#     secrets:
+#       - bsc_private_key
+#       - solana_private_key
+#     environment:
+#       BSC_PRIVATE_KEY_FILE: /run/secrets/bsc_private_key
+#       SOLANA_PRIVATE_KEY_FILE: /run/secrets/solana_private_key
+# ---------------------------------------------------------------------------

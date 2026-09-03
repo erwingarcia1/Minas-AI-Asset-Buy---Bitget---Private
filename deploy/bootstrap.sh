@@ -69,7 +69,7 @@ else
 fi
 
 echo "==> Building the Docker image..."
-docker compose build --quiet
+docker compose -f docker-compose.legacy.yml build --quiet
 
 cat <<'EOF'
 
@@ -77,14 +77,14 @@ cat <<'EOF'
  Setup complete. Next steps:
 
  1. Selftest (no API keys needed — checks Bitget connectivity + clock):
-        docker compose run --rm autobuy --selftest
+        docker compose -f docker-compose.legacy.yml run --rm autobuy --selftest
 
  2. Join your Tailscale network and expose the web UI to it:
         sudo tailscale up            # prints a login URL — open it
         sudo tailscale serve --bg 8080
 
  3. Start everything:
-        docker compose up -d
+        docker compose -f docker-compose.legacy.yml up -d
 
     Web UI (tailnet only):  https://<machine-name>.<tailnet>.ts.net
     Your VAs get access by being invited to your tailnet at
@@ -92,9 +92,9 @@ cat <<'EOF'
 
  4. VAs add clients in the UI and press "Apply to bot". Entries without
     API keys show "awaiting keys" and are skipped by the bot until you
-    add their keys to .env (then: docker compose restart autobuy).
+    add their keys to .env (then: docker compose -f docker-compose.legacy.yml up -d autobuy).
 
  5. When ready to trade: add keys to .env, dry-run first:
-        docker compose run --rm autobuy --once --dry-run
+        docker compose -f docker-compose.legacy.yml run --rm autobuy --once --dry-run
 ==========================================================================
 EOF

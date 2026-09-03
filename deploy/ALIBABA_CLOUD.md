@@ -41,8 +41,9 @@ sudo systemctl enable --now docker
 git clone <your-repo-url> autobuy && cd autobuy
 
 # Config: reference secrets as ${VAR} in config.json...
-cp config.example.json config.json
-nano config.json          # set buy_coin etc.; use "api_key": "${SUB1_API_KEY}", ...
+# (the containers read ./data/config.json — see docker-compose.legacy.yml)
+mkdir -p data && cp config.example.json data/config.json
+nano data/config.json     # set buy_coin etc.; use "api_key": "${SUB1_API_KEY}", ...
 
 # ...and put the secret values in .env (never committed, never in the image)
 cat > .env <<'EOF'
@@ -53,15 +54,17 @@ EOF
 chmod 600 .env
 
 # Dry-run first — confirms credentials, symbols, and connectivity
-docker compose build
-docker compose run --rm autobuy --once --dry-run
+# (the bot + web UI live in docker-compose.legacy.yml; the root
+#  docker-compose.yml belongs to the platform API)
+docker compose -f docker-compose.legacy.yml build
+docker compose -f docker-compose.legacy.yml run --rm autobuy --once --dry-run
 
 # Go live (restarts automatically on crash and on reboot)
-docker compose up -d
-docker compose logs -f    # watch it work
+docker compose -f docker-compose.legacy.yml up -d
+docker compose -f docker-compose.legacy.yml logs -f    # watch it work
 ```
 
-Log rotation is already configured in `docker-compose.yml` (5 × 10 MB).
+Log rotation is already configured in `docker-compose.legacy.yml` (5 × 10 MB).
 To ship logs to Alibaba Log Service (SLS) instead, install the Logtail agent
 and point it at the container's json-file logs.
 
@@ -77,7 +80,7 @@ docker login registry.cn-hongkong.aliyuncs.com
 docker push registry.cn-hongkong.aliyuncs.com/<ns>/bitget-autobuy:latest
 ```
 
-and on the instance replace `build: .` in `docker-compose.yml` with
+and on the instance replace `build: .` in `docker-compose.legacy.yml` with
 `image: registry.cn-hongkong.aliyuncs.com/<ns>/bitget-autobuy:latest`.
 This also unlocks serverless options (SAE / ECI) later — the image has no
 local-state requirements beyond the mounted `config.json`.
@@ -112,12 +115,15 @@ journalctl -u autobuy -f
   symbols and logs what it *would* buy, without spending anything.
 - **Go-live test**: transfer a small amount (e.g. 10 USDT) into one
   sub-account and watch the logs for the buy before trusting it broadly.
-- **Updating config**: edit `config.json` / `.env`, then
-  `docker compose restart autobuy` (or `sudo systemctl restart autobuy`).
+- **Updating config**: `data/config.json` edits are hot-reloaded within one
+  poll cycle. `.env` changes need the container recreated:
+  `docker compose -f docker-compose.legacy.yml up -d autobuy` (`up -d`, not
+  `restart` — a restart keeps the old environment). On systemd:
+  `sudo systemctl restart autobuy`.
 - **API keys**: spot-trade + read only, withdrawals disabled, IP-whitelisted
   to the instance's EIP.
 - **Monitoring**: Alibaba CloudMonitor can alert on instance down / process
   count; for trade-level alerting, tail the logs for `ERROR` lines
-  (`docker compose logs | grep ERROR`).
+  (`docker compose -f docker-compose.legacy.yml logs | grep ERROR`).
 - Snapshot the disk (or just keep `config.json` + `.env` backed up
   somewhere safe) — everything else is reproducible from the repo.
