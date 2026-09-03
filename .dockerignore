@@ -1,28 +1,37 @@
-venv/
-env/
-.venv/
+# Base ignore for the LEGACY bot image (root Dockerfile), which COPYs
+# webapp/, chains/, memebuy/, payout/ and safety/ — do not exclude those here.
+# The platform API build uses its own Dockerfile.api.dockerignore (BuildKit
+# picks <Dockerfile-name>.dockerignore over this file), which excludes far
+# more aggressively.
+.git/
+.gitignore
+.DS_Store
 __pycache__/
 *.pyc
 .pytest_cache/
 .coverage
 htmlcov/
-.git/
-.gitignore
-.DS_Store
+venv/
+env/
+.venv/
+.env
+.env.local
 *.db
 *.sqlite
 *.sqlite3
-.env
-.env.local
+config.json
+*.local.json
+*.pem
+secrets/
+data/
 tests/
 docs/
+deploy/
+deployment/
 frontend/
 mobile/
-data/
-deploy/
-webapp/
-chains/
-memebuy/
-payout/
-safety/
+api/
+alembic/
+templates/
+scripts/
 *.md
