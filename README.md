@@ -14,6 +14,15 @@ server setup. VAs add/edit clients and press *Apply to bot*; the bot
 hot-reloads the config within one poll cycle. API secrets never enter the
 UI or its database — they live only in the server's `.env` file.
 
+**Also in this repo:** the AutoBuy **platform** — a FastAPI + Postgres +
+Redis service with its own web frontend, mobile scaffold, and generated
+client SDKs (`clients/`: Python, JavaScript, TypeScript). The platform and
+this bot are separate deployables: the bot uses `docker-compose.legacy.yml`
++ the root `Dockerfile`, the platform uses `docker-compose.yml` +
+`Dockerfile.api`. Platform docs: [`SETUP_GUIDE.md`](SETUP_GUIDE.md) and
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) (including the production launch
+checklist).
+
 ## How it works
 
 - Every `poll_seconds` (default 30s) the bot checks each sub-account's
@@ -170,6 +179,16 @@ bot + admin web UI (and, optionally, the platform API stack). The repo is
 checked out at `~/autobuy` on the server, and the server pulls from GitHub
 with its own **deploy key** (`~/.ssh/github_deploy`) — no tokens needed.
 
+**All deployments come from the `main` branch.** Both the server and your
+local clone are checked out on `main`; `deploy.sh` deploys whatever branch
+the server has checked out (override with `--branch NAME` for a one-off).
+Merge to `main`, push, then deploy.
+
+The admin web UI is served tailnet-only at
+`https://ip-172-31-21-173.tail0fdd4a.ts.net` — you must be logged into the
+Tailscale network to reach it (invite people at
+https://login.tailscale.com/admin/users).
+
 ### SSH into the server
 
 The private key `Minas-AI-Guardian-Execution-Key-Tokyo.pem` sits in the repo
@@ -207,8 +226,8 @@ bash scripts/deploy.sh all        # both stacks
 
 What `deploy.sh` does, in order:
 
-1. Points `origin` at the SSH deploy-key URL (one-time; the box was cloned
-   over HTTPS) and fetches.
+1. Keeps `origin` on the SSH deploy-key URL and fetches the deploy branch
+   (`main`, unless `--branch` says otherwise).
 2. Refuses to deploy a commit that's missing the bot-stack files (catches a
    partial push), then **fast-forward-only** updates the checkout — it also
    refuses if the server has local commits (use `--force` to discard them;
@@ -224,7 +243,11 @@ What `deploy.sh` does, in order:
    * **platform** — runs the API + Postgres + Redis under a separate compose
      project (`autobuy-platform`) so it can never displace the bot's
      containers; refuses to start unless `SECRET_KEY`/`ENCRYPTION_KEY` are in
-     `.env`, and waits for `/health` (migrations apply at boot).
+     `.env`, and waits for `/health` (migrations apply at boot). Before the
+     first platform deploy, work through the **production checklist** in
+     [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md): fill `.env` from
+     `.env.production.example` and check it with
+     `python scripts/validate_env.py .env` on the server.
 4. Prunes dangling images older than 48h so rebuilds don't fill the disk
    (the tagged rollback image always survives).
 
@@ -235,6 +258,15 @@ sudo docker compose -f docker-compose.legacy.yml logs -f autobuy   # watch the b
 sudo docker compose -f docker-compose.legacy.yml logs -f webapp    # watch the UI
 sudo docker compose -f docker-compose.legacy.yml up -d autobuy     # after .env edits
 sudo docker ps                                                     # everything running
+```
+
+Every bot deploy keeps the previous image tagged `bitget-autobuy:rollback`
+(and rolls back to it automatically if the new one crash-loops). To roll
+back by hand:
+
+```bash
+sudo docker tag bitget-autobuy:rollback bitget-autobuy:latest
+sudo docker compose -f docker-compose.legacy.yml up -d --force-recreate
 ```
 
 Note: after editing `.env` use `up -d` (recreates the container), **not**
