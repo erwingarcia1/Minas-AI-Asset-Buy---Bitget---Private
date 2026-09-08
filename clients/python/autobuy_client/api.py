@@ -10,9 +10,13 @@ from .types import (
     AdminTransactionList,
     AdminUserList,
     AlertItem,
+    ApplicantStatusResponse,
     ChangePasswordRequest,
     ComparisonResponse,
+    CreateApplicantRequest,
+    CreateApplicantResponse,
     DashboardResponse,
+    EmailSentResponse,
     HistoryResponse,
     InitiateResponse,
     IntegrationInfo,
@@ -36,6 +40,8 @@ from .types import (
     RecurringResponse,
     RefreshRequest,
     RegisterRequest,
+    SendNotificationRequest,
+    SendVerificationRequest,
     StatusResponse,
     TimelineResponse,
     TokenResponse,
@@ -110,7 +116,7 @@ class AuthApi:
         """Logout — ``POST /api/auth/logout``."""
         return self._http.request("POST", "/api/auth/logout", auth=False, body=body)
 
-    def change_password_api_auth_change_password_post(self, body: ChangePasswordRequest) -> Any:
+    def change_password(self, body: ChangePasswordRequest) -> Any:
         """Change Password — ``POST /api/auth/change-password``."""
         return self._http.request("POST", "/api/auth/change-password", auth=True, body=body)
 
@@ -141,7 +147,7 @@ class AsyncAuthApi:
         """Logout — ``POST /api/auth/logout``."""
         return await self._http.request("POST", "/api/auth/logout", auth=False, body=body)
 
-    async def change_password_api_auth_change_password_post(self, body: ChangePasswordRequest) -> Any:
+    async def change_password(self, body: ChangePasswordRequest) -> Any:
         """Change Password — ``POST /api/auth/change-password``."""
         return await self._http.request("POST", "/api/auth/change-password", auth=True, body=body)
 
@@ -444,7 +450,7 @@ class ReportsApi:
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
 
-    def tax_summary_api_reports_tax_summary_get(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
+    def tax_summary(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
         """Tax Summary — ``GET /api/reports/tax-summary``."""
         return self._http.request("GET", "/api/reports/tax-summary", auth=True, query={"year": year, "format": format})
 
@@ -463,7 +469,7 @@ class AsyncReportsApi:
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
-    async def tax_summary_api_reports_tax_summary_get(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
+    async def tax_summary(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
         """Tax Summary — ``GET /api/reports/tax-summary``."""
         return await self._http.request("GET", "/api/reports/tax-summary", auth=True, query={"year": year, "format": format})
 
@@ -548,7 +554,7 @@ class AdminApi:
         """Delete User — ``DELETE /api/admin/users/{user_id}``."""
         return self._http.request("DELETE", "/api/admin/users/" + _q(user_id), auth=True, query={"confirm": confirm})
 
-    def kyc_override_api_admin_users_user_id_kyc_override_post(self, user_id: str, body: KycOverride) -> Any:
+    def kyc_override(self, user_id: str, body: KycOverride) -> Any:
         """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
         return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
 
@@ -556,7 +562,7 @@ class AdminApi:
         """All Transactions — ``GET /api/admin/transactions``."""
         return self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
 
-    def force_retry_api_admin_purchases_purchase_id_force_retry_post(self, purchase_id: str) -> Any:
+    def force_retry(self, purchase_id: str) -> Any:
         """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
         return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
 
@@ -599,7 +605,7 @@ class AsyncAdminApi:
         """Delete User — ``DELETE /api/admin/users/{user_id}``."""
         return await self._http.request("DELETE", "/api/admin/users/" + _q(user_id), auth=True, query={"confirm": confirm})
 
-    async def kyc_override_api_admin_users_user_id_kyc_override_post(self, user_id: str, body: KycOverride) -> Any:
+    async def kyc_override(self, user_id: str, body: KycOverride) -> Any:
         """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
         return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
 
@@ -607,7 +613,7 @@ class AsyncAdminApi:
         """All Transactions — ``GET /api/admin/transactions``."""
         return await self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
 
-    async def force_retry_api_admin_purchases_purchase_id_force_retry_post(self, purchase_id: str) -> Any:
+    async def force_retry(self, purchase_id: str) -> Any:
         """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
         return await self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
 
@@ -630,7 +636,7 @@ class AdvancedApi:
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
 
-    def create_limit_order_api_advanced_limit_order_post(self, body: LimitOrderCreate) -> PurchaseResponse:
+    def create_limit_order(self, body: LimitOrderCreate) -> PurchaseResponse:
         """Create Limit Order — ``POST /api/advanced/limit-order``."""
         return self._http.request("POST", "/api/advanced/limit-order", auth=True, body=body)
 
@@ -649,7 +655,7 @@ class AsyncAdvancedApi:
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
-    async def create_limit_order_api_advanced_limit_order_post(self, body: LimitOrderCreate) -> PurchaseResponse:
+    async def create_limit_order(self, body: LimitOrderCreate) -> PurchaseResponse:
         """Create Limit Order — ``POST /api/advanced/limit-order``."""
         return await self._http.request("POST", "/api/advanced/limit-order", auth=True, body=body)
 
@@ -726,6 +732,14 @@ class KycApi:
         """Sumsub Webhook — ``POST /api/kyc/webhook``."""
         return self._http.request("POST", "/api/kyc/webhook", auth=False)
 
+    def create_applicant(self, body: CreateApplicantRequest) -> CreateApplicantResponse:
+        """Create Applicant — ``POST /api/kyc/create-applicant``."""
+        return self._http.request("POST", "/api/kyc/create-applicant", auth=True, body=body)
+
+    def applicant_status(self, applicant_id: str) -> ApplicantStatusResponse:
+        """Applicant Status — ``GET /api/kyc/applicant/{applicant_id}/status``."""
+        return self._http.request("GET", "/api/kyc/applicant/" + _q(applicant_id) + "/status", auth=True)
+
 
 class AsyncKycApi:
     """`kyc` endpoints (async)."""
@@ -745,12 +759,24 @@ class AsyncKycApi:
         """Sumsub Webhook — ``POST /api/kyc/webhook``."""
         return await self._http.request("POST", "/api/kyc/webhook", auth=False)
 
+    async def create_applicant(self, body: CreateApplicantRequest) -> CreateApplicantResponse:
+        """Create Applicant — ``POST /api/kyc/create-applicant``."""
+        return await self._http.request("POST", "/api/kyc/create-applicant", auth=True, body=body)
+
+    async def applicant_status(self, applicant_id: str) -> ApplicantStatusResponse:
+        """Applicant Status — ``GET /api/kyc/applicant/{applicant_id}/status``."""
+        return await self._http.request("GET", "/api/kyc/applicant/" + _q(applicant_id) + "/status", auth=True)
+
 
 class WebhooksApi:
     """`webhooks` endpoints."""
 
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
+
+    def sumsub_events(self) -> Any:
+        """Sumsub Events — ``POST /api/webhooks/sumsub``."""
+        return self._http.request("POST", "/api/webhooks/sumsub", auth=False)
 
     def resend_events(self) -> Any:
         """Resend Events — ``POST /api/webhooks/resend``."""
@@ -763,9 +789,43 @@ class AsyncWebhooksApi:
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
+    async def sumsub_events(self) -> Any:
+        """Sumsub Events — ``POST /api/webhooks/sumsub``."""
+        return await self._http.request("POST", "/api/webhooks/sumsub", auth=False)
+
     async def resend_events(self) -> Any:
         """Resend Events — ``POST /api/webhooks/resend``."""
         return await self._http.request("POST", "/api/webhooks/resend", auth=False)
+
+
+class EmailApi:
+    """`email` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def send_verification(self, body: SendVerificationRequest) -> EmailSentResponse:
+        """Send Verification — ``POST /api/email/send-verification``."""
+        return self._http.request("POST", "/api/email/send-verification", auth=True, body=body)
+
+    def send_notification(self, body: SendNotificationRequest) -> EmailSentResponse:
+        """Send Notification — ``POST /api/email/send-notification``."""
+        return self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
+
+
+class AsyncEmailApi:
+    """`email` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def send_verification(self, body: SendVerificationRequest) -> EmailSentResponse:
+        """Send Verification — ``POST /api/email/send-verification``."""
+        return await self._http.request("POST", "/api/email/send-verification", auth=True, body=body)
+
+    async def send_notification(self, body: SendNotificationRequest) -> EmailSentResponse:
+        """Send Notification — ``POST /api/email/send-notification``."""
+        return await self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
 
 
 class TestPurchaseApi:
@@ -774,11 +834,11 @@ class TestPurchaseApi:
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
 
-    def execute_purchase_test_purchase_execute_purchase_id_post(self, purchase_id: str, *, dry_run: Optional[bool] = None) -> TransactionResponse:
+    def execute_purchase(self, purchase_id: str, *, dry_run: Optional[bool] = None) -> TransactionResponse:
         """Execute Purchase — ``POST /test-purchase/execute/{purchase_id}``."""
         return self._http.request("POST", "/test-purchase/execute/" + _q(purchase_id), auth=True, query={"dry_run": dry_run})
 
-    def account_balance_test_purchase_balance_coin_get(self, coin: str) -> Any:
+    def account_balance(self, coin: str) -> Any:
         """Account Balance — ``GET /test-purchase/balance/{coin}``."""
         return self._http.request("GET", "/test-purchase/balance/" + _q(coin), auth=True)
 
@@ -789,11 +849,11 @@ class AsyncTestPurchaseApi:
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
-    async def execute_purchase_test_purchase_execute_purchase_id_post(self, purchase_id: str, *, dry_run: Optional[bool] = None) -> TransactionResponse:
+    async def execute_purchase(self, purchase_id: str, *, dry_run: Optional[bool] = None) -> TransactionResponse:
         """Execute Purchase — ``POST /test-purchase/execute/{purchase_id}``."""
         return await self._http.request("POST", "/test-purchase/execute/" + _q(purchase_id), auth=True, query={"dry_run": dry_run})
 
-    async def account_balance_test_purchase_balance_coin_get(self, coin: str) -> Any:
+    async def account_balance(self, coin: str) -> Any:
         """Account Balance — ``GET /test-purchase/balance/{coin}``."""
         return await self._http.request("GET", "/test-purchase/balance/" + _q(coin), auth=True)
 
@@ -817,6 +877,7 @@ class Api:
         self.analytics = AnalyticsApi(http)
         self.kyc = KycApi(http)
         self.webhooks = WebhooksApi(http)
+        self.email = EmailApi(http)
         self.test_purchase = TestPurchaseApi(http)
 
 
@@ -839,4 +900,5 @@ class AsyncApi:
         self.analytics = AsyncAnalyticsApi(http)
         self.kyc = AsyncKycApi(http)
         self.webhooks = AsyncWebhooksApi(http)
+        self.email = AsyncEmailApi(http)
         self.test_purchase = AsyncTestPurchaseApi(http)

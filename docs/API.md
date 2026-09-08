@@ -56,7 +56,9 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 |---|---|
 | auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` |
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
-| kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /webhook` (Sumsub, HMAC) |
+| kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
+| email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
+| webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
 | exchange (`/api/exchange`) | `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` |
 | purchases (`/api/purchases`) | `POST/GET /` · `GET/PUT/DELETE /{id}` · `PATCH /{id}/toggle` |
 | transactions (`/api/transactions`) | `GET /` (paginated ≤100) · `/{id}` · `/stats/summary` · `/crypto/{c}` · `/status/{s}` |

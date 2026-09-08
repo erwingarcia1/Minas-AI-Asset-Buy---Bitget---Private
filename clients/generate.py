@@ -54,8 +54,8 @@ def ref_name(schema: dict | None) -> str | None:
 
 
 def op_func_name(op_id: str, path: str, method: str) -> str:
-    """FastAPI operationId = <function>_<path with / { } -> _>_<method>; recover <function>."""
-    suffix = path.replace("/", "_").replace("{", "_").replace("}", "_") + "_" + method
+    """FastAPI operationId = <function>_<path with every non-word char -> _>_<method>; recover <function>."""
+    suffix = re.sub(r"\W", "_", path) + "_" + method
     if op_id.endswith(suffix):
         return op_id[: -len(suffix)]
     return op_id

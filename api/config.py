@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # Email (Resend)
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@minastech.ca")
+    # Public web app origin used in emailed links; defaults to the first CORS origin
+    app_base_url: str = os.getenv("APP_BASE_URL", "")
     
     # Binance
     binance_api_key: str = os.getenv("BINANCE_API_KEY", "")

@@ -66,7 +66,7 @@ async def get_current_user(
         )
     except JWTError:
         raise unauthorized
-    if payload.get("type") == "refresh":  # refresh tokens are not access tokens
+    if payload.get("type") in ("refresh", "email_verify"):  # only access tokens log in
         raise unauthorized
     sub = payload.get("sub")
     if not sub:

@@ -82,7 +82,7 @@ export class AuthApi {
    * @param {import('./types.js').ChangePasswordRequest} body
    * @returns {Promise<unknown>}
    */
-  changePasswordApiAuthChangePasswordPost(body) {
+  changePassword(body) {
     return this.http.request("POST", "/api/auth/change-password", { body, auth: true });
   }
 
@@ -383,7 +383,7 @@ export class ReportsApi {
    * @param {{ year?: number; format?: string }} [query]
    * @returns {Promise<unknown>}
    */
-  taxSummaryApiReportsTaxSummaryGet(query) {
+  taxSummary(query) {
     return this.http.request("GET", "/api/reports/tax-summary", { query, auth: true });
   }
 
@@ -507,7 +507,7 @@ export class AdminApi {
    * @param {import('./types.js').KycOverride} body
    * @returns {Promise<unknown>}
    */
-  kycOverrideApiAdminUsersUserIdKycOverridePost(userId, body) {
+  kycOverride(userId, body) {
     return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/kyc-override", { body, auth: true });
   }
 
@@ -525,7 +525,7 @@ export class AdminApi {
    * @param {string} purchaseId
    * @returns {Promise<unknown>}
    */
-  forceRetryApiAdminPurchasesPurchaseIdForceRetryPost(purchaseId) {
+  forceRetry(purchaseId) {
     return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
   }
 
@@ -567,7 +567,7 @@ export class AdvancedApi {
    * @param {import('./types.js').LimitOrderCreate} body
    * @returns {Promise<import('./types.js').PurchaseResponse>}
    */
-  createLimitOrderApiAdvancedLimitOrderPost(body) {
+  createLimitOrder(body) {
     return this.http.request("POST", "/api/advanced/limit-order", { body, auth: true });
   }
 
@@ -662,6 +662,24 @@ export class KycApi {
     return this.http.request("POST", "/api/kyc/webhook", { auth: false });
   }
 
+  /**
+   * Create Applicant — `POST /api/kyc/create-applicant`
+   * @param {import('./types.js').CreateApplicantRequest} body
+   * @returns {Promise<import('./types.js').CreateApplicantResponse>}
+   */
+  createApplicant(body) {
+    return this.http.request("POST", "/api/kyc/create-applicant", { body, auth: true });
+  }
+
+  /**
+   * Applicant Status — `GET /api/kyc/applicant/{applicant_id}/status`
+   * @param {string} applicantId
+   * @returns {Promise<import('./types.js').ApplicantStatusResponse>}
+   */
+  applicantStatus(applicantId) {
+    return this.http.request("GET", "/api/kyc/applicant/" + encodeURIComponent(String(applicantId)) + "/status", { auth: true });
+  }
+
 }
 
 /** `webhooks` endpoints. */
@@ -672,11 +690,46 @@ export class WebhooksApi {
   }
 
   /**
+   * Sumsub Events — `POST /api/webhooks/sumsub`
+   * @returns {Promise<unknown>}
+   */
+  sumsubEvents() {
+    return this.http.request("POST", "/api/webhooks/sumsub", { auth: false });
+  }
+
+  /**
    * Resend Events — `POST /api/webhooks/resend`
    * @returns {Promise<unknown>}
    */
   resendEvents() {
     return this.http.request("POST", "/api/webhooks/resend", { auth: false });
+  }
+
+}
+
+/** `email` endpoints. */
+export class EmailApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Send Verification — `POST /api/email/send-verification`
+   * @param {import('./types.js').SendVerificationRequest} body
+   * @returns {Promise<import('./types.js').EmailSentResponse>}
+   */
+  sendVerification(body) {
+    return this.http.request("POST", "/api/email/send-verification", { body, auth: true });
+  }
+
+  /**
+   * Send Notification — `POST /api/email/send-notification`
+   * @param {import('./types.js').SendNotificationRequest} body
+   * @returns {Promise<import('./types.js').EmailSentResponse>}
+   */
+  sendNotification(body) {
+    return this.http.request("POST", "/api/email/send-notification", { body, auth: true });
   }
 
 }
@@ -694,7 +747,7 @@ export class TestPurchaseApi {
    * @param {{ dry_run?: boolean }} [query]
    * @returns {Promise<import('./types.js').TransactionResponse>}
    */
-  executePurchaseTestPurchaseExecutePurchaseIdPost(purchaseId, query) {
+  executePurchase(purchaseId, query) {
     return this.http.request("POST", "/test-purchase/execute/" + encodeURIComponent(String(purchaseId)), { query, auth: true });
   }
 
@@ -703,7 +756,7 @@ export class TestPurchaseApi {
    * @param {string} coin
    * @returns {Promise<unknown>}
    */
-  accountBalanceTestPurchaseBalanceCoinGet(coin) {
+  accountBalance(coin) {
     return this.http.request("GET", "/test-purchase/balance/" + encodeURIComponent(String(coin)), { auth: true });
   }
 
@@ -727,6 +780,7 @@ export function buildApi(http) {
     analytics: new AnalyticsApi(http),
     kyc: new KycApi(http),
     webhooks: new WebhooksApi(http),
+    email: new EmailApi(http),
     testPurchase: new TestPurchaseApi(http),
   };
 }

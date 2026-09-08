@@ -7,9 +7,13 @@ import type {
   AdminTransactionList,
   AdminUserList,
   AlertItem,
+  ApplicantStatusResponse,
   ChangePasswordRequest,
   ComparisonResponse,
+  CreateApplicantRequest,
+  CreateApplicantResponse,
   DashboardResponse,
+  EmailSentResponse,
   HistoryResponse,
   InitiateResponse,
   IntegrationInfo,
@@ -33,6 +37,8 @@ import type {
   RecurringResponse,
   RefreshRequest,
   RegisterRequest,
+  SendNotificationRequest,
+  SendVerificationRequest,
   StatusResponse,
   TimelineResponse,
   TokenResponse,
@@ -96,7 +102,7 @@ export class AuthApi {
   }
 
   /** Change Password — `POST /api/auth/change-password` */
-  changePasswordApiAuthChangePasswordPost(body: ChangePasswordRequest): Promise<unknown> {
+  changePassword(body: ChangePasswordRequest): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/auth/change-password", { body, auth: true });
   }
 
@@ -273,7 +279,7 @@ export class ReportsApi {
   constructor(private readonly http: HttpTransport) {}
 
   /** Tax Summary — `GET /api/reports/tax-summary` */
-  taxSummaryApiReportsTaxSummaryGet(query?: { year?: number; format?: string }): Promise<unknown> {
+  taxSummary(query?: { year?: number; format?: string }): Promise<unknown> {
     return this.http.request<unknown>("GET", "/api/reports/tax-summary", { query, auth: true });
   }
 
@@ -345,7 +351,7 @@ export class AdminApi {
   }
 
   /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
-  kycOverrideApiAdminUsersUserIdKycOverridePost(userId: string, body: KycOverride): Promise<unknown> {
+  kycOverride(userId: string, body: KycOverride): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/kyc-override", { body, auth: true });
   }
 
@@ -355,7 +361,7 @@ export class AdminApi {
   }
 
   /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
-  forceRetryApiAdminPurchasesPurchaseIdForceRetryPost(purchaseId: string): Promise<unknown> {
+  forceRetry(purchaseId: string): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
   }
 
@@ -381,7 +387,7 @@ export class AdvancedApi {
   constructor(private readonly http: HttpTransport) {}
 
   /** Create Limit Order — `POST /api/advanced/limit-order` */
-  createLimitOrderApiAdvancedLimitOrderPost(body: LimitOrderCreate): Promise<PurchaseResponse> {
+  createLimitOrder(body: LimitOrderCreate): Promise<PurchaseResponse> {
     return this.http.request<PurchaseResponse>("POST", "/api/advanced/limit-order", { body, auth: true });
   }
 
@@ -442,15 +448,46 @@ export class KycApi {
     return this.http.request<unknown>("POST", "/api/kyc/webhook", { auth: false });
   }
 
+  /** Create Applicant — `POST /api/kyc/create-applicant` */
+  createApplicant(body: CreateApplicantRequest): Promise<CreateApplicantResponse> {
+    return this.http.request<CreateApplicantResponse>("POST", "/api/kyc/create-applicant", { body, auth: true });
+  }
+
+  /** Applicant Status — `GET /api/kyc/applicant/{applicant_id}/status` */
+  applicantStatus(applicantId: string): Promise<ApplicantStatusResponse> {
+    return this.http.request<ApplicantStatusResponse>("GET", "/api/kyc/applicant/" + encodeURIComponent(String(applicantId)) + "/status", { auth: true });
+  }
+
 }
 
 /** `webhooks` endpoints. */
 export class WebhooksApi {
   constructor(private readonly http: HttpTransport) {}
 
+  /** Sumsub Events — `POST /api/webhooks/sumsub` */
+  sumsubEvents(): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/webhooks/sumsub", { auth: false });
+  }
+
   /** Resend Events — `POST /api/webhooks/resend` */
   resendEvents(): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/webhooks/resend", { auth: false });
+  }
+
+}
+
+/** `email` endpoints. */
+export class EmailApi {
+  constructor(private readonly http: HttpTransport) {}
+
+  /** Send Verification — `POST /api/email/send-verification` */
+  sendVerification(body: SendVerificationRequest): Promise<EmailSentResponse> {
+    return this.http.request<EmailSentResponse>("POST", "/api/email/send-verification", { body, auth: true });
+  }
+
+  /** Send Notification — `POST /api/email/send-notification` */
+  sendNotification(body: SendNotificationRequest): Promise<EmailSentResponse> {
+    return this.http.request<EmailSentResponse>("POST", "/api/email/send-notification", { body, auth: true });
   }
 
 }
@@ -460,12 +497,12 @@ export class TestPurchaseApi {
   constructor(private readonly http: HttpTransport) {}
 
   /** Execute Purchase — `POST /test-purchase/execute/{purchase_id}` */
-  executePurchaseTestPurchaseExecutePurchaseIdPost(purchaseId: string, query?: { dry_run?: boolean }): Promise<TransactionResponse> {
+  executePurchase(purchaseId: string, query?: { dry_run?: boolean }): Promise<TransactionResponse> {
     return this.http.request<TransactionResponse>("POST", "/test-purchase/execute/" + encodeURIComponent(String(purchaseId)), { query, auth: true });
   }
 
   /** Account Balance — `GET /test-purchase/balance/{coin}` */
-  accountBalanceTestPurchaseBalanceCoinGet(coin: string): Promise<unknown> {
+  accountBalance(coin: string): Promise<unknown> {
     return this.http.request<unknown>("GET", "/test-purchase/balance/" + encodeURIComponent(String(coin)), { auth: true });
   }
 
@@ -489,6 +526,7 @@ export function buildApi(http: HttpTransport) {
     analytics: new AnalyticsApi(http),
     kyc: new KycApi(http),
     webhooks: new WebhooksApi(http),
+    email: new EmailApi(http),
     testPurchase: new TestPurchaseApi(http),
   } as const;
 }

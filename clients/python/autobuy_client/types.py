@@ -79,6 +79,15 @@ class AlertItem(TypedDict):
     detail: str
 
 
+class ApplicantStatusResponse(TypedDict):
+    """ApplicantStatusResponse."""
+    applicant_id: str
+    kyc_status: str
+    review_status: str
+    review_answer: NotRequired[Optional[str]]
+    reject_labels: NotRequired[List[str]]
+
+
 class ChangePasswordRequest(TypedDict):
     """ChangePasswordRequest."""
     current_password: str
@@ -99,6 +108,20 @@ class ComparisonResponse(TypedDict):
     diversification_score: float
 
 
+class CreateApplicantRequest(TypedDict):
+    """CreateApplicantRequest."""
+    email: str
+    first_name: str
+    last_name: str
+
+
+class CreateApplicantResponse(TypedDict):
+    """CreateApplicantResponse."""
+    applicant_id: str
+    kyc_status: str
+    created: bool
+
+
 class CryptoHolding(TypedDict):
     """CryptoHolding."""
     crypto: str
@@ -112,6 +135,12 @@ class DashboardResponse(TypedDict):
     active_purchases: List[ActivePurchase]
     upcoming_purchases: List[UpcomingPurchase]
     monthly_average_usdt: float
+
+
+class EmailSentResponse(TypedDict):
+    """EmailSentResponse."""
+    sent: bool
+    email_id: NotRequired[Optional[str]]
 
 
 class HTTPValidationError(TypedDict):
@@ -346,6 +375,18 @@ class RegisterRequest(TypedDict):
     """RegisterRequest."""
     email: str
     password: str
+
+
+class SendNotificationRequest(TypedDict):
+    """SendNotificationRequest."""
+    email: str
+    subject: str
+    message: str
+
+
+class SendVerificationRequest(TypedDict):
+    """SendVerificationRequest."""
+    email: str
 
 
 class StatusResponse(TypedDict):

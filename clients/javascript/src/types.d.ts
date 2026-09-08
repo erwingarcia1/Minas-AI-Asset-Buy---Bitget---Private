@@ -63,6 +63,14 @@ export interface AlertItem {
   detail: string;
 }
 
+export interface ApplicantStatusResponse {
+  applicant_id: string;
+  kyc_status: string;
+  review_status: string;
+  review_answer?: string | null;
+  reject_labels?: string[];
+}
+
 export interface ChangePasswordRequest {
   current_password: string;
   new_password: string;
@@ -80,6 +88,18 @@ export interface ComparisonResponse {
   diversification_score: number;
 }
 
+export interface CreateApplicantRequest {
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+export interface CreateApplicantResponse {
+  applicant_id: string;
+  kyc_status: string;
+  created: boolean;
+}
+
 export interface CryptoHolding {
   crypto: string;
   total_amount: number;
@@ -91,6 +111,11 @@ export interface DashboardResponse {
   active_purchases: ActivePurchase[];
   upcoming_purchases: UpcomingPurchase[];
   monthly_average_usdt: number;
+}
+
+export interface EmailSentResponse {
+  sent: boolean;
+  email_id?: string | null;
 }
 
 export interface HTTPValidationError {
@@ -296,6 +321,16 @@ export interface RefreshRequest {
 export interface RegisterRequest {
   email: string;
   password: string;
+}
+
+export interface SendNotificationRequest {
+  email: string;
+  subject: string;
+  message: string;
+}
+
+export interface SendVerificationRequest {
+  email: string;
 }
 
 export interface StatusResponse {

@@ -7,9 +7,13 @@ import type {
   AdminTransactionList,
   AdminUserList,
   AlertItem,
+  ApplicantStatusResponse,
   ChangePasswordRequest,
   ComparisonResponse,
+  CreateApplicantRequest,
+  CreateApplicantResponse,
   DashboardResponse,
+  EmailSentResponse,
   HistoryResponse,
   InitiateResponse,
   IntegrationInfo,
@@ -33,6 +37,8 @@ import type {
   RecurringResponse,
   RefreshRequest,
   RegisterRequest,
+  SendNotificationRequest,
+  SendVerificationRequest,
   StatusResponse,
   TimelineResponse,
   TokenResponse,
@@ -73,7 +79,7 @@ export declare class AuthApi {
   /** Logout — `POST /api/auth/logout` */
   logout(body: LogoutRequest): Promise<unknown>;
   /** Change Password — `POST /api/auth/change-password` */
-  changePasswordApiAuthChangePasswordPost(body: ChangePasswordRequest): Promise<unknown>;
+  changePassword(body: ChangePasswordRequest): Promise<unknown>;
 }
 
 /** `user` endpoints. */
@@ -162,7 +168,7 @@ export declare class IntegrationsApi {
 export declare class ReportsApi {
   constructor(http: HttpTransport);
   /** Tax Summary — `GET /api/reports/tax-summary` */
-  taxSummaryApiReportsTaxSummaryGet(query?: { year?: number; format?: string }): Promise<unknown>;
+  taxSummary(query?: { year?: number; format?: string }): Promise<unknown>;
   /** Performance — `GET /api/reports/performance` */
   performance(): Promise<unknown>;
   /** Export Pdf — `GET /api/reports/export` */
@@ -196,11 +202,11 @@ export declare class AdminApi {
   /** Delete User — `DELETE /api/admin/users/{user_id}` */
   deleteUser(userId: string, query: { confirm: string }): Promise<unknown>;
   /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
-  kycOverrideApiAdminUsersUserIdKycOverridePost(userId: string, body: KycOverride): Promise<unknown>;
+  kycOverride(userId: string, body: KycOverride): Promise<unknown>;
   /** All Transactions — `GET /api/admin/transactions` */
   allTransactions(query?: { status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }): Promise<AdminTransactionList>;
   /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
-  forceRetryApiAdminPurchasesPurchaseIdForceRetryPost(purchaseId: string): Promise<unknown>;
+  forceRetry(purchaseId: string): Promise<unknown>;
   /** Alerts — `GET /api/admin/alerts` */
   alerts(): Promise<AlertItem[]>;
   /** Pause Scheduler — `POST /api/admin/scheduler/pause` */
@@ -213,7 +219,7 @@ export declare class AdminApi {
 export declare class AdvancedApi {
   constructor(http: HttpTransport);
   /** Create Limit Order — `POST /api/advanced/limit-order` */
-  createLimitOrderApiAdvancedLimitOrderPost(body: LimitOrderCreate): Promise<PurchaseResponse>;
+  createLimitOrder(body: LimitOrderCreate): Promise<PurchaseResponse>;
   /** Create Rebalance Plan — `POST /api/advanced/rebalance` */
   createRebalancePlan(body: RebalanceCreate): Promise<RebalancePlan>;
   /** Opportunities — `GET /api/advanced/opportunities` */
@@ -242,22 +248,37 @@ export declare class KycApi {
   kycStatus(): Promise<StatusResponse>;
   /** Sumsub Webhook — `POST /api/kyc/webhook` */
   sumsubWebhook(): Promise<unknown>;
+  /** Create Applicant — `POST /api/kyc/create-applicant` */
+  createApplicant(body: CreateApplicantRequest): Promise<CreateApplicantResponse>;
+  /** Applicant Status — `GET /api/kyc/applicant/{applicant_id}/status` */
+  applicantStatus(applicantId: string): Promise<ApplicantStatusResponse>;
 }
 
 /** `webhooks` endpoints. */
 export declare class WebhooksApi {
   constructor(http: HttpTransport);
+  /** Sumsub Events — `POST /api/webhooks/sumsub` */
+  sumsubEvents(): Promise<unknown>;
   /** Resend Events — `POST /api/webhooks/resend` */
   resendEvents(): Promise<unknown>;
+}
+
+/** `email` endpoints. */
+export declare class EmailApi {
+  constructor(http: HttpTransport);
+  /** Send Verification — `POST /api/email/send-verification` */
+  sendVerification(body: SendVerificationRequest): Promise<EmailSentResponse>;
+  /** Send Notification — `POST /api/email/send-notification` */
+  sendNotification(body: SendNotificationRequest): Promise<EmailSentResponse>;
 }
 
 /** `test-purchase` endpoints. */
 export declare class TestPurchaseApi {
   constructor(http: HttpTransport);
   /** Execute Purchase — `POST /test-purchase/execute/{purchase_id}` */
-  executePurchaseTestPurchaseExecutePurchaseIdPost(purchaseId: string, query?: { dry_run?: boolean }): Promise<TransactionResponse>;
+  executePurchase(purchaseId: string, query?: { dry_run?: boolean }): Promise<TransactionResponse>;
   /** Account Balance — `GET /test-purchase/balance/{coin}` */
-  accountBalanceTestPurchaseBalanceCoinGet(coin: string): Promise<unknown>;
+  accountBalance(coin: string): Promise<unknown>;
 }
 
 export interface Api {
@@ -276,6 +297,7 @@ export interface Api {
   readonly analytics: AnalyticsApi;
   readonly kyc: KycApi;
   readonly webhooks: WebhooksApi;
+  readonly email: EmailApi;
   readonly testPurchase: TestPurchaseApi;
 }
 export declare function buildApi(http: HttpTransport): Api;

@@ -28,10 +28,12 @@ def map_review_to_kyc_status(review_status: str, review_answer: str | None) -> s
 
 
 class SumsubClient:
-    def __init__(self, app_token: str = "", secret_key: str = "", base_url: str = ""):
+    def __init__(self, app_token: str = "", secret_key: str = "", base_url: str = "",
+                 transport: httpx.AsyncBaseTransport | None = None):
         self.app_token = app_token or settings.sumsub_app_token
         self.secret_key = secret_key or settings.sumsub_secret_key
         self.base_url = (base_url or settings.sumsub_api_url).rstrip("/")
+        self._transport = transport  # tests inject httpx.MockTransport
 
     @property
     def configured(self) -> bool:
@@ -48,7 +50,7 @@ class SumsubClient:
     async def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         body = json.dumps(payload) if payload is not None else ""
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=15, transport=self._transport) as client:
                 resp = await client.request(
                     method, f"{self.base_url}{path}",
                     headers=self._headers(method, path, body),
@@ -58,6 +60,10 @@ class SumsubClient:
         if resp.status_code >= 400:
             raise SumsubError(f"Sumsub {resp.status_code}: {resp.text[:300]}")
         return resp.json()
+
+    async def request(self, method: str, path: str, payload: dict | None = None) -> dict:
+        """Signed request to an arbitrary Sumsub endpoint; returns the JSON body."""
+        return await self._request(method, path, payload)
 
     async def create_applicant(self, external_user_id: str, email: str) -> str:
         """Create an applicant; returns the Sumsub applicant id."""

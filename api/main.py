@@ -150,6 +150,8 @@ from api.routes import kyc
 app.include_router(kyc.router, prefix="/api/kyc", tags=["kyc"])
 from api.routes import webhooks
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
+from api.routes import email
+app.include_router(email.router, prefix="/api/email", tags=["user"])
 
 # TEMPORARY (remove in Phase 3): manual purchase-execution routes for testing
 from api.routes import test_purchase
