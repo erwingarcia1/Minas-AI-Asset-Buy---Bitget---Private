@@ -2,6 +2,13 @@
 config.json
 *.local.json
 .env
+.env.*
+!.env.example
+!.env.production.example
+.envy
+.env.bak
+.env.production
+.env.*.local
 data/
 
 __pycache__/
