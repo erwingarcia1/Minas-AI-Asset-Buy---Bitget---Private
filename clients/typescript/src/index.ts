@@ -1,0 +1,99 @@
+/**
+ * AutoBuy Crypto API — TypeScript client.
+ *
+ *   const client = new AutoBuyClient({ baseUrl: "http://localhost:8000" });
+ *   await client.login("me@example.com", "Str0ng!Passw0rd");
+ *   const purchase = await client.purchases.createPurchase({ crypto: "BTC", amount_usdt: 50, frequency: "weekly" });
+ */
+import { buildApi, type Api } from "./api.js";
+import { FetchTransport, type FetchTransportOptions, type TokenPair } from "./http.js";
+import type { PurchaseCreate, PurchaseResponse, TokenResponse, UserOut, UserProfile } from "./types.js";
+
+export * from "./types.js";
+export * from "./api.js";
+export {
+  ApiError, AuthenticationError, RateLimitError, ValidationError, FetchTransport,
+  type HttpTransport, type RequestOptions, type TokenPair, type FetchTransportOptions, type ValidationDetail,
+} from "./http.js";
+
+export type AutoBuyClientOptions = FetchTransportOptions;
+
+/** High-level client: resource groups from the OpenAPI spec plus token-lifecycle helpers. */
+export class AutoBuyClient {
+  readonly transport: FetchTransport;
+  private readonly api: Api;
+
+  constructor(opts: AutoBuyClientOptions) {
+    this.transport = new FetchTransport(opts);
+    this.api = buildApi(this.transport);
+  }
+
+  // ---- resource groups (generated from the spec) --------------------------
+  get system() { return this.api.system; }
+  get auth() { return this.api.auth; }
+  get user() { return this.api.user; }
+  get exchange() { return this.api.exchange; }
+  get purchases() { return this.api.purchases; }
+  get transactions() { return this.api.transactions; }
+  get dashboard() { return this.api.dashboard; }
+  get integrations() { return this.api.integrations; }
+  get reports() { return this.api.reports; }
+  get notifications() { return this.api.notifications; }
+  get admin() { return this.api.admin; }
+  get advanced() { return this.api.advanced; }
+  get analytics() { return this.api.analytics; }
+  get kyc() { return this.api.kyc; }
+  get webhooks() { return this.api.webhooks; }
+  /** Development-only routes; removed before production (#34). */
+  get testPurchase() { return this.api.testPurchase; }
+
+  // ---- auth helpers ---------------------------------------------------------
+
+  /** Current token pair (null when logged out). */
+  get tokens(): TokenPair | null {
+    return this.transport.getTokens();
+  }
+
+  /** Install a token pair obtained elsewhere (e.g. restored from storage). */
+  setTokens(tokens: TokenPair | null): void {
+    this.transport.setTokens(tokens);
+  }
+
+  /** `POST /api/auth/register` — create an account. Does not log in. */
+  register(email: string, password: string): Promise<UserOut> {
+    return this.api.auth.register({ email, password });
+  }
+
+  /** `POST /api/auth/login` — authenticate and store the resulting tokens. */
+  async login(email: string, password: string): Promise<TokenResponse> {
+    const pair = await this.api.auth.login({ email, password });
+    this.transport.setTokens(pair);
+    return pair;
+  }
+
+  /** Force a refresh now (normally happens automatically on 401). */
+  refreshTokens(): Promise<TokenPair> {
+    return this.transport.refresh();
+  }
+
+  /** `POST /api/auth/logout` — revoke the refresh token and clear local state. */
+  async logout(): Promise<void> {
+    const refresh_token = this.tokens?.refresh_token;
+    if (refresh_token) {
+      await this.api.auth.logout({ refresh_token }).catch(() => undefined);
+    }
+    this.transport.setTokens(null);
+  }
+
+  /** `GET /api/user/profile` — the authenticated user. */
+  me(): Promise<UserProfile> {
+    return this.api.user.getProfile();
+  }
+
+  /** Convenience wrapper around `purchases.createPurchase`. */
+  createPurchase(body: PurchaseCreate): Promise<PurchaseResponse> {
+    return this.api.purchases.createPurchase(body);
+  }
+}
+
+export default AutoBuyClient;

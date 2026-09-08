@@ -1,0 +1,16 @@
+{
+  "name": "@autobuy/js-client",
+  "version": "0.4.1",
+  "description": "JavaScript client for the AutoBuy Crypto API with bundled TypeScript types (generated from OpenAPI)",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": { ".": { "types": "./src/index.d.ts", "import": "./src/index.js" } },
+  "files": ["src", "README.md"],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "keywords": ["autobuy", "crypto", "api-client", "openapi", "javascript"],
+  "license": "MIT",
+  "engines": { "node": ">=18" }
+}

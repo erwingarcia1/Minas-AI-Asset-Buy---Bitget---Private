@@ -91,7 +91,13 @@ login/register 5/min · verify/refresh/logout 10/min · key verification 3/min �
 purchase creation 20/min · transaction listing 30/min · dashboard 10/min ·
 default 60/min. Login lockout: 5 failed attempts → 15 minutes.
 
-## Planned (Phase 4+)
+## Client SDKs
 
-WebSocket push for live transaction status; client SDKs generated from
-`/openapi.json`.
+Generated from `/openapi.json` and kept in [`clients/`](../clients/README.md):
+`autobuy-client` (Python, sync + asyncio), `@autobuy/js-client` (ESM + types)
+and `@autobuy/ts-client` (TypeScript). Each handles bearer auth, transparent
+token refresh, typed errors, and ships a register → login → schedule example.
+
+## Planned
+
+WebSocket push for live transaction status.
