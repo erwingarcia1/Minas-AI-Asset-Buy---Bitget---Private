@@ -661,4 +661,21 @@ CSV/PDF exports of transaction history and cost-basis summaries (tax-season frie
 
 ---
 
+## Phase 7 — Production Readiness (added 2026-09-08)
+
+Tracking issues for the launch gate in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md). All are labelled `phase-7`, `production`, `blocker` and require manual credential provisioning — none change application code except #34.
+
+| # | Title | Scope |
+|---|---|---|
+| #27 | Setup Sumsub KYC | Configure `SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`, `SUMSUB_WEBHOOK_SECRET`; run a full applicant flow |
+| #28 | Setup Resend Email | Obtain `RESEND_API_KEY`, verify sending domain, test sends |
+| #29 | Setup Twilio SMS | Obtain `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN`, test SMS |
+| #30 | Setup FCM Push | Obtain `FCM_SERVICE_ACCOUNT` JSON, test push notifications |
+| #31 | Configure TLS & DNS | SSL certificate, nginx, DNS records |
+| #32 | Setup Automated Backups | Daily `pg_dump`, off-host storage, tested restore |
+| #33 | Configure Pager Alerts | PagerDuty integration, critical alert routing |
+| #34 | Remove /test-purchase Endpoint | Delete the dev-only routes, update docs, keep tests green |
+
+---
+
 *End of issues. See [`ROADMAP.md`](ROADMAP.md) for the timeline, milestones, capacity, and risk assessment.*

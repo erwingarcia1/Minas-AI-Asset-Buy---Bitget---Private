@@ -53,14 +53,18 @@
 
 ## Prerequisites for production (the launch gate)
 
-1. [ ] **Sumsub sandbox→prod credentials** (`SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`, `SUMSUB_WEBHOOK_SECRET`) — integration is mock-tested only; embed the WebSDK widget once credentials exist
-2. [ ] **Resend API key** + verified sending domain
-3. [ ] **Live-trade verification on Binance testnet**, then a small-amount canary with `AUTOBUY_DRY_RUN=0` (today every order is simulated)
-4. [ ] TLS certificate + DNS for `api.autobuy.app`; deploy `deployment/nginx.conf`
-5. [ ] Strong `SECRET_KEY` + `ENCRYPTION_KEY` in production env (boot guard enforces this)
-6. [ ] Automated database backups on a schedule + one tested restore
-7. [ ] Prometheus scraping `/metrics` with the docs/ALERTING.md rules wired to a pager
-8. [ ] Remove the temporary `/test-purchase` routes (tracked since Sprint 1)
+Each blocker is tracked as a Phase 7 GitHub issue (labels `phase-7`, `production`, `blocker`).
+
+1. [ ] **Sumsub sandbox→prod credentials** (`SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`, `SUMSUB_WEBHOOK_SECRET`) — integration is mock-tested only; embed the WebSDK widget once credentials exist → #27
+2. [ ] **Resend API key** + verified sending domain → #28
+3. [ ] **Twilio SMS credentials** (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) → #29
+4. [ ] **FCM push service account** (`FCM_SERVICE_ACCOUNT`) → #30
+5. [ ] **Live-trade verification on Binance testnet**, then a small-amount canary with `AUTOBUY_DRY_RUN=0` (today every order is simulated)
+6. [ ] TLS certificate + DNS for `api.autobuy.app`; deploy `deployment/nginx.conf` → #31
+7. [ ] Strong `SECRET_KEY` + `ENCRYPTION_KEY` in production env (boot guard enforces this)
+8. [ ] Automated database backups on a schedule + one tested restore → #32
+9. [ ] Prometheus scraping `/metrics` with the docs/ALERTING.md rules wired to a pager → #33
+10. [ ] Remove the temporary `/test-purchase` routes (tracked since Sprint 1) → #34
 
 ## Deployment steps
 
