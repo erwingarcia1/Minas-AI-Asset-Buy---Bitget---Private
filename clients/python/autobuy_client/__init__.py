@@ -53,6 +53,9 @@ class AutoBuyClient:
         self.analytics = api.analytics
         self.kyc = api.kyc
         self.webhooks = api.webhooks
+        #: Auto-Buy purchases delivered to validated wallets (``/api/v2/purchases``).
+        self.auto_buy = api.v2
+        self.wallets = api.wallets
 
     # -- lifecycle -------------------------------------------------------------
     def close(self) -> None:
@@ -131,6 +134,9 @@ class AsyncAutoBuyClient:
         self.analytics = api.analytics
         self.kyc = api.kyc
         self.webhooks = api.webhooks
+        #: Auto-Buy purchases delivered to validated wallets (``/api/v2/purchases``).
+        self.auto_buy = api.v2
+        self.wallets = api.wallets
 
     async def aclose(self) -> None:
         await self.transport.aclose()

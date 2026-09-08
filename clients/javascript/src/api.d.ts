@@ -29,8 +29,13 @@ import type {
   PreferencesResponse,
   ProfileUpdateRequest,
   PurchaseCreate,
+  PurchaseCreateRequest,
+  PurchaseCreatedOut,
+  PurchaseDetailOut,
+  PurchaseOut,
   PurchaseResponse,
   PurchaseUpdate,
+  PurchaseUpdateRequest,
   QuickStats,
   RebalanceCreate,
   RebalancePlan,
@@ -43,6 +48,7 @@ import type {
   TimelineResponse,
   TokenResponse,
   TransactionListResponse,
+  TransactionOut,
   TransactionResponse,
   TransactionStats,
   UserOut,
@@ -51,6 +57,8 @@ import type {
   VerifyRequest,
   VerifyResponse,
   VolatilityResponse,
+  WalletCreateRequest,
+  WalletOut,
   WebhookCreate,
   WebhookCreated,
   WebhookRow,
@@ -272,6 +280,34 @@ export declare class EmailApi {
   sendNotification(body: SendNotificationRequest): Promise<EmailSentResponse>;
 }
 
+/** `v2` endpoints. */
+export declare class V2Api {
+  constructor(http: HttpTransport);
+  /** List Purchases — `GET /api/v2/purchases` */
+  listPurchases(): Promise<PurchaseOut[]>;
+  /** Create Purchase — `POST /api/v2/purchases` */
+  createPurchase(body: PurchaseCreateRequest): Promise<PurchaseCreatedOut>;
+  /** Get Purchase — `GET /api/v2/purchases/{purchase_id}` */
+  getPurchase(purchaseId: string): Promise<PurchaseDetailOut>;
+  /** Update Purchase — `PUT /api/v2/purchases/{purchase_id}` */
+  updatePurchase(purchaseId: string, body: PurchaseUpdateRequest): Promise<PurchaseOut>;
+  /** Cancel Purchase — `DELETE /api/v2/purchases/{purchase_id}` */
+  cancelPurchase(purchaseId: string): Promise<unknown>;
+  /** Purchase Transactions — `GET /api/v2/purchases/{purchase_id}/transactions` */
+  purchaseTransactions(purchaseId: string, query?: { status_filter?: string | null }): Promise<TransactionOut[]>;
+}
+
+/** `wallets` endpoints. */
+export declare class WalletsApi {
+  constructor(http: HttpTransport);
+  /** Add Wallet — `POST /api/wallets` */
+  addWallet(body: WalletCreateRequest): Promise<WalletOut>;
+  /** List Wallets — `GET /api/wallets` */
+  listWallets(query?: { blockchain_network?: string | null }): Promise<WalletOut[]>;
+  /** Delete Wallet — `DELETE /api/wallets/{wallet_id}` */
+  deleteWallet(walletId: string): Promise<unknown>;
+}
+
 export interface Api {
   readonly system: SystemApi;
   readonly auth: AuthApi;
@@ -289,5 +325,7 @@ export interface Api {
   readonly kyc: KycApi;
   readonly webhooks: WebhooksApi;
   readonly email: EmailApi;
+  readonly v2: V2Api;
+  readonly wallets: WalletsApi;
 }
 export declare function buildApi(http: HttpTransport): Api;

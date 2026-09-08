@@ -21,11 +21,22 @@ async def lifespan(app: FastAPI):
         scheduler.dry_run = settings.autobuy_dry_run
         scheduler.start()
         print(f"✓ Scheduler started (dry_run={settings.autobuy_dry_run})")
+        # Auto-Buy purchases (buy + withdraw to wallet): APScheduler, every 5 minutes
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from api.tasks.purchase_scheduler import execute_purchases
+        app.state.autobuy_scheduler = BackgroundScheduler(timezone="UTC")
+        app.state.autobuy_scheduler.add_job(execute_purchases, "interval", minutes=5,
+                                            id="execute_purchases", max_instances=1, coalesce=True)
+        app.state.autobuy_scheduler.start()
+        print("✓ Auto-Buy purchase scheduler started (every 5 minutes)")
     yield
     # Shutdown
     if settings.scheduler_enabled:
         from api.services.recurring_scheduler import scheduler
         scheduler.stop()
+        autobuy = getattr(app.state, "autobuy_scheduler", None)
+        if autobuy is not None:
+            autobuy.shutdown(wait=False)
     await close_db()
     print("✓ Database closed")
 
@@ -38,6 +49,7 @@ OPENAPI_TAGS = [
     {"name": "transactions", "description": "Execution history with pagination, filters, and aggregate statistics."},
     {"name": "dashboard", "description": "Holdings, upcoming purchases, and investment analytics."},
     {"name": "webhooks", "description": "Inbound provider callbacks."},
+    {"name": "auto-buy", "description": "Auto-Buy purchases delivered to validated wallets (multi-network) and saved wallets."},
 ]
 
 # Create FastAPI app
@@ -151,6 +163,9 @@ from api.routes import webhooks
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
 from api.routes import email
 app.include_router(email.router, prefix="/api/email", tags=["user"])
+from api.routes import autobuy_purchases, wallets
+app.include_router(autobuy_purchases.router, prefix="/api/v2/purchases", tags=["auto-buy"])
+app.include_router(wallets.router, prefix="/api/wallets", tags=["auto-buy"])
 
 if __name__ == "__main__":
     import uvicorn

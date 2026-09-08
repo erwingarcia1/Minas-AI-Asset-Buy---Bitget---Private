@@ -184,6 +184,23 @@ class BinanceClient:
             params["newClientOrderId"] = oid
         return self._request("POST", "/api/v3/order", params=params, auth=True)
 
+    def withdraw(self, coin, address, amount, network=None, client_oid=None):
+        """Submit a withdrawal via /sapi/v1/capital/withdraw/apply.
+
+        `network` is Binance's network code (e.g. "BTC", "ETH", "SOL"); when
+        omitted Binance uses the coin's default network. Returns the withdrawal
+        id string. Requires an API key with withdrawal permission and a
+        whitelisted address when the account enforces a whitelist.
+        """
+        params = {"coin": coin.upper(), "address": address, "amount": str(amount)}
+        if network:
+            params["network"] = network
+        oid = self._sanitize_client_oid(client_oid) if client_oid else None
+        if oid:
+            params["withdrawOrderId"] = oid
+        data = self._request("POST", "/sapi/v1/capital/withdraw/apply", params=params, auth=True)
+        return str(data.get("id", ""))
+
     def get_order_info(self, symbol, order_id):
         """Order state normalized to {status, baseVolume, quoteVolume}, or None if unknown."""
         try:

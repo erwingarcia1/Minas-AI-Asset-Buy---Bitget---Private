@@ -57,6 +57,8 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 | auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` |
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
+| auto-buy (`/api/v2/purchases`) | `POST /` (validates wallet address vs coin chain + network, exchange network support, account ownership) · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency) · `DELETE /{id}` (cancel, history kept) |
+| wallets (`/api/wallets`) | `POST /` (format must match network; Bitcoin testnet/mainnet distinguished; Ethereum/Solana valid on both) · `GET /?blockchain_network=` · `DELETE /{id}` |
 | email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
 | webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
 | exchange (`/api/exchange`) | `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` |
@@ -92,6 +94,19 @@ verified users.** `kyc_status` cannot be set through the profile API.
 login/register 5/min · verify/refresh/logout 10/min · key verification 3/min ·
 purchase creation 20/min · transaction listing 30/min · dashboard 10/min ·
 default 60/min. Login lockout: 5 failed attempts → 15 minutes.
+
+## Auto-Buy purchases
+
+`/api/v2/purchases` buys `amount_usd` of a coin on one of the caller's
+exchange accounts and withdraws it to a validated wallet on a declared
+network. Supported coins and address chains: BTC (bitcoin), ETH/USDT/USDC
+(ethereum), SOL (solana). A background job runs every 5 minutes
+(`api/tasks/purchase_scheduler.py`): only KYC-verified, non-suspended owners
+are processed; every attempt is recorded as a `purchase_transactions` row;
+success advances `next_execution` (daily +24h, weekly +7d, monthly same day
+next month, one-time completes); three consecutive failures mark the purchase
+`failed`. Buys and withdrawals are simulated while `AUTOBUY_DRY_RUN=1`; real
+withdrawals are implemented for Binance only.
 
 ## Client SDKs
 

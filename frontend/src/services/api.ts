@@ -3,8 +3,9 @@
 // session is truly gone.
 import axios, { AxiosError } from "axios";
 import type {
-  ApiKey, Dashboard, PurchaseCreate, QuickStats, RecurringPurchase,
-  Timeline, TokenPair, Transaction, TransactionList, TransactionStats, User,
+  ApiKey, AutoBuyPurchase, AutoBuyPurchaseCreate, AutoBuyPurchaseCreated, AutoBuyTransaction,
+  BlockchainNetwork, Dashboard, PurchaseCreate, QuickStats, RecurringPurchase,
+  Timeline, TokenPair, Transaction, TransactionList, TransactionStats, User, Wallet,
 } from "../types";
 import { clearTokens, getAccessToken, getRefreshToken, storeTokens } from "./auth";
 
@@ -183,3 +184,41 @@ export const admin = {
       { params }).then((r) => r.data),
   alerts: () => api.get<AdminAlert[]>("/api/admin/alerts").then((r) => r.data),
 };
+
+// Auto-Buy purchases: buy on an exchange account, withdraw to a validated wallet.
+export const autoBuy = {
+  create: (payload: AutoBuyPurchaseCreate) =>
+    api.post<AutoBuyPurchaseCreated>("/api/v2/purchases", payload).then((r) => r.data),
+  list: () => api.get<AutoBuyPurchase[]>("/api/v2/purchases").then((r) => r.data),
+  get: (id: string) => api.get<AutoBuyPurchase>(`/api/v2/purchases/${id}`).then((r) => r.data),
+  update: (id: string, payload: { status?: "active" | "paused"; amount_usd?: number; frequency?: string }) =>
+    api.put<AutoBuyPurchase>(`/api/v2/purchases/${id}`, payload).then((r) => r.data),
+  remove: (id: string) => api.delete(`/api/v2/purchases/${id}`),
+  transactions: (id: string, status?: string) =>
+    api.get<AutoBuyTransaction[]>(`/api/v2/purchases/${id}/transactions`,
+      { params: { status_filter: status || undefined } }).then((r) => r.data),
+};
+
+export const wallets = {
+  list: (network?: BlockchainNetwork) =>
+    api.get<Wallet[]>("/api/wallets", { params: { blockchain_network: network } }).then((r) => r.data),
+  add: (payload: { address: string; blockchain_network: BlockchainNetwork; label?: string }) =>
+    api.post<Wallet>("/api/wallets", payload).then((r) => r.data),
+  remove: (id: string) => api.delete(`/api/wallets/${id}`),
+};
+
+/** Readable message from a FastAPI error body, including the {error, details} shape. */
+export function apiErrorMessage(err: unknown, fallback = "Request failed"): string {
+  const data = (err as { response?: { data?: { detail?: unknown } } }).response?.data;
+  const detail = data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return String((detail[0] as { msg?: string })?.msg ?? fallback);
+  if (detail && typeof detail === "object") {
+    const d = detail as { error?: string; details?: { message?: string; supported_networks?: string[] } };
+    if (d.details?.message) return d.details.message;
+    if (d.error === "network_not_supported_by_exchange")
+      return `This exchange cannot withdraw to that network (supports: ${d.details?.supported_networks?.join(", ")})`;
+    if (d.error) return d.error.replace(/_/g, " ");
+  }
+  return fallback;
+}

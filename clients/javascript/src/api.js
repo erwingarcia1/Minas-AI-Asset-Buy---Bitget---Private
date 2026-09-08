@@ -734,6 +734,106 @@ export class EmailApi {
 
 }
 
+/** `v2` endpoints. */
+export class V2Api {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * List Purchases — `GET /api/v2/purchases`
+   * @returns {Promise<import('./types.js').PurchaseOut[]>}
+   */
+  listPurchases() {
+    return this.http.request("GET", "/api/v2/purchases", { auth: true });
+  }
+
+  /**
+   * Create Purchase — `POST /api/v2/purchases`
+   * @param {import('./types.js').PurchaseCreateRequest} body
+   * @returns {Promise<import('./types.js').PurchaseCreatedOut>}
+   */
+  createPurchase(body) {
+    return this.http.request("POST", "/api/v2/purchases", { body, auth: true });
+  }
+
+  /**
+   * Get Purchase — `GET /api/v2/purchases/{purchase_id}`
+   * @param {string} purchaseId
+   * @returns {Promise<import('./types.js').PurchaseDetailOut>}
+   */
+  getPurchase(purchaseId) {
+    return this.http.request("GET", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
+  }
+
+  /**
+   * Update Purchase — `PUT /api/v2/purchases/{purchase_id}`
+   * @param {string} purchaseId
+   * @param {import('./types.js').PurchaseUpdateRequest} body
+   * @returns {Promise<import('./types.js').PurchaseOut>}
+   */
+  updatePurchase(purchaseId, body) {
+    return this.http.request("PUT", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)), { body, auth: true });
+  }
+
+  /**
+   * Cancel Purchase — `DELETE /api/v2/purchases/{purchase_id}`
+   * @param {string} purchaseId
+   * @returns {Promise<unknown>}
+   */
+  cancelPurchase(purchaseId) {
+    return this.http.request("DELETE", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
+  }
+
+  /**
+   * Purchase Transactions — `GET /api/v2/purchases/{purchase_id}/transactions`
+   * @param {string} purchaseId
+   * @param {{ status_filter?: string | null }} [query]
+   * @returns {Promise<import('./types.js').TransactionOut[]>}
+   */
+  purchaseTransactions(purchaseId, query) {
+    return this.http.request("GET", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)) + "/transactions", { query, auth: true });
+  }
+
+}
+
+/** `wallets` endpoints. */
+export class WalletsApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Add Wallet — `POST /api/wallets`
+   * @param {import('./types.js').WalletCreateRequest} body
+   * @returns {Promise<import('./types.js').WalletOut>}
+   */
+  addWallet(body) {
+    return this.http.request("POST", "/api/wallets", { body, auth: true });
+  }
+
+  /**
+   * List Wallets — `GET /api/wallets`
+   * @param {{ blockchain_network?: string | null }} [query]
+   * @returns {Promise<import('./types.js').WalletOut[]>}
+   */
+  listWallets(query) {
+    return this.http.request("GET", "/api/wallets", { query, auth: true });
+  }
+
+  /**
+   * Delete Wallet — `DELETE /api/wallets/{wallet_id}`
+   * @param {string} walletId
+   * @returns {Promise<unknown>}
+   */
+  deleteWallet(walletId) {
+    return this.http.request("DELETE", "/api/wallets/" + encodeURIComponent(String(walletId)), { auth: true });
+  }
+
+}
+
 /** All resource groups, keyed by API module. */
 export function buildApi(http) {
   return {
@@ -753,5 +853,7 @@ export function buildApi(http) {
     kyc: new KycApi(http),
     webhooks: new WebhooksApi(http),
     email: new EmailApi(http),
+    v2: new V2Api(http),
+    wallets: new WalletsApi(http),
   };
 }

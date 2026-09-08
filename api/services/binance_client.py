@@ -128,4 +128,30 @@ class BinanceClient:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
 
 
+    def withdraw(self, coin: str, address: str, amount: float, network: str | None = None,
+                 client_oid: str | None = None, dry_run: bool = True) -> dict:
+        """Withdraw `amount` of `coin` to `address`.
+
+        Returns {withdrawal_id, amount, dry_run}. Dry runs validate inputs and
+        submit nothing. Only Binance withdrawals are implemented; other venues
+        raise BinanceClientError(code="WITHDRAW_UNSUPPORTED") so the caller can
+        record an honest failure instead of pretending the coins moved.
+        """
+        if amount <= 0:
+            raise BinanceClientError("withdrawal amount must be positive", "AMOUNT")
+        if dry_run:
+            return {"withdrawal_id": f"DRY-WD-{uuid.uuid4().hex[:12]}", "amount": amount, "dry_run": True}
+        if self.exchange != "binance":
+            raise BinanceClientError(
+                f"withdrawals are not implemented for {self.exchange}", "WITHDRAW_UNSUPPORTED")
+        try:
+            with time_binance("withdraw"):
+                wid = self._client.withdraw(coin, address, amount, network=network, client_oid=client_oid)
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
+        if not wid:
+            raise BinanceClientError("exchange returned no withdrawal id", "NO_WITHDRAWAL_ID")
+        return {"withdrawal_id": wid, "amount": amount, "dry_run": False}
+
+
 ExchangeClient = BinanceClient  # preferred name going forward

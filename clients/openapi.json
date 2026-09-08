@@ -2802,6 +2802,443 @@
           }
         ]
       }
+    },
+    "/api/v2/purchases": {
+      "get": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "List Purchases",
+        "description": "All of the caller's Auto-Buy purchases, each with its latest transaction.",
+        "operationId": "list_purchases_api_v2_purchases_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PurchaseOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Purchases Api V2 Purchases Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Create Purchase",
+        "description": "Create an Auto-Buy purchase. Rejects (422 with `{error, details}`) when\nthe wallet address does not match the coin's chain or the declared\nnetwork, when the exchange account cannot withdraw to that network, or\nwhen the exchange account is not the caller's.",
+        "operationId": "create_purchase_api_v2_purchases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseCreatedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v2/purchases/{purchase_id}": {
+      "get": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Get Purchase",
+        "description": "One purchase with its full transaction history (newest first).",
+        "operationId": "get_purchase_api_v2_purchases__purchase_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseDetailOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Update Purchase",
+        "description": "Pause (`status: paused`), resume (`status: active`) or change amount/frequency.\nCancelled, completed and failed purchases cannot be changed.",
+        "operationId": "update_purchase_api_v2_purchases__purchase_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Cancel Purchase",
+        "description": "Cancel a purchase. The record and its transaction history are kept;\nthe scheduler will never execute it again.",
+        "operationId": "cancel_purchase_api_v2_purchases__purchase_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/purchases/{purchase_id}/transactions": {
+      "get": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Purchase Transactions",
+        "description": "Transaction history for a purchase, optionally filtered by status\n(pending / success / failed).",
+        "operationId": "purchase_transactions_api_v2_purchases__purchase_id__transactions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          },
+          {
+            "name": "status_filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TransactionOut"
+                  },
+                  "title": "Response Purchase Transactions Api V2 Purchases  Purchase Id  Transactions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wallets": {
+      "post": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Add Wallet",
+        "description": "Save a wallet. The address must be a valid Bitcoin, Ethereum or Solana\naddress usable on the declared network; addresses are unique platform-wide.",
+        "operationId": "add_wallet_api_wallets_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WalletCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "List Wallets",
+        "description": "The caller's wallets, newest first; filter with `?blockchain_network=mainnet|testnet`.",
+        "operationId": "list_wallets_api_wallets_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "blockchain_network",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blockchain Network"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WalletOut"
+                  },
+                  "title": "Response List Wallets Api Wallets Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wallets/{wallet_id}": {
+      "delete": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Delete Wallet",
+        "description": "Remove a saved wallet. Existing purchases keep their address.",
+        "operationId": "delete_wallet_api_wallets__wallet_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Wallet Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4034,6 +4471,324 @@
         ],
         "title": "PurchaseCreate"
       },
+      "PurchaseCreateRequest": {
+        "properties": {
+          "crypto_symbol": {
+            "type": "string",
+            "maxLength": 10,
+            "minLength": 2,
+            "title": "Crypto Symbol"
+          },
+          "amount_usd": {
+            "type": "number",
+            "maximum": 1000000.0,
+            "minimum": 10.0,
+            "title": "Amount Usd"
+          },
+          "wallet_address": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Wallet Address"
+          },
+          "blockchain_network": {
+            "type": "string",
+            "title": "Blockchain Network"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "exchange_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Exchange Account Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "crypto_symbol",
+          "amount_usd",
+          "wallet_address",
+          "blockchain_network",
+          "frequency",
+          "exchange_account_id"
+        ],
+        "title": "PurchaseCreateRequest"
+      },
+      "PurchaseCreatedOut": {
+        "properties": {
+          "purchase_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Purchase Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "next_execution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Execution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purchase_id",
+          "status"
+        ],
+        "title": "PurchaseCreatedOut"
+      },
+      "PurchaseDetailOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "crypto_symbol": {
+            "type": "string",
+            "title": "Crypto Symbol"
+          },
+          "amount_usd": {
+            "type": "number",
+            "title": "Amount Usd"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "wallet_address": {
+            "type": "string",
+            "title": "Wallet Address"
+          },
+          "blockchain_network": {
+            "type": "string",
+            "title": "Blockchain Network"
+          },
+          "exchange_account_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Account Id"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "failure_count": {
+            "type": "integer",
+            "title": "Failure Count"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "next_execution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Execution"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "latest_transaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransactionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transactions": {
+            "items": {
+              "$ref": "#/components/schemas/TransactionOut"
+            },
+            "type": "array",
+            "title": "Transactions",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "crypto_symbol",
+          "amount_usd",
+          "frequency",
+          "wallet_address",
+          "blockchain_network",
+          "status",
+          "failure_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PurchaseDetailOut"
+      },
+      "PurchaseOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "crypto_symbol": {
+            "type": "string",
+            "title": "Crypto Symbol"
+          },
+          "amount_usd": {
+            "type": "number",
+            "title": "Amount Usd"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "wallet_address": {
+            "type": "string",
+            "title": "Wallet Address"
+          },
+          "blockchain_network": {
+            "type": "string",
+            "title": "Blockchain Network"
+          },
+          "exchange_account_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Account Id"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "failure_count": {
+            "type": "integer",
+            "title": "Failure Count"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "next_execution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Execution"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "latest_transaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransactionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "crypto_symbol",
+          "amount_usd",
+          "frequency",
+          "wallet_address",
+          "blockchain_network",
+          "status",
+          "failure_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PurchaseOut"
+      },
       "PurchaseResponse": {
         "properties": {
           "id": {
@@ -4167,6 +4922,47 @@
         },
         "type": "object",
         "title": "PurchaseUpdate"
+      },
+      "PurchaseUpdateRequest": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "amount_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "minimum": 10.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Usd"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frequency"
+          }
+        },
+        "type": "object",
+        "title": "PurchaseUpdateRequest"
       },
       "QuickStats": {
         "properties": {
@@ -4524,6 +5320,93 @@
           "offset"
         ],
         "title": "TransactionListResponse"
+      },
+      "TransactionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "purchase_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Purchase Id"
+          },
+          "exchange_tx_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Tx Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "amount_executed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Executed"
+          },
+          "fee": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "purchase_id",
+          "status",
+          "created_at"
+        ],
+        "title": "TransactionOut"
       },
       "TransactionResponse": {
         "properties": {
@@ -4936,6 +5819,102 @@
         ],
         "title": "VolatilityResponse"
       },
+      "WalletCreateRequest": {
+        "properties": {
+          "address": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Address"
+          },
+          "blockchain_network": {
+            "type": "string",
+            "title": "Blockchain Network"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "address",
+          "blockchain_network"
+        ],
+        "title": "WalletCreateRequest"
+      },
+      "WalletOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "blockchain_network": {
+            "type": "string",
+            "title": "Blockchain Network"
+          },
+          "chain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "address",
+          "blockchain_network",
+          "created_at"
+        ],
+        "title": "WalletOut"
+      },
       "WebhookCreate": {
         "properties": {
           "url": {
@@ -5077,6 +6056,10 @@
     {
       "name": "webhooks",
       "description": "Inbound provider callbacks."
+    },
+    {
+      "name": "auto-buy",
+      "description": "Auto-Buy purchases delivered to validated wallets (multi-network) and saved wallets."
     }
   ]
 }

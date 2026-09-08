@@ -254,6 +254,58 @@ export interface PurchaseCreate {
   withdrawal_address?: string | null;
 }
 
+export interface PurchaseCreateRequest {
+  crypto_symbol: string;
+  amount_usd: number;
+  wallet_address: string;
+  blockchain_network: string;
+  frequency: string;
+  exchange_account_id: string;
+}
+
+export interface PurchaseCreatedOut {
+  purchase_id: string;
+  status: string;
+  next_execution?: string | null;
+}
+
+export interface PurchaseDetailOut {
+  id: string;
+  crypto_symbol: string;
+  amount_usd: number;
+  frequency: string;
+  wallet_address: string;
+  blockchain_network: string;
+  exchange_account_id?: string | null;
+  exchange?: string | null;
+  status: string;
+  failure_count: number;
+  last_error?: string | null;
+  next_execution?: string | null;
+  created_at: string;
+  updated_at: string;
+  latest_transaction?: TransactionOut | null;
+  transactions?: TransactionOut[];
+}
+
+export interface PurchaseOut {
+  id: string;
+  crypto_symbol: string;
+  amount_usd: number;
+  frequency: string;
+  wallet_address: string;
+  blockchain_network: string;
+  exchange_account_id?: string | null;
+  exchange?: string | null;
+  status: string;
+  failure_count: number;
+  last_error?: string | null;
+  next_execution?: string | null;
+  created_at: string;
+  updated_at: string;
+  latest_transaction?: TransactionOut | null;
+}
+
 export interface PurchaseResponse {
   id: string;
   crypto: string;
@@ -273,6 +325,12 @@ export interface PurchaseUpdate {
   frequency?: string | null;
   withdrawal_address?: string | null;
   enabled?: boolean | null;
+}
+
+export interface PurchaseUpdateRequest {
+  status?: string | null;
+  amount_usd?: number | null;
+  frequency?: string | null;
 }
 
 export interface QuickStats {
@@ -362,6 +420,18 @@ export interface TransactionListResponse {
   offset: number;
 }
 
+export interface TransactionOut {
+  id: string;
+  purchase_id: string;
+  exchange_tx_id?: string | null;
+  status: string;
+  amount_executed?: number | null;
+  fee?: number | null;
+  error_message?: string | null;
+  executed_at?: string | null;
+  created_at: string;
+}
+
 export interface TransactionResponse {
   id: string;
   recurring_purchase_id?: string | null;
@@ -442,6 +512,22 @@ export interface VolatilityEntry {
 
 export interface VolatilityResponse {
   entries: VolatilityEntry[];
+}
+
+export interface WalletCreateRequest {
+  address: string;
+  blockchain_network: string;
+  label?: string | null;
+}
+
+export interface WalletOut {
+  id: string;
+  address: string;
+  blockchain_network: string;
+  chain?: string | null;
+  label?: string | null;
+  verified_at?: string | null;
+  created_at: string;
 }
 
 export interface WebhookCreate {

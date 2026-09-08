@@ -32,6 +32,9 @@ export class AutoBuyClient {
     this.analytics = api.analytics;
     this.kyc = api.kyc;
     this.webhooks = api.webhooks;
+    /** Auto-Buy purchases delivered to validated wallets (`/api/v2/purchases`). */
+    this.autoBuy = api.v2;
+    this.wallets = api.wallets;
   }
 
   /** Current token pair (null when logged out). */

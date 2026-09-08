@@ -28,6 +28,8 @@ export declare class AutoBuyClient {
   readonly analytics: Api.AnalyticsApi;
   readonly kyc: Api.KycApi;
   readonly webhooks: Api.WebhooksApi;
+  readonly autoBuy: Api.V2Api;
+  readonly wallets: Api.WalletsApi;
 
   constructor(opts: AutoBuyClientOptions);
   get tokens(): TokenPair | null;

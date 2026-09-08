@@ -32,8 +32,13 @@ from .types import (
     PreferencesResponse,
     ProfileUpdateRequest,
     PurchaseCreate,
+    PurchaseCreateRequest,
+    PurchaseCreatedOut,
+    PurchaseDetailOut,
+    PurchaseOut,
     PurchaseResponse,
     PurchaseUpdate,
+    PurchaseUpdateRequest,
     QuickStats,
     RebalanceCreate,
     RebalancePlan,
@@ -46,6 +51,7 @@ from .types import (
     TimelineResponse,
     TokenResponse,
     TransactionListResponse,
+    TransactionOut,
     TransactionResponse,
     TransactionStats,
     UserOut,
@@ -54,6 +60,8 @@ from .types import (
     VerifyRequest,
     VerifyResponse,
     VolatilityResponse,
+    WalletCreateRequest,
+    WalletOut,
     WebhookCreate,
     WebhookCreated,
     WebhookRow,
@@ -828,6 +836,106 @@ class AsyncEmailApi:
         return await self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
 
 
+class V2Api:
+    """`v2` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def list_purchases(self) -> List[PurchaseOut]:
+        """List Purchases — ``GET /api/v2/purchases``."""
+        return self._http.request("GET", "/api/v2/purchases", auth=True)
+
+    def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
+        """Create Purchase — ``POST /api/v2/purchases``."""
+        return self._http.request("POST", "/api/v2/purchases", auth=True, body=body)
+
+    def get_purchase(self, purchase_id: str) -> PurchaseDetailOut:
+        """Get Purchase — ``GET /api/v2/purchases/{purchase_id}``."""
+        return self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    def update_purchase(self, purchase_id: str, body: PurchaseUpdateRequest) -> PurchaseOut:
+        """Update Purchase — ``PUT /api/v2/purchases/{purchase_id}``."""
+        return self._http.request("PUT", "/api/v2/purchases/" + _q(purchase_id), auth=True, body=body)
+
+    def cancel_purchase(self, purchase_id: str) -> Any:
+        """Cancel Purchase — ``DELETE /api/v2/purchases/{purchase_id}``."""
+        return self._http.request("DELETE", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    def purchase_transactions(self, purchase_id: str, *, status_filter: Optional[str] = None) -> List[TransactionOut]:
+        """Purchase Transactions — ``GET /api/v2/purchases/{purchase_id}/transactions``."""
+        return self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id) + "/transactions", auth=True, query={"status_filter": status_filter})
+
+
+class AsyncV2Api:
+    """`v2` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def list_purchases(self) -> List[PurchaseOut]:
+        """List Purchases — ``GET /api/v2/purchases``."""
+        return await self._http.request("GET", "/api/v2/purchases", auth=True)
+
+    async def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
+        """Create Purchase — ``POST /api/v2/purchases``."""
+        return await self._http.request("POST", "/api/v2/purchases", auth=True, body=body)
+
+    async def get_purchase(self, purchase_id: str) -> PurchaseDetailOut:
+        """Get Purchase — ``GET /api/v2/purchases/{purchase_id}``."""
+        return await self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    async def update_purchase(self, purchase_id: str, body: PurchaseUpdateRequest) -> PurchaseOut:
+        """Update Purchase — ``PUT /api/v2/purchases/{purchase_id}``."""
+        return await self._http.request("PUT", "/api/v2/purchases/" + _q(purchase_id), auth=True, body=body)
+
+    async def cancel_purchase(self, purchase_id: str) -> Any:
+        """Cancel Purchase — ``DELETE /api/v2/purchases/{purchase_id}``."""
+        return await self._http.request("DELETE", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    async def purchase_transactions(self, purchase_id: str, *, status_filter: Optional[str] = None) -> List[TransactionOut]:
+        """Purchase Transactions — ``GET /api/v2/purchases/{purchase_id}/transactions``."""
+        return await self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id) + "/transactions", auth=True, query={"status_filter": status_filter})
+
+
+class WalletsApi:
+    """`wallets` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def add_wallet(self, body: WalletCreateRequest) -> WalletOut:
+        """Add Wallet — ``POST /api/wallets``."""
+        return self._http.request("POST", "/api/wallets", auth=True, body=body)
+
+    def list_wallets(self, *, blockchain_network: Optional[str] = None) -> List[WalletOut]:
+        """List Wallets — ``GET /api/wallets``."""
+        return self._http.request("GET", "/api/wallets", auth=True, query={"blockchain_network": blockchain_network})
+
+    def delete_wallet(self, wallet_id: str) -> Any:
+        """Delete Wallet — ``DELETE /api/wallets/{wallet_id}``."""
+        return self._http.request("DELETE", "/api/wallets/" + _q(wallet_id), auth=True)
+
+
+class AsyncWalletsApi:
+    """`wallets` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def add_wallet(self, body: WalletCreateRequest) -> WalletOut:
+        """Add Wallet — ``POST /api/wallets``."""
+        return await self._http.request("POST", "/api/wallets", auth=True, body=body)
+
+    async def list_wallets(self, *, blockchain_network: Optional[str] = None) -> List[WalletOut]:
+        """List Wallets — ``GET /api/wallets``."""
+        return await self._http.request("GET", "/api/wallets", auth=True, query={"blockchain_network": blockchain_network})
+
+    async def delete_wallet(self, wallet_id: str) -> Any:
+        """Delete Wallet — ``DELETE /api/wallets/{wallet_id}``."""
+        return await self._http.request("DELETE", "/api/wallets/" + _q(wallet_id), auth=True)
+
+
 class Api:
     """All resource groups, keyed by API module."""
 
@@ -848,6 +956,8 @@ class Api:
         self.kyc = KycApi(http)
         self.webhooks = WebhooksApi(http)
         self.email = EmailApi(http)
+        self.v2 = V2Api(http)
+        self.wallets = WalletsApi(http)
 
 
 class AsyncApi:
@@ -870,3 +980,5 @@ class AsyncApi:
         self.kyc = AsyncKycApi(http)
         self.webhooks = AsyncWebhooksApi(http)
         self.email = AsyncEmailApi(http)
+        self.v2 = AsyncV2Api(http)
+        self.wallets = AsyncWalletsApi(http)

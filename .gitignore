@@ -20,3 +20,5 @@ venv/
 secrets/
 *.pem
 data/meme_buy.sqlite3
+htmlcov/
+.coverage

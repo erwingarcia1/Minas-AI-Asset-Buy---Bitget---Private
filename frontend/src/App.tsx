@@ -7,6 +7,7 @@ import RegisterPage from "./pages/RegisterPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import AdminPage from "./pages/AdminPage";
 import PurchasesPage from "./pages/PurchasesPage";
+import AutoBuyPage from "./pages/Purchases";
 import SettingsPage from "./pages/SettingsPage";
 import { isLoggedIn } from "./services/auth";
 
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/purchases" element={<PurchasesPage />} />
+          <Route path="/auto-buy" element={<AutoBuyPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin" element={<AdminPage />} />
         </Route>

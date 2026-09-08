@@ -108,3 +108,64 @@ export interface Timeline {
   days: number;
   timeline: TimelinePoint[];
 }
+
+// ---- Auto-Buy purchases (delivered to a wallet) — /api/v2/purchases, /api/wallets
+export type AutoBuyFrequency = "one_time" | "daily" | "weekly" | "monthly";
+export type AutoBuyStatus = "active" | "paused" | "completed" | "failed" | "cancelled";
+export type BlockchainNetwork = "mainnet" | "testnet";
+
+export interface AutoBuyTransaction {
+  id: string;
+  purchase_id: string;
+  exchange_tx_id?: string | null;
+  status: "pending" | "success" | "failed";
+  amount_executed?: number | null;
+  fee?: number | null;
+  error_message?: string | null;
+  executed_at?: string | null;
+  created_at: string;
+}
+
+export interface AutoBuyPurchase {
+  id: string;
+  crypto_symbol: string;
+  amount_usd: number;
+  frequency: AutoBuyFrequency;
+  wallet_address: string;
+  blockchain_network: BlockchainNetwork;
+  exchange_account_id?: string | null;
+  exchange?: string | null;
+  status: AutoBuyStatus;
+  failure_count: number;
+  last_error?: string | null;
+  next_execution?: string | null;
+  created_at: string;
+  updated_at: string;
+  latest_transaction?: AutoBuyTransaction | null;
+  transactions?: AutoBuyTransaction[];
+}
+
+export interface AutoBuyPurchaseCreate {
+  crypto_symbol: string;
+  amount_usd: number;
+  wallet_address: string;
+  blockchain_network: BlockchainNetwork;
+  frequency: AutoBuyFrequency;
+  exchange_account_id: string;
+}
+
+export interface AutoBuyPurchaseCreated {
+  purchase_id: string;
+  status: AutoBuyStatus;
+  next_execution?: string | null;
+}
+
+export interface Wallet {
+  id: string;
+  address: string;
+  blockchain_network: BlockchainNetwork;
+  chain?: "bitcoin" | "ethereum" | "solana" | null;
+  label?: string | null;
+  verified_at?: string | null;
+  created_at: string;
+}

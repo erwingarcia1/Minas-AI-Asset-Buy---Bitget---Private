@@ -298,6 +298,62 @@ class PurchaseCreate(TypedDict):
     withdrawal_address: NotRequired[Optional[str]]
 
 
+class PurchaseCreateRequest(TypedDict):
+    """PurchaseCreateRequest."""
+    crypto_symbol: str
+    amount_usd: float
+    wallet_address: str
+    blockchain_network: str
+    frequency: str
+    exchange_account_id: str
+
+
+class PurchaseCreatedOut(TypedDict):
+    """PurchaseCreatedOut."""
+    purchase_id: str
+    status: str
+    next_execution: NotRequired[Optional[str]]
+
+
+class PurchaseDetailOut(TypedDict):
+    """PurchaseDetailOut."""
+    id: str
+    crypto_symbol: str
+    amount_usd: float
+    frequency: str
+    wallet_address: str
+    blockchain_network: str
+    exchange_account_id: NotRequired[Optional[str]]
+    exchange: NotRequired[Optional[str]]
+    status: str
+    failure_count: int
+    last_error: NotRequired[Optional[str]]
+    next_execution: NotRequired[Optional[str]]
+    created_at: str
+    updated_at: str
+    latest_transaction: NotRequired[Optional[TransactionOut]]
+    transactions: NotRequired[List[TransactionOut]]
+
+
+class PurchaseOut(TypedDict):
+    """PurchaseOut."""
+    id: str
+    crypto_symbol: str
+    amount_usd: float
+    frequency: str
+    wallet_address: str
+    blockchain_network: str
+    exchange_account_id: NotRequired[Optional[str]]
+    exchange: NotRequired[Optional[str]]
+    status: str
+    failure_count: int
+    last_error: NotRequired[Optional[str]]
+    next_execution: NotRequired[Optional[str]]
+    created_at: str
+    updated_at: str
+    latest_transaction: NotRequired[Optional[TransactionOut]]
+
+
 class PurchaseResponse(TypedDict):
     """PurchaseResponse."""
     id: str
@@ -319,6 +375,13 @@ class PurchaseUpdate(TypedDict):
     frequency: NotRequired[Optional[str]]
     withdrawal_address: NotRequired[Optional[str]]
     enabled: NotRequired[Optional[bool]]
+
+
+class PurchaseUpdateRequest(TypedDict):
+    """PurchaseUpdateRequest."""
+    status: NotRequired[Optional[str]]
+    amount_usd: NotRequired[Optional[float]]
+    frequency: NotRequired[Optional[str]]
 
 
 class QuickStats(TypedDict):
@@ -423,6 +486,19 @@ class TransactionListResponse(TypedDict):
     offset: int
 
 
+class TransactionOut(TypedDict):
+    """TransactionOut."""
+    id: str
+    purchase_id: str
+    exchange_tx_id: NotRequired[Optional[str]]
+    status: str
+    amount_executed: NotRequired[Optional[float]]
+    fee: NotRequired[Optional[float]]
+    error_message: NotRequired[Optional[str]]
+    executed_at: NotRequired[Optional[str]]
+    created_at: str
+
+
 class TransactionResponse(TypedDict):
     """TransactionResponse."""
     id: str
@@ -514,6 +590,24 @@ class VolatilityEntry(TypedDict):
 class VolatilityResponse(TypedDict):
     """VolatilityResponse."""
     entries: List[VolatilityEntry]
+
+
+class WalletCreateRequest(TypedDict):
+    """WalletCreateRequest."""
+    address: str
+    blockchain_network: str
+    label: NotRequired[Optional[str]]
+
+
+class WalletOut(TypedDict):
+    """WalletOut."""
+    id: str
+    address: str
+    blockchain_network: str
+    chain: NotRequired[Optional[str]]
+    label: NotRequired[Optional[str]]
+    verified_at: NotRequired[Optional[str]]
+    created_at: str
 
 
 class WebhookCreate(TypedDict):

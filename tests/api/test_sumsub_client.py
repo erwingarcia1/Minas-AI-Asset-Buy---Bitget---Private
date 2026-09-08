@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 import api.services.sumsub_client as sc_mod
+from api.config import settings
 from api.services.sumsub_client import SumsubClient, SumsubError
 
 
@@ -31,8 +32,11 @@ def make():
     return SumsubClient(app_token="tok", secret_key="sec", base_url="https://api.sumsub.test")
 
 
-def test_configured_flag():
+def test_configured_flag(monkeypatch):
     assert make().configured
+    # empty ctor args fall back to settings; blank those so the developer's .env cannot leak in
+    monkeypatch.setattr(settings, "sumsub_app_token", "")
+    monkeypatch.setattr(settings, "sumsub_secret_key", "")
     assert not SumsubClient(app_token="", secret_key="", base_url="x").configured
 
 

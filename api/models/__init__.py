@@ -33,6 +33,8 @@ class User(Base):
     api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
     recurring_purchases = relationship("RecurringPurchase", back_populates="user", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
+    wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
+    purchases = relationship("Purchase", back_populates="user", cascade="all, delete-orphan")
 
 
 class APIKey(Base):
@@ -149,3 +151,8 @@ class WebhookEndpoint(Base):
     enabled = Column(Boolean, nullable=False, default=True)
     last_status = Column(String(100), nullable=True)  # e.g. "200" or "failed: timeout"
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+# Auto-Buy purchases (wallets, purchases, purchase_transactions) live in their
+# own module; importing them here registers the tables on Base.metadata.
+from .purchase import Purchase, PurchaseTransaction, Wallet  # noqa: E402,F401

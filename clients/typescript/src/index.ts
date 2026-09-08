@@ -44,6 +44,9 @@ export class AutoBuyClient {
   get analytics() { return this.api.analytics; }
   get kyc() { return this.api.kyc; }
   get webhooks() { return this.api.webhooks; }
+  /** Auto-Buy purchases delivered to validated wallets (`/api/v2/purchases`). */
+  get autoBuy() { return this.api.v2; }
+  get wallets() { return this.api.wallets; }
 
   // ---- auth helpers ---------------------------------------------------------
 

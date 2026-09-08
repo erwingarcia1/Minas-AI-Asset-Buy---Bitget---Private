@@ -8,6 +8,7 @@ export default function Sidebar() {
     <nav className="w-48 shrink-0 space-y-1 border-r bg-white p-3 max-md:hidden">
       <NavLink to="/dashboard" className={link}>Dashboard</NavLink>
       <NavLink to="/purchases" className={link}>Purchases</NavLink>
+      <NavLink to="/auto-buy" className={link}>Auto-Buy</NavLink>
       <NavLink to="/settings" className={link}>Settings</NavLink>
     </nav>
   );

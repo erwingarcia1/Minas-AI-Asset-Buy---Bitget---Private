@@ -14,15 +14,17 @@ def test_production_guard_refuses_default_secrets(monkeypatch):
     monkeypatch.setenv("API_ENV", "production")
     monkeypatch.setenv("SECRET_KEY", "your-secret-key-change-this")
     monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
-    s = Settings()
+    # Field defaults are captured from os.environ at import time, so the developer's .env
+    # would leak in through them: pass the guarded fields explicitly instead.
+    s = Settings(_env_file=None, encryption_key="")
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         enforce_production_secrets(s)
     monkeypatch.setenv("SECRET_KEY", "x" * 40)
-    s = Settings()
+    s = Settings(_env_file=None, encryption_key="")
     with pytest.raises(RuntimeError, match="ENCRYPTION_KEY"):
         enforce_production_secrets(s)
     monkeypatch.setenv("ENCRYPTION_KEY", "y" * 40)
-    enforce_production_secrets(Settings())  # no raise
+    enforce_production_secrets(Settings(_env_file=None))  # no raise
 
 
 def test_guard_is_noop_in_development():
