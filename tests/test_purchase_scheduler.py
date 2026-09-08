@@ -167,6 +167,43 @@ async def test_gateway_dry_run_via_real_client_is_simulated(db, user, binance_ke
     assert tx.amount_executed == pytest.approx(0.002)
 
 
+async def test_accumulate_mode_buys_without_withdrawing(db, user, binance_key, monkeypatch):
+    """withdraw_immediately=False: the real gateway places the buy and never calls withdraw."""
+    from api.services import binance_client as bc
+    calls = []
+
+    class FakeLegacy:
+        def __init__(self, *a, **k): pass
+        @staticmethod
+        def spot_symbol(b, q): return f"{b}{q}"
+        def get_ticker_price(self, symbol): return 2_000.0
+        def withdraw(self, *a, **k): calls.append("withdraw"); return "should-not-happen"
+    monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
+    p = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address=None,
+                            withdraw_immediately=False, amount_usd=100, next_execution=NOW)
+    await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    tx = (await tx_for(db, p))[0]
+    assert tx.status == "success" and tx.exchange_tx_id.startswith("DRY-") and not tx.exchange_tx_id.startswith("DRY-WD-")
+    assert tx.amount_executed == pytest.approx(0.05) and calls == []
+    await db.refresh(p)
+    assert p.next_execution == NOW + timedelta(days=1)
+
+
+async def test_immediate_mode_without_wallet_fails_honestly(db, user, binance_key, monkeypatch):
+    from api.services import binance_client as bc
+
+    class FakeLegacy:
+        def __init__(self, *a, **k): pass
+        @staticmethod
+        def spot_symbol(b, q): return f"{b}{q}"
+        def get_ticker_price(self, symbol): return 50_000.0
+    monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
+    p = await make_purchase(db, user, binance_key, wallet_address=None, withdraw_immediately=True, next_execution=NOW)
+    await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    tx = (await tx_for(db, p))[0]
+    assert tx.status == "failed" and "wallet" in tx.error_message
+
+
 async def test_sync_entry_point_runs(db, user, binance_key):
     """execute_purchases() (APScheduler target) runs the async core on its own loop and never raises."""
     import asyncio

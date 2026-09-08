@@ -6,7 +6,7 @@ withdraws the coins to a validated wallet address on a declared network.
 """
 import uuid
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -45,8 +45,10 @@ class Purchase(Base):
     crypto_symbol = Column(String(10), nullable=False)
     amount_usd = Column(Float, nullable=False)
     frequency = Column(String(20), nullable=False)          # one_time | daily | weekly | monthly
-    wallet_address = Column(String(128), nullable=False)
+    # Withdraw immediately (Auto-Buy) needs a wallet; accumulate-on-exchange (DCA) may leave it empty.
+    wallet_address = Column(String(128), nullable=True)
     blockchain_network = Column(String(20), nullable=False)  # mainnet | testnet
+    withdraw_immediately = Column(Boolean, nullable=False, default=True)
     status = Column(String(20), nullable=False, default="active")
     failure_count = Column(Integer, nullable=False, default=0)  # consecutive failed attempts
     last_error = Column(String(500), nullable=True)

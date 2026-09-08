@@ -2838,7 +2838,7 @@
           "auto-buy"
         ],
         "summary": "Create Purchase",
-        "description": "Create an Auto-Buy purchase. Rejects (422 with `{error, details}`) when\nthe wallet address does not match the coin's chain or the declared\nnetwork, when the exchange account cannot withdraw to that network, or\nwhen the exchange account is not the caller's.",
+        "description": "Create a purchase in one of two modes: `withdraw_immediately: true`\n(Auto-Buy: buy, then send the coins to `wallet_address`; wallet required)\nor `false` (DCA accumulate: buy and hold on the exchange; wallet optional).\nRejects (422 with `{error, details}`) when a given wallet address does not\nmatch the coin's chain or the declared network, when the exchange account\ncannot withdraw to that network (immediate mode), or when the exchange\naccount is not the caller's.",
         "operationId": "create_purchase_api_v2_purchases_post",
         "requestBody": {
           "content": {
@@ -4486,9 +4486,15 @@
             "title": "Amount Usd"
           },
           "wallet_address": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 20,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Wallet Address"
           },
           "blockchain_network": {
@@ -4503,13 +4509,17 @@
             "type": "string",
             "format": "uuid",
             "title": "Exchange Account Id"
+          },
+          "withdraw_immediately": {
+            "type": "boolean",
+            "title": "Withdraw Immediately",
+            "default": true
           }
         },
         "type": "object",
         "required": [
           "crypto_symbol",
           "amount_usd",
-          "wallet_address",
           "blockchain_network",
           "frequency",
           "exchange_account_id"
@@ -4567,12 +4577,23 @@
             "title": "Frequency"
           },
           "wallet_address": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Wallet Address"
           },
           "blockchain_network": {
             "type": "string",
             "title": "Blockchain Network"
+          },
+          "withdraw_immediately": {
+            "type": "boolean",
+            "title": "Withdraw Immediately"
           },
           "exchange_account_id": {
             "anyOf": [
@@ -4663,8 +4684,8 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
-          "wallet_address",
           "blockchain_network",
+          "withdraw_immediately",
           "status",
           "failure_count",
           "created_at",
@@ -4692,12 +4713,23 @@
             "title": "Frequency"
           },
           "wallet_address": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Wallet Address"
           },
           "blockchain_network": {
             "type": "string",
             "title": "Blockchain Network"
+          },
+          "withdraw_immediately": {
+            "type": "boolean",
+            "title": "Withdraw Immediately"
           },
           "exchange_account_id": {
             "anyOf": [
@@ -4780,8 +4812,8 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
-          "wallet_address",
           "blockchain_network",
+          "withdraw_immediately",
           "status",
           "failure_count",
           "created_at",

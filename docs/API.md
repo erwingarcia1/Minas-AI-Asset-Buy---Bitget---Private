@@ -98,8 +98,11 @@ default 60/min. Login lockout: 5 failed attempts → 15 minutes.
 ## Auto-Buy purchases
 
 `/api/v2/purchases` buys `amount_usd` of a coin on one of the caller's
-exchange accounts and withdraws it to a validated wallet on a declared
-network. Supported coins and address chains: BTC (bitcoin), ETH/USDT/USDC
+exchange accounts in one of two modes: `withdraw_immediately: true` (Auto-Buy:
+each buy is withdrawn to a validated `wallet_address` on the declared network;
+wallet required) or `false` (DCA accumulate: coins are held on the exchange;
+wallet optional and kept for later withdrawals). Both modes share the same
+list, history and scheduler. Supported coins and address chains: BTC (bitcoin), ETH/USDT/USDC
 (ethereum), SOL (solana). A background job runs every 5 minutes
 (`api/tasks/purchase_scheduler.py`): only KYC-verified, non-suspended owners
 are processed; every attempt is recorded as a `purchase_transactions` row;
