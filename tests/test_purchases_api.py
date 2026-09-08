@@ -168,43 +168,64 @@ async def test_wallet_crud_and_validation(client, db, user, other_user):
     assert (await db.execute(select(Wallet).where(Wallet.id == uuid.UUID(w["id"])))).first() is None
 
 
-# --------------------------------------------------------------------------- modes: withdraw immediately vs accumulate
+# --------------------------------------------------------------------------- modes: autobuy vs dca
 
-async def test_default_mode_is_withdraw_immediately(client, db, user, binance_key):
+async def test_default_purchase_type_is_autobuy(client, db, user, binance_key):
     r = await client.post(P, json=body(binance_key), headers=auth(user))
     assert r.status_code == 201
     row = (await db.execute(select(Purchase).where(Purchase.id == uuid.UUID(r.json()["purchase_id"])))).scalar_one()
-    assert row.withdraw_immediately is True
-    assert (await client.get(f"{P}/{row.id}", headers=auth(user))).json()["withdraw_immediately"] is True
+    assert row.purchase_type == "autobuy"
+    out = (await client.get(f"{P}/{row.id}", headers=auth(user))).json()
+    assert out["purchase_type"] == "autobuy" and out["withdraw_immediately"] is True
 
 
-async def test_immediate_mode_requires_wallet(client, user, binance_key):
-    r = await client.post(P, json=body(binance_key, wallet_address="", withdraw_immediately=True), headers=auth(user))
-    assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_address_required"
-    b = body(binance_key, withdraw_immediately=True); del b["wallet_address"]
-    assert (await client.post(P, json=b, headers=auth(user))).status_code == 422
-
-
-async def test_accumulate_mode_without_wallet(client, db, user, binance_key):
-    b = body(binance_key, crypto_symbol="ETH", withdraw_immediately=False); del b["wallet_address"]
-    r = await client.post(P, json=b, headers=auth(user))
+async def test_create_dca_purchase(client, db, user, binance_key):
+    r = await client.post(P, json=body(binance_key, crypto_symbol="ETH", wallet_address=ETH, purchase_type="dca"), headers=auth(user))
     assert r.status_code == 201, r.text
     row = (await db.execute(select(Purchase).where(Purchase.id == uuid.UUID(r.json()["purchase_id"])))).scalar_one()
-    assert row.withdraw_immediately is False and row.wallet_address is None
+    assert row.purchase_type == "dca" and row.wallet_address == ETH
     listed = (await client.get(P, headers=auth(user))).json()[0]
-    assert listed["withdraw_immediately"] is False and listed["wallet_address"] is None
+    assert listed["purchase_type"] == "dca" and listed["withdraw_immediately"] is False
 
 
-async def test_accumulate_mode_still_validates_a_given_wallet(client, user, binance_key):
-    r = await client.post(P, json=body(binance_key, wallet_address=BTC_TEST, withdraw_immediately=False), headers=auth(user))
+async def test_purchase_type_validation_and_alias(client, user, binance_key):
+    H = auth(user)
+    assert (await client.post(P, json=body(binance_key, purchase_type="hodl"), headers=H)).status_code == 422
+    # deprecated boolean alias still maps onto purchase_type
+    r = await client.post(P, json=body(binance_key, withdraw_immediately=False), headers=H)
+    assert r.status_code == 201
+    assert (await client.get(f"{P}/{r.json()['purchase_id']}", headers=H)).json()["purchase_type"] == "dca"
+    r = await client.post(P, json=body(binance_key, purchase_type="AutoBuy"), headers=H)
+    assert r.status_code == 201, "case-insensitive"
+    # contradictory alias is rejected rather than silently picking one
+    assert (await client.post(P, json=body(binance_key, purchase_type="dca", withdraw_immediately=True), headers=H)).status_code == 422
+
+
+@pytest.mark.parametrize("purchase_type", ["autobuy", "dca"])
+async def test_both_modes_require_wallet_and_network(client, user, binance_key, purchase_type):
+    H = auth(user)
+    b = body(binance_key, purchase_type=purchase_type); del b["wallet_address"]
+    assert (await client.post(P, json=b, headers=H)).status_code == 422
+    assert (await client.post(P, json=body(binance_key, purchase_type=purchase_type, wallet_address=""), headers=H)).status_code == 422
+    b = body(binance_key, purchase_type=purchase_type); del b["blockchain_network"]
+    assert (await client.post(P, json=b, headers=H)).status_code == 422
+    # and the wallet must be valid for the coin/network in both modes
+    r = await client.post(P, json=body(binance_key, purchase_type=purchase_type, wallet_address=BTC_TEST), headers=H)
     assert r.status_code == 422 and r.json()["detail"]["error"] == "invalid_wallet_address"
-    r = await client.post(P, json=body(binance_key, wallet_address=BTC_MAIN, withdraw_immediately=False), headers=auth(user))
-    assert r.status_code == 201, "a valid wallet is kept for later withdrawals"
 
 
-async def test_accumulate_mode_skips_exchange_network_check(client, user, binance_key, monkeypatch):
+async def test_dca_skips_exchange_withdrawal_network_check(client, user, binance_key, monkeypatch):
     monkeypatch.setitem(en.EXCHANGE_NETWORKS, "binance", ["mainnet"])
     payload = body(binance_key, wallet_address=BTC_TEST, blockchain_network="testnet")
-    assert (await client.post(P, json={**payload, "withdraw_immediately": True}, headers=auth(user))).status_code == 422
-    assert (await client.post(P, json={**payload, "withdraw_immediately": False}, headers=auth(user))).status_code == 201, \
+    assert (await client.post(P, json={**payload, "purchase_type": "autobuy"}, headers=auth(user))).status_code == 422
+    assert (await client.post(P, json={**payload, "purchase_type": "dca"}, headers=auth(user))).status_code == 201, \
         "nothing is withdrawn, so the exchange's withdrawal networks do not matter"
+
+
+async def test_transactions_expose_tx_type(client, db, user, binance_key):
+    p = await make_purchase(db, user, binance_key, purchase_type="dca")
+    db.add(PurchaseTransaction(purchase_id=p.id, status="success", tx_type="accumulation", exchange_tx_id="ord-1", executed_at=utcnow()))
+    await db.commit()
+    out = (await client.get(f"{P}/{p.id}", headers=auth(user))).json()
+    assert out["latest_transaction"]["tx_type"] == "accumulation"
+    assert out["transactions"][0]["tx_type"] == "accumulation"

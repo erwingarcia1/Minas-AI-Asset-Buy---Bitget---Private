@@ -4,10 +4,11 @@ For each ``Purchase`` with status 'active' and next_execution <= now whose
 owner is KYC-verified and not suspended:
 
 1. load and decrypt the exchange account credentials,
-2. market-buy `amount_usd` worth of the coin and, when the purchase has
-   ``withdraw_immediately`` set, withdraw the filled amount to its wallet on
-   its network; otherwise the coins accumulate on the exchange (both steps
-   are simulated when AUTOBUY_DRY_RUN=1, the default),
+2. market-buy `amount_usd` worth of the coin, then branch on
+   ``purchase_type``: ``autobuy`` withdraws the filled amount to the wallet on
+   the purchase's network (transaction tx_type = withdrawal); ``dca`` skips the
+   withdrawal and the coins accumulate on the exchange (tx_type =
+   accumulation). Both steps are simulated when AUTOBUY_DRY_RUN=1 (default),
 3. record a ``PurchaseTransaction`` (pending -> success / failed),
 4. on success advance ``next_execution`` by the frequency (one-time purchases
    complete); on failure count the attempt and mark the purchase 'failed'
@@ -74,12 +75,12 @@ class ExchangeClientGateway:
             order = client.execute_order(symbol, purchase.amount_usd, dry_run=dry_run,
                                          client_oid=f"ab-{purchase.id.hex[:12]}")
             amount = float(order["amount_crypto"])
-            if not purchase.withdraw_immediately:
-                # DCA accumulate: coins stay on the exchange; the order id is the reference
+            if purchase.purchase_type == "dca":
+                # accumulate: coins stay on the exchange; the order id is the reference
                 return {"exchange_tx_id": str(order["order_id"]), "amount_executed": amount, "fee": 0.0,
-                        "order_id": order["order_id"], "withdrawn": False}
+                        "order_id": order["order_id"], "tx_type": "accumulation"}
             if not purchase.wallet_address:
-                raise ExecutionError("no wallet address on an immediate-withdrawal purchase")
+                raise ExecutionError("no wallet address on an autobuy purchase")
             withdrawal = client.withdraw(purchase.crypto_symbol, purchase.wallet_address, amount,
                                          network=WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol),
                                          client_oid=f"abw-{purchase.id.hex[:12]}", dry_run=dry_run)
@@ -88,7 +89,7 @@ class ExchangeClientGateway:
         except Exception as exc:  # decrypt failures, network blips
             raise ExecutionError(f"{type(exc).__name__}: {exc}") from exc
         return {"exchange_tx_id": withdrawal["withdrawal_id"], "amount_executed": amount, "fee": 0.0,
-                "order_id": order["order_id"], "withdrawn": True}
+                "order_id": order["order_id"], "tx_type": "withdrawal"}
 
 
 # --------------------------------------------------------------------------- scheduling math
@@ -131,7 +132,8 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
                     purchase.id, getattr(user, "kyc_status", None), getattr(user, "suspended", None))
         return None
 
-    tx = PurchaseTransaction(purchase_id=purchase.id, status="pending")
+    tx = PurchaseTransaction(purchase_id=purchase.id, status="pending",
+                             tx_type="accumulation" if purchase.purchase_type == "dca" else "withdrawal")
     db.add(tx)
     await db.flush()
 
@@ -142,6 +144,7 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
         result = await asyncio.to_thread(gateway.execute, account, purchase, dry_run)
         tx.status = "success"
         tx.exchange_tx_id = result.get("exchange_tx_id")
+        tx.tx_type = result.get("tx_type", tx.tx_type)
         tx.amount_executed = result.get("amount_executed")
         tx.fee = result.get("fee")
         tx.executed_at = now
@@ -155,7 +158,7 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
             purchase.next_execution = nxt
         logger.info("purchase %s executed (%s %s -> %s, dry_run=%s)", purchase.id, tx.amount_executed,
                     purchase.crypto_symbol,
-                    purchase.wallet_address if purchase.withdraw_immediately else "held on exchange", dry_run)
+                    purchase.wallet_address if purchase.purchase_type == "autobuy" else "held on exchange", dry_run)
     except ExecutionError as exc:
         tx.status = "failed"
         tx.error_message = str(exc)[:500]

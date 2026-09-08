@@ -2838,7 +2838,7 @@
           "auto-buy"
         ],
         "summary": "Create Purchase",
-        "description": "Create a purchase in one of two modes: `withdraw_immediately: true`\n(Auto-Buy: buy, then send the coins to `wallet_address`; wallet required)\nor `false` (DCA accumulate: buy and hold on the exchange; wallet optional).\nRejects (422 with `{error, details}`) when a given wallet address does not\nmatch the coin's chain or the declared network, when the exchange account\ncannot withdraw to that network (immediate mode), or when the exchange\naccount is not the caller's.",
+        "description": "Create a purchase. `purchase_type` selects the mode: `autobuy` (default:\nbuy, then withdraw the coins to `wallet_address`) or `dca` (buy and\naccumulate on the exchange; the wallet is kept for later withdrawals).\nBoth modes require a wallet address and network. Rejects (422 with\n`{error, details}`) when the wallet address does not match the coin's\nchain or the declared network, when the exchange account cannot withdraw\nto that network (autobuy), or when the exchange account is not the caller's.",
         "operationId": "create_purchase_api_v2_purchases_post",
         "requestBody": {
           "content": {
@@ -4486,15 +4486,9 @@
             "title": "Amount Usd"
           },
           "wallet_address": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 20,
             "title": "Wallet Address"
           },
           "blockchain_network": {
@@ -4510,16 +4504,28 @@
             "format": "uuid",
             "title": "Exchange Account Id"
           },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type",
+            "default": "autobuy"
+          },
           "withdraw_immediately": {
-            "type": "boolean",
-            "title": "Withdraw Immediately",
-            "default": true
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdraw Immediately"
           }
         },
         "type": "object",
         "required": [
           "crypto_symbol",
           "amount_usd",
+          "wallet_address",
           "blockchain_network",
           "frequency",
           "exchange_account_id"
@@ -4577,19 +4583,16 @@
             "title": "Frequency"
           },
           "wallet_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Wallet Address"
           },
           "blockchain_network": {
             "type": "string",
             "title": "Blockchain Network"
+          },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type"
           },
           "withdraw_immediately": {
             "type": "boolean",
@@ -4684,7 +4687,9 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
+          "wallet_address",
           "blockchain_network",
+          "purchase_type",
           "withdraw_immediately",
           "status",
           "failure_count",
@@ -4713,19 +4718,16 @@
             "title": "Frequency"
           },
           "wallet_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Wallet Address"
           },
           "blockchain_network": {
             "type": "string",
             "title": "Blockchain Network"
+          },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type"
           },
           "withdraw_immediately": {
             "type": "boolean",
@@ -4812,7 +4814,9 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
+          "wallet_address",
           "blockchain_network",
+          "purchase_type",
           "withdraw_immediately",
           "status",
           "failure_count",
@@ -5375,6 +5379,11 @@
               }
             ],
             "title": "Exchange Tx Id"
+          },
+          "tx_type": {
+            "type": "string",
+            "title": "Tx Type",
+            "default": "withdrawal"
           },
           "status": {
             "type": "string",

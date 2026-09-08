@@ -257,11 +257,12 @@ export interface PurchaseCreate {
 export interface PurchaseCreateRequest {
   crypto_symbol: string;
   amount_usd: number;
-  wallet_address?: string | null;
+  wallet_address: string;
   blockchain_network: string;
   frequency: string;
   exchange_account_id: string;
-  withdraw_immediately?: boolean;
+  purchase_type?: string;
+  withdraw_immediately?: boolean | null;
 }
 
 export interface PurchaseCreatedOut {
@@ -275,8 +276,9 @@ export interface PurchaseDetailOut {
   crypto_symbol: string;
   amount_usd: number;
   frequency: string;
-  wallet_address?: string | null;
+  wallet_address: string;
   blockchain_network: string;
+  purchase_type: string;
   withdraw_immediately: boolean;
   exchange_account_id?: string | null;
   exchange?: string | null;
@@ -295,8 +297,9 @@ export interface PurchaseOut {
   crypto_symbol: string;
   amount_usd: number;
   frequency: string;
-  wallet_address?: string | null;
+  wallet_address: string;
   blockchain_network: string;
+  purchase_type: string;
   withdraw_immediately: boolean;
   exchange_account_id?: string | null;
   exchange?: string | null;
@@ -427,6 +430,7 @@ export interface TransactionOut {
   id: string;
   purchase_id: string;
   exchange_tx_id?: string | null;
+  tx_type?: string;
   status: string;
   amount_executed?: number | null;
   fee?: number | null;

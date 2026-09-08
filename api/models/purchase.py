@@ -6,13 +6,15 @@ withdraws the coins to a validated wallet address on a declared network.
 """
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from api.database import Base
 from . import utcnow
 
+PURCHASE_TYPES = ("autobuy", "dca")           # autobuy: buy + withdraw to wallet; dca: buy + accumulate on exchange
+TRANSACTION_TYPES = ("withdrawal", "accumulation")
 PURCHASE_FREQUENCIES = ("one_time", "daily", "weekly", "monthly")
 PURCHASE_STATUSES = ("active", "paused", "completed", "failed", "cancelled")
 TRANSACTION_STATUSES = ("pending", "success", "failed")
@@ -45,10 +47,11 @@ class Purchase(Base):
     crypto_symbol = Column(String(10), nullable=False)
     amount_usd = Column(Float, nullable=False)
     frequency = Column(String(20), nullable=False)          # one_time | daily | weekly | monthly
-    # Withdraw immediately (Auto-Buy) needs a wallet; accumulate-on-exchange (DCA) may leave it empty.
-    wallet_address = Column(String(128), nullable=True)
+    # Required in both modes: autobuy withdraws to it after every buy, dca keeps it for later withdrawals.
+    wallet_address = Column(String(128), nullable=False)
     blockchain_network = Column(String(20), nullable=False)  # mainnet | testnet
-    withdraw_immediately = Column(Boolean, nullable=False, default=True)
+    purchase_type = Column(Enum(*PURCHASE_TYPES, name="purchase_type"), nullable=False, default="autobuy",
+                           server_default="autobuy")
     status = Column(String(20), nullable=False, default="active")
     failure_count = Column(Integer, nullable=False, default=0)  # consecutive failed attempts
     last_error = Column(String(500), nullable=True)
@@ -58,6 +61,11 @@ class Purchase(Base):
 
     user = relationship("User", back_populates="purchases")
     exchange_account = relationship("APIKey")
+
+    @property
+    def withdraw_immediately(self) -> bool:
+        """Compatibility view of purchase_type for older clients."""
+        return self.purchase_type == "autobuy"
     transactions = relationship("PurchaseTransaction", back_populates="purchase",
                                 cascade="all, delete-orphan", order_by="PurchaseTransaction.created_at.desc()")
 
@@ -73,6 +81,10 @@ class PurchaseTransaction(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     purchase_id = Column(UUID(as_uuid=True), ForeignKey("purchases.id", ondelete="CASCADE"), nullable=False)
     exchange_tx_id = Column(String(128), nullable=True)
+    # withdrawal: coins were sent to the wallet (exchange_tx_id = withdrawal id)
+    # accumulation: coins stay on the exchange (exchange_tx_id = order id)
+    tx_type = Column(Enum(*TRANSACTION_TYPES, name="transaction_type"), nullable=False, default="withdrawal",
+                     server_default="withdrawal")
     status = Column(String(20), nullable=False, default="pending")  # pending | success | failed
     amount_executed = Column(Float, nullable=True)   # crypto amount delivered
     fee = Column(Float, nullable=True)               # withdrawal fee in crypto units

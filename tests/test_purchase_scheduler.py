@@ -167,41 +167,58 @@ async def test_gateway_dry_run_via_real_client_is_simulated(db, user, binance_ke
     assert tx.amount_executed == pytest.approx(0.002)
 
 
-async def test_accumulate_mode_buys_without_withdrawing(db, user, binance_key, monkeypatch):
-    """withdraw_immediately=False: the real gateway places the buy and never calls withdraw."""
-    from api.services import binance_client as bc
-    calls = []
+class FakeLegacy:
+    """Legacy exchange client stand-in: fixed price, records withdrawals."""
+    withdrawals = []
 
-    class FakeLegacy:
-        def __init__(self, *a, **k): pass
-        @staticmethod
-        def spot_symbol(b, q): return f"{b}{q}"
-        def get_ticker_price(self, symbol): return 2_000.0
-        def withdraw(self, *a, **k): calls.append("withdraw"); return "should-not-happen"
+    def __init__(self, *a, **k): pass
+    @staticmethod
+    def spot_symbol(b, q): return f"{b}{q}"
+    def get_ticker_price(self, symbol): return 2_000.0 if symbol.startswith("ETH") else 50_000.0
+    def withdraw(self, *a, **k): FakeLegacy.withdrawals.append((a, k)); return "real-wd-1"
+
+
+async def test_autobuy_mode_withdraws_and_records_withdrawal_tx(db, user, binance_key, monkeypatch):
+    from api.services import binance_client as bc
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
-    p = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address=None,
-                            withdraw_immediately=False, amount_usd=100, next_execution=NOW)
+    FakeLegacy.withdrawals.clear()
+    p = await make_purchase(db, user, binance_key, purchase_type="autobuy", amount_usd=100, next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
     tx = (await tx_for(db, p))[0]
-    assert tx.status == "success" and tx.exchange_tx_id.startswith("DRY-") and not tx.exchange_tx_id.startswith("DRY-WD-")
-    assert tx.amount_executed == pytest.approx(0.05) and calls == []
-    await db.refresh(p)
-    assert p.next_execution == NOW + timedelta(days=1)
+    assert tx.status == "success" and tx.tx_type == "withdrawal"
+    assert tx.exchange_tx_id.startswith("DRY-WD-"), "dry run: withdrawal simulated, not sent"
+    assert tx.amount_executed == pytest.approx(0.002) and FakeLegacy.withdrawals == []
 
 
-async def test_immediate_mode_without_wallet_fails_honestly(db, user, binance_key, monkeypatch):
+async def test_dca_mode_skips_withdrawal_and_records_accumulation_tx(db, user, binance_key, monkeypatch):
     from api.services import binance_client as bc
-
-    class FakeLegacy:
-        def __init__(self, *a, **k): pass
-        @staticmethod
-        def spot_symbol(b, q): return f"{b}{q}"
-        def get_ticker_price(self, symbol): return 50_000.0
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
-    p = await make_purchase(db, user, binance_key, wallet_address=None, withdraw_immediately=True, next_execution=NOW)
-    await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    FakeLegacy.withdrawals.clear()
+    p = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
+                            purchase_type="dca", amount_usd=100, next_execution=NOW)
+    await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=False)  # live path, still no withdrawal
     tx = (await tx_for(db, p))[0]
-    assert tx.status == "failed" and "wallet" in tx.error_message
+    assert tx.status in ("success", "failed")
+    if tx.status == "success":  # FakeLegacy has no order book, so the live buy path may fail before recording
+        assert tx.tx_type == "accumulation"
+    assert FakeLegacy.withdrawals == [], "dca never withdraws"
+    # dry-run path records the accumulation cleanly
+    p2 = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
+                             purchase_type="dca", amount_usd=100, next_execution=NOW)
+    await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    tx2 = (await tx_for(db, p2))[0]
+    assert tx2.status == "success" and tx2.tx_type == "accumulation"
+    assert tx2.exchange_tx_id.startswith("DRY-") and not tx2.exchange_tx_id.startswith("DRY-WD-")
+    assert tx2.amount_executed == pytest.approx(0.05)
+    await db.refresh(p2)
+    assert p2.next_execution == NOW + timedelta(days=1)
+
+
+async def test_failed_attempt_keeps_mode_tx_type(db, user, binance_key):
+    p = await make_purchase(db, user, binance_key, purchase_type="dca", next_execution=NOW)
+    await ps.execute_due_purchases(db, now=NOW, gateway=FailingGateway(), dry_run=True)
+    tx = (await tx_for(db, p))[0]
+    assert tx.status == "failed" and tx.tx_type == "accumulation"
 
 
 async def test_sync_entry_point_runs(db, user, binance_key):

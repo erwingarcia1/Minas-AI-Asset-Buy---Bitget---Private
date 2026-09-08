@@ -302,11 +302,12 @@ class PurchaseCreateRequest(TypedDict):
     """PurchaseCreateRequest."""
     crypto_symbol: str
     amount_usd: float
-    wallet_address: NotRequired[Optional[str]]
+    wallet_address: str
     blockchain_network: str
     frequency: str
     exchange_account_id: str
-    withdraw_immediately: NotRequired[bool]
+    purchase_type: NotRequired[str]
+    withdraw_immediately: NotRequired[Optional[bool]]
 
 
 class PurchaseCreatedOut(TypedDict):
@@ -322,8 +323,9 @@ class PurchaseDetailOut(TypedDict):
     crypto_symbol: str
     amount_usd: float
     frequency: str
-    wallet_address: NotRequired[Optional[str]]
+    wallet_address: str
     blockchain_network: str
+    purchase_type: str
     withdraw_immediately: bool
     exchange_account_id: NotRequired[Optional[str]]
     exchange: NotRequired[Optional[str]]
@@ -343,8 +345,9 @@ class PurchaseOut(TypedDict):
     crypto_symbol: str
     amount_usd: float
     frequency: str
-    wallet_address: NotRequired[Optional[str]]
+    wallet_address: str
     blockchain_network: str
+    purchase_type: str
     withdraw_immediately: bool
     exchange_account_id: NotRequired[Optional[str]]
     exchange: NotRequired[Optional[str]]
@@ -494,6 +497,7 @@ class TransactionOut(TypedDict):
     id: str
     purchase_id: str
     exchange_tx_id: NotRequired[Optional[str]]
+    tx_type: NotRequired[str]
     status: str
     amount_executed: NotRequired[Optional[float]]
     fee: NotRequired[Optional[float]]

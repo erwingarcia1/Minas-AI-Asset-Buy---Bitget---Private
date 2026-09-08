@@ -11,14 +11,14 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.database import get_db
 from api.models import APIKey, Purchase, PurchaseTransaction, User, utcnow
-from api.models.purchase import BLOCKCHAIN_NETWORKS, PURCHASE_FREQUENCIES
+from api.models.purchase import BLOCKCHAIN_NETWORKS, PURCHASE_FREQUENCIES, PURCHASE_TYPES
 from api.routes.user import get_current_user
 from api.utils.exchange_networks import (
     SUPPORTED_CRYPTOS, can_exchange_withdraw_to_network, chain_for_crypto, supported_networks)
@@ -36,13 +36,32 @@ MIN_AMOUNT_USD, MAX_AMOUNT_USD = 10.0, 1_000_000.0
 class PurchaseCreateRequest(BaseModel):
     crypto_symbol: str = Field(min_length=2, max_length=10)
     amount_usd: float = Field(ge=MIN_AMOUNT_USD, le=MAX_AMOUNT_USD)
-    wallet_address: Optional[str] = Field(default=None, max_length=128)
+    wallet_address: str = Field(min_length=20, max_length=128)
     blockchain_network: str
     frequency: str
     exchange_account_id: UUID
-    # True  = Auto-Buy: buy, then withdraw to wallet_address right away (wallet required)
-    # False = DCA accumulate: buy and hold on the exchange (wallet optional, kept for later withdrawals)
-    withdraw_immediately: bool = True
+    # autobuy (default): buy, then withdraw to wallet_address right away
+    # dca:               buy and accumulate on the exchange; the wallet is kept for later withdrawals
+    purchase_type: str = "autobuy"
+    # Deprecated alias for purchase_type (true = autobuy, false = dca); must agree with it when both are sent.
+    withdraw_immediately: Optional[bool] = None
+
+    @field_validator("purchase_type")
+    @classmethod
+    def _purchase_type(cls, v: str) -> str:
+        v = (v or "autobuy").lower().strip().replace("-", "").replace("_", "")
+        if v not in PURCHASE_TYPES:
+            raise ValueError(f"purchase_type must be one of {', '.join(PURCHASE_TYPES)}")
+        return v
+
+    @model_validator(mode="after")
+    def _reconcile_alias(self):
+        if self.withdraw_immediately is not None:
+            implied = "autobuy" if self.withdraw_immediately else "dca"
+            if "purchase_type" in self.model_fields_set and self.purchase_type != implied:
+                raise ValueError("withdraw_immediately contradicts purchase_type; send purchase_type only")
+            self.purchase_type = implied
+        return self
 
     @field_validator("crypto_symbol")
     @classmethod
@@ -72,9 +91,8 @@ class PurchaseCreateRequest(BaseModel):
 
     @field_validator("wallet_address")
     @classmethod
-    def _address(cls, v):
-        v = (v or "").strip()
-        return v or None
+    def _address(cls, v: str) -> str:
+        return v.strip()
 
 
 class PurchaseUpdateRequest(BaseModel):
@@ -102,6 +120,7 @@ class TransactionOut(BaseModel):
     id: UUID
     purchase_id: UUID
     exchange_tx_id: Optional[str] = None
+    tx_type: str = "withdrawal"   # withdrawal | accumulation
     status: str
     amount_executed: Optional[float] = None
     fee: Optional[float] = None
@@ -117,9 +136,10 @@ class PurchaseOut(BaseModel):
     crypto_symbol: str
     amount_usd: float
     frequency: str
-    wallet_address: Optional[str] = None
+    wallet_address: str
     blockchain_network: str
-    withdraw_immediately: bool
+    purchase_type: str            # autobuy | dca
+    withdraw_immediately: bool    # derived: purchase_type == "autobuy" (compatibility)
     exchange_account_id: Optional[UUID] = None
     exchange: Optional[str] = None
     status: str
@@ -151,7 +171,8 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
     base = dict(
         id=p.id, crypto_symbol=p.crypto_symbol, amount_usd=p.amount_usd, frequency=p.frequency,
         wallet_address=p.wallet_address, blockchain_network=p.blockchain_network,
-        withdraw_immediately=p.withdraw_immediately, exchange_account_id=p.exchange_account_id,
+        purchase_type=p.purchase_type, withdraw_immediately=p.purchase_type == "autobuy",
+        exchange_account_id=p.exchange_account_id,
         exchange=p.exchange_account.exchange if p.exchange_account else None,
         status=p.status, failure_count=p.failure_count, last_error=p.last_error,
         next_execution=p.next_execution, created_at=p.created_at, updated_at=p.updated_at,
@@ -184,20 +205,15 @@ async def create_purchase(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a purchase in one of two modes: `withdraw_immediately: true`
-    (Auto-Buy: buy, then send the coins to `wallet_address`; wallet required)
-    or `false` (DCA accumulate: buy and hold on the exchange; wallet optional).
-    Rejects (422 with `{error, details}`) when a given wallet address does not
-    match the coin's chain or the declared network, when the exchange account
-    cannot withdraw to that network (immediate mode), or when the exchange
-    account is not the caller's."""
+    """Create a purchase. `purchase_type` selects the mode: `autobuy` (default:
+    buy, then withdraw the coins to `wallet_address`) or `dca` (buy and
+    accumulate on the exchange; the wallet is kept for later withdrawals).
+    Both modes require a wallet address and network. Rejects (422 with
+    `{error, details}`) when the wallet address does not match the coin's
+    chain or the declared network, when the exchange account cannot withdraw
+    to that network (autobuy), or when the exchange account is not the caller's."""
     chain = chain_for_crypto(payload.crypto_symbol)
-    if payload.withdraw_immediately and not payload.wallet_address:
-        raise _reject("wallet_address_required", {
-            "withdraw_immediately": True,
-            "message": "A wallet address is required when withdrawing immediately; untick it to accumulate on the exchange",
-        })
-    if payload.wallet_address and not validate_address_for_network(payload.wallet_address, payload.blockchain_network, chain=chain):
+    if not validate_address_for_network(payload.wallet_address, payload.blockchain_network, chain=chain):
         raise _reject("invalid_wallet_address", {
             "wallet_address": payload.wallet_address, "blockchain_network": payload.blockchain_network,
             "expected_chain": chain,
@@ -210,7 +226,7 @@ async def create_purchase(
         raise HTTPException(status_code=404, detail={"error": "exchange_account_not_found",
                                                     "details": {"exchange_account_id": str(payload.exchange_account_id)}})
 
-    if payload.withdraw_immediately and not can_exchange_withdraw_to_network(account.exchange, payload.blockchain_network):
+    if payload.purchase_type == "autobuy" and not can_exchange_withdraw_to_network(account.exchange, payload.blockchain_network):
         raise _reject("network_not_supported_by_exchange", {
             "exchange": account.exchange, "blockchain_network": payload.blockchain_network,
             "supported_networks": supported_networks(account.exchange),
@@ -219,7 +235,7 @@ async def create_purchase(
     purchase = Purchase(
         user_id=current_user.id, exchange_account_id=account.id, crypto_symbol=payload.crypto_symbol,
         amount_usd=payload.amount_usd, frequency=payload.frequency, wallet_address=payload.wallet_address,
-        blockchain_network=payload.blockchain_network, withdraw_immediately=payload.withdraw_immediately,
+        blockchain_network=payload.blockchain_network, purchase_type=payload.purchase_type,
         status="active", failure_count=0,
         next_execution=utcnow(),  # due on the scheduler's next run
     )
@@ -228,7 +244,7 @@ async def create_purchase(
     await db.refresh(purchase)
     logger.info("purchase created", extra={"purchase_id": str(purchase.id), "user_id": str(current_user.id),
                                            "crypto": purchase.crypto_symbol, "network": purchase.blockchain_network,
-                                           "withdraw_immediately": purchase.withdraw_immediately})
+                                           "purchase_type": purchase.purchase_type})
     return PurchaseCreatedOut(purchase_id=purchase.id, status=purchase.status, next_execution=purchase.next_execution)
 
 
