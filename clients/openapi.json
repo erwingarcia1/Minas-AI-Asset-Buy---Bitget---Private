@@ -2802,111 +2802,6 @@
           }
         ]
       }
-    },
-    "/test-purchase/execute/{purchase_id}": {
-      "post": {
-        "tags": [
-          "test-purchase"
-        ],
-        "summary": "Execute Purchase",
-        "description": "Execute one of the caller's recurring purchases right now.",
-        "operationId": "execute_purchase_test_purchase_execute__purchase_id__post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "purchase_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Purchase Id"
-            }
-          },
-          {
-            "name": "dry_run",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": true,
-              "title": "Dry Run"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TransactionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/test-purchase/balance/{coin}": {
-      "get": {
-        "tags": [
-          "test-purchase"
-        ],
-        "summary": "Account Balance",
-        "description": "Available spot balance of `coin` on the caller's Binance account.",
-        "operationId": "account_balance_test_purchase_balance__coin__get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "coin",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Coin"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -5182,10 +5077,6 @@
     {
       "name": "webhooks",
       "description": "Inbound provider callbacks."
-    },
-    {
-      "name": "test-purchase",
-      "description": "TEMPORARY manual execution endpoints \u2014 removed before launch."
     }
   ]
 }

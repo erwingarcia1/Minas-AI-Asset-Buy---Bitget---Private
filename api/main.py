@@ -38,7 +38,6 @@ OPENAPI_TAGS = [
     {"name": "transactions", "description": "Execution history with pagination, filters, and aggregate statistics."},
     {"name": "dashboard", "description": "Holdings, upcoming purchases, and investment analytics."},
     {"name": "webhooks", "description": "Inbound provider callbacks."},
-    {"name": "test-purchase", "description": "TEMPORARY manual execution endpoints — removed before launch."},
 ]
 
 # Create FastAPI app
@@ -152,10 +151,6 @@ from api.routes import webhooks
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
 from api.routes import email
 app.include_router(email.router, prefix="/api/email", tags=["user"])
-
-# TEMPORARY (remove in Phase 3): manual purchase-execution routes for testing
-from api.routes import test_purchase
-app.include_router(test_purchase.router, prefix="/test-purchase", tags=["test-purchase"])
 
 if __name__ == "__main__":
     import uvicorn

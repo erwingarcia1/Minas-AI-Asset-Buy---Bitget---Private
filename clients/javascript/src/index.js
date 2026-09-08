@@ -32,8 +32,6 @@ export class AutoBuyClient {
     this.analytics = api.analytics;
     this.kyc = api.kyc;
     this.webhooks = api.webhooks;
-    /** Development-only routes; removed before production (#34). */
-    this.testPurchase = api.testPurchase;
   }
 
   /** Current token pair (null when logged out). */

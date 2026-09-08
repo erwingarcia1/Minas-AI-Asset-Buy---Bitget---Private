@@ -492,22 +492,6 @@ export class EmailApi {
 
 }
 
-/** `test-purchase` endpoints. */
-export class TestPurchaseApi {
-  constructor(private readonly http: HttpTransport) {}
-
-  /** Execute Purchase — `POST /test-purchase/execute/{purchase_id}` */
-  executePurchase(purchaseId: string, query?: { dry_run?: boolean }): Promise<TransactionResponse> {
-    return this.http.request<TransactionResponse>("POST", "/test-purchase/execute/" + encodeURIComponent(String(purchaseId)), { query, auth: true });
-  }
-
-  /** Account Balance — `GET /test-purchase/balance/{coin}` */
-  accountBalance(coin: string): Promise<unknown> {
-    return this.http.request<unknown>("GET", "/test-purchase/balance/" + encodeURIComponent(String(coin)), { auth: true });
-  }
-
-}
-
 /** All resource groups, keyed by API module. */
 export function buildApi(http: HttpTransport) {
   return {
@@ -527,7 +511,6 @@ export function buildApi(http: HttpTransport) {
     kyc: new KycApi(http),
     webhooks: new WebhooksApi(http),
     email: new EmailApi(http),
-    testPurchase: new TestPurchaseApi(http),
   } as const;
 }
 

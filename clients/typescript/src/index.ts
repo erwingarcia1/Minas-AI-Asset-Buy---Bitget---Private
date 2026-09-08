@@ -44,8 +44,6 @@ export class AutoBuyClient {
   get analytics() { return this.api.analytics; }
   get kyc() { return this.api.kyc; }
   get webhooks() { return this.api.webhooks; }
-  /** Development-only routes; removed before production (#34). */
-  get testPurchase() { return this.api.testPurchase; }
 
   // ---- auth helpers ---------------------------------------------------------
 

@@ -734,34 +734,6 @@ export class EmailApi {
 
 }
 
-/** `test-purchase` endpoints. */
-export class TestPurchaseApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Execute Purchase — `POST /test-purchase/execute/{purchase_id}`
-   * @param {string} purchaseId
-   * @param {{ dry_run?: boolean }} [query]
-   * @returns {Promise<import('./types.js').TransactionResponse>}
-   */
-  executePurchase(purchaseId, query) {
-    return this.http.request("POST", "/test-purchase/execute/" + encodeURIComponent(String(purchaseId)), { query, auth: true });
-  }
-
-  /**
-   * Account Balance — `GET /test-purchase/balance/{coin}`
-   * @param {string} coin
-   * @returns {Promise<unknown>}
-   */
-  accountBalance(coin) {
-    return this.http.request("GET", "/test-purchase/balance/" + encodeURIComponent(String(coin)), { auth: true });
-  }
-
-}
-
 /** All resource groups, keyed by API module. */
 export function buildApi(http) {
   return {
@@ -781,6 +753,5 @@ export function buildApi(http) {
     kyc: new KycApi(http),
     webhooks: new WebhooksApi(http),
     email: new EmailApi(http),
-    testPurchase: new TestPurchaseApi(http),
   };
 }

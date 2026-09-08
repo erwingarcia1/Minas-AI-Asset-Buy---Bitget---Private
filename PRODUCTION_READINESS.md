@@ -65,7 +65,7 @@ Each blocker is tracked as a Phase 7 GitHub issue (labels `phase-7`, `production
 7. [ ] Strong `SECRET_KEY` + `ENCRYPTION_KEY` in production env (boot guard enforces this)
 8. [ ] Automated database backups on a schedule + one tested restore → #32
 9. [ ] Prometheus scraping `/metrics` with the docs/ALERTING.md rules wired to a pager → #33
-10. [ ] Remove the temporary `/test-purchase` routes (tracked since Sprint 1) → #34
+10. [x] Remove the temporary `/test-purchase` routes (tracked since Sprint 1) → #34
 
 ## Deployment steps
 

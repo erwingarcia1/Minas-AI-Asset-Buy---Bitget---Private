@@ -53,8 +53,6 @@ class AutoBuyClient:
         self.analytics = api.analytics
         self.kyc = api.kyc
         self.webhooks = api.webhooks
-        #: Development-only routes; removed before production (#34).
-        self.test_purchase = api.test_purchase
 
     # -- lifecycle -------------------------------------------------------------
     def close(self) -> None:
@@ -133,7 +131,6 @@ class AsyncAutoBuyClient:
         self.analytics = api.analytics
         self.kyc = api.kyc
         self.webhooks = api.webhooks
-        self.test_purchase = api.test_purchase
 
     async def aclose(self) -> None:
         await self.transport.aclose()

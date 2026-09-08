@@ -674,7 +674,7 @@ Tracking issues for the launch gate in [`PRODUCTION_READINESS.md`](PRODUCTION_RE
 | #31 | Configure TLS & DNS | SSL certificate, nginx, DNS records |
 | #32 | Setup Automated Backups | Daily `pg_dump`, off-host storage, tested restore |
 | #33 | Configure Pager Alerts | PagerDuty integration, critical alert routing |
-| #34 | Remove /test-purchase Endpoint | Delete the dev-only routes, update docs, keep tests green |
+| #34 | Remove /test-purchase Endpoint | Done — routes deleted, SDKs regenerated, tests green |
 
 ---
 

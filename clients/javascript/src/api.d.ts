@@ -272,15 +272,6 @@ export declare class EmailApi {
   sendNotification(body: SendNotificationRequest): Promise<EmailSentResponse>;
 }
 
-/** `test-purchase` endpoints. */
-export declare class TestPurchaseApi {
-  constructor(http: HttpTransport);
-  /** Execute Purchase — `POST /test-purchase/execute/{purchase_id}` */
-  executePurchase(purchaseId: string, query?: { dry_run?: boolean }): Promise<TransactionResponse>;
-  /** Account Balance — `GET /test-purchase/balance/{coin}` */
-  accountBalance(coin: string): Promise<unknown>;
-}
-
 export interface Api {
   readonly system: SystemApi;
   readonly auth: AuthApi;
@@ -298,6 +289,5 @@ export interface Api {
   readonly kyc: KycApi;
   readonly webhooks: WebhooksApi;
   readonly email: EmailApi;
-  readonly testPurchase: TestPurchaseApi;
 }
 export declare function buildApi(http: HttpTransport): Api;

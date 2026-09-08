@@ -828,36 +828,6 @@ class AsyncEmailApi:
         return await self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
 
 
-class TestPurchaseApi:
-    """`test-purchase` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def execute_purchase(self, purchase_id: str, *, dry_run: Optional[bool] = None) -> TransactionResponse:
-        """Execute Purchase — ``POST /test-purchase/execute/{purchase_id}``."""
-        return self._http.request("POST", "/test-purchase/execute/" + _q(purchase_id), auth=True, query={"dry_run": dry_run})
-
-    def account_balance(self, coin: str) -> Any:
-        """Account Balance — ``GET /test-purchase/balance/{coin}``."""
-        return self._http.request("GET", "/test-purchase/balance/" + _q(coin), auth=True)
-
-
-class AsyncTestPurchaseApi:
-    """`test-purchase` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def execute_purchase(self, purchase_id: str, *, dry_run: Optional[bool] = None) -> TransactionResponse:
-        """Execute Purchase — ``POST /test-purchase/execute/{purchase_id}``."""
-        return await self._http.request("POST", "/test-purchase/execute/" + _q(purchase_id), auth=True, query={"dry_run": dry_run})
-
-    async def account_balance(self, coin: str) -> Any:
-        """Account Balance — ``GET /test-purchase/balance/{coin}``."""
-        return await self._http.request("GET", "/test-purchase/balance/" + _q(coin), auth=True)
-
-
 class Api:
     """All resource groups, keyed by API module."""
 
@@ -878,7 +848,6 @@ class Api:
         self.kyc = KycApi(http)
         self.webhooks = WebhooksApi(http)
         self.email = EmailApi(http)
-        self.test_purchase = TestPurchaseApi(http)
 
 
 class AsyncApi:
@@ -901,4 +870,3 @@ class AsyncApi:
         self.kyc = AsyncKycApi(http)
         self.webhooks = AsyncWebhooksApi(http)
         self.email = AsyncEmailApi(http)
-        self.test_purchase = AsyncTestPurchaseApi(http)

@@ -198,38 +198,6 @@ async def test_purchase_list_and_get(client, user, purchase):
         assert empty.status_code == 400
 
 
-# ---------------------------------------------------------------- test-purchase routes
-
-async def test_manual_execute_route(client, db, user, purchase, binance_key, monkeypatch):
-    from api.services import purchase_service as ps_mod
-    from tests.api.test_purchase_service import FakeBinance
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
-    H = auth_headers(user)
-    async with client as c:
-        r = await c.post(f"/test-purchase/execute/{purchase.id}", headers=H)
-        assert r.status_code == 200
-        assert r.json()["status"] == "completed" and r.json()["exchange_rate"] == 50000.0
-        missing = await c.post(f"/test-purchase/execute/{uuid.uuid4()}", headers=H)
-        assert missing.status_code == 404
-
-
-async def test_balance_route(client, db, user, binance_key, monkeypatch):
-    class FakeBal:
-        def __init__(self, *a, **k): pass
-        def get_account_balance(self, coin): return 12.5
-    monkeypatch.setattr("api.routes.test_purchase.BinanceClient", FakeBal)
-    H = auth_headers(user)
-    async with client as c:
-        r = await c.get("/test-purchase/balance/btc", headers=H)
-    assert r.json() == {"symbol": "BTC", "balance": 12.5}
-
-
-async def test_balance_route_no_key_404(client, user):
-    async with client as c:
-        assert (await c.get("/test-purchase/balance/btc",
-                            headers=auth_headers(user))).status_code == 404
-
-
 # ---------------------------------------------------------------- misc branches
 
 async def test_resend_webhook_stub(client):
