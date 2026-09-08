@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,7 +118,7 @@ async def _monthly_average(db: AsyncSession, user_id) -> float:
 @router.get("/", response_model=DashboardResponse)
 @limiter.limit("10/minute", key_func=user_or_ip_key)
 async def dashboard(
-    request: Request,
+    request: Request, response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

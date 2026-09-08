@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
@@ -142,7 +142,7 @@ def _token_pair(user_id: str) -> TokenResponse:
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
-async def register(request: Request, payload: RegisterRequest,
+async def register(request: Request, response: Response, payload: RegisterRequest,
                    background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     """Register a new user with email and password."""
     email = payload.email.lower()
@@ -161,7 +161,7 @@ async def register(request: Request, payload: RegisterRequest,
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("5/minute")
-async def login(request: Request, payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, response: Response, payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate with email/password and receive access + refresh tokens."""
     locked_for = await is_locked_out(payload.email)
     if locked_for:
@@ -186,7 +186,7 @@ async def login(request: Request, payload: LoginRequest, db: AsyncSession = Depe
 
 @router.post("/verify", response_model=VerifyResponse)
 @limiter.limit("10/minute")
-async def verify(request: Request, payload: VerifyRequest):
+async def verify(request: Request, response: Response, payload: VerifyRequest):
     """Verify an access token; returns validity and the user id it belongs to."""
     data = verify_token(payload.token)
     if data is None or data.user_id is None:
@@ -196,7 +196,7 @@ async def verify(request: Request, payload: VerifyRequest):
 
 @router.post("/refresh", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def refresh(request: Request, payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh(request: Request, response: Response, payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """Exchange a valid refresh token for a new access + refresh token pair."""
     invalid = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -238,7 +238,7 @@ class LogoutRequest(BaseModel):
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("10/minute")
-async def logout(request: Request, payload: LogoutRequest):
+async def logout(request: Request, response: Response, payload: LogoutRequest):
     """Revoke a refresh token. The short-lived access token simply expires."""
     try:
         decoded = jwt.decode(

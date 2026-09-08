@@ -6,7 +6,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -172,7 +172,7 @@ class KeyVerifyResponse(BaseModel):
 @router.post("/keys/{key_id}/verify", response_model=KeyVerifyResponse)
 @limiter.limit("3/minute", key_func=user_or_ip_key)
 async def verify_key(
-    request: Request,
+    request: Request, response: Response,
     key_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

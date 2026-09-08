@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +71,7 @@ class TransactionStats(BaseModel):
 @router.get("/", response_model=TransactionListResponse)
 @limiter.limit("30/minute", key_func=user_or_ip_key)
 async def list_transactions(
-    request: Request,
+    request: Request, response: Response,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status_filter: Optional[str] = Query(None),

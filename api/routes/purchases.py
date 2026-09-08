@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -162,7 +162,7 @@ async def _get_owned_purchase(
 @router.post("/", response_model=PurchaseResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("20/minute", key_func=user_or_ip_key)
 async def create_purchase(
-    request: Request,
+    request: Request, response: Response,
     payload: PurchaseCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

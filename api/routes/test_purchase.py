@@ -7,7 +7,7 @@ dry_run=false.
 import asyncio
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ router = APIRouter()
 @router.post("/execute/{purchase_id}", response_model=TransactionResponse)
 @limiter.limit("1/minute", key_func=user_or_ip_key)
 async def execute_purchase(
-    request: Request,
+    request: Request, response: Response,
     purchase_id: UUID,
     dry_run: bool = Query(True),
     current_user: User = Depends(get_current_user),

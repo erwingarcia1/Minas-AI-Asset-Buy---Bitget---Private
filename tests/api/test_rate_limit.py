@@ -118,3 +118,26 @@ def test_user_key_from_bearer_token(user):
              "headers": [(b"authorization", f"Bearer {token}".encode())],
              "client": ("9.9.9.9", 1234)}
     assert user_or_ip_key(Request(scope)) == f"user:{user.id}"
+
+
+async def test_successful_limited_response_carries_headers(limits_on, db):
+    """Regression: with the limiter on, a limited endpoint that *succeeds* must
+    still return (slowapi injects X-RateLimit-* into the endpoint's `response`
+    parameter; without it every 2xx from a limited route was a 500)."""
+    from sqlalchemy import select
+    from api.models import User
+    email = f"hdr-{uuid.uuid4().hex[:8]}@example.com"
+    try:
+        async with fresh_client() as c:
+            r = await c.post("/api/auth/register", json={"email": email, "password": PW})
+            assert r.status_code == 201, r.text
+            assert r.headers.get("x-ratelimit-limit") == "5"
+            r = await c.post("/api/auth/login", json={"email": email, "password": PW})
+            assert r.status_code == 200, r.text
+            assert r.headers.get("x-ratelimit-limit") == "5"
+            assert "x-ratelimit-remaining" in r.headers
+    finally:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if user is not None:
+            await db.delete(user)
+            await db.commit()
