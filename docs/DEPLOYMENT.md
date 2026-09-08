@@ -19,6 +19,39 @@ The entrypoint applies Alembic migrations, then serves via **gunicorn with 4
 uvicorn workers** (measured: p95 245ms @10 concurrent vs 1.6s single-worker).
 The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse them.
 
+## Production deployment checklist
+
+Work through this top to bottom before the first `scripts/deploy.sh platform`
+on a production host. Items marked done are already in the repository; the
+rest are manual and tracked as Phase 7 issues.
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 1 | Credential files ignored by git (`.env`, every `.env.*`, `.envy`, `*.pem`) | ✅ done | `.gitignore` |
+| 2 | Dev-only `/test-purchase` routes removed | ✅ done (#34) | `api/main.py` |
+| 3 | Production env template with every required variable | ✅ done | `.env.production.example` |
+| 4 | TLS + DNS: real hostname (`api.autobuy.app`) and certificate paths in `deployment/nginx.conf`; DNS A/AAAA records; HTTP→HTTPS redirect verified | ⬜ manual (#31) | `deployment/nginx.conf` |
+| 5 | Credentials provisioned into the server's root-owned `.env` (`chmod 600`): `SECRET_KEY`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, Resend (#28), Sumsub (#27); optional Twilio (#29), FCM (#30), Slack | ⬜ manual | `.env.production.example` |
+| 6 | `.env` validated (command below) | ⬜ manual | `scripts/validate_env.py` |
+| 7 | Sumsub webhook pointed at `https://<api host>/api/webhooks/sumsub` with the same secret as `SUMSUB_WEBHOOK_SECRET`; Resend sending domain verified (SPF/DKIM) | ⬜ manual (#27, #28) | provider dashboards |
+| 8 | Daily `pg_dump` scheduled to off-host storage, retention set, one restore rehearsed | ⬜ manual (#32) | "Database" section |
+| 9 | Prometheus scraping `/metrics`; `docs/ALERTING.md` rules routed to a pager with an on-call rotation | ⬜ manual (#33) | `deployment/prometheus.yml` |
+| 10 | Binance testnet run, then a small-amount canary before `AUTOBUY_DRY_RUN=0` | ⬜ manual | `PRODUCTION_READINESS.md` |
+| 11 | `main` is the default branch and the deploy key pulls it | ⬜ manual | GitHub settings |
+
+### Validate `.env` before every deploy
+
+```bash
+python scripts/validate_env.py .env          # on the server; default path is ./.env
+```
+
+It exits non-zero and lists one line per problem when a required variable is
+missing, still a placeholder, or too weak for the API's boot guard (defaults,
+keys under 32 characters, `SECRET_KEY` equal to `ENCRYPTION_KEY`, the compose
+default Postgres password). Warnings cover disabled features, plain-http
+origins, and `AUTOBUY_DRY_RUN=0`. Values are never printed. `scripts/deploy.sh
+platform` performs its own, narrower check afterwards.
+
 ## Environment variables
 
 | Variable | Required in prod | Notes |
