@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
 from calendar import monthrange
 from datetime import datetime, timedelta
 from typing import Optional, Protocol
@@ -178,12 +180,22 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
 async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None,
                                 gateway: Optional[ExchangeGateway] = None,
                                 dry_run: Optional[bool] = None) -> dict:
-    """Process every due purchase. Returns {"executed", "failed", "skipped"} counts."""
+    """Process every due purchase. Returns {"executed", "failed", "skipped"} counts.
+
+    Always logs a "run started" and an "auto-buy run" summary line (even when
+    nothing is due) so a silent scheduler is distinguishable from an idle one.
+    """
     now = now or utcnow()
     gateway = gateway or ExchangeClientGateway()
     dry_run = settings.autobuy_dry_run if dry_run is None else dry_run
     counts = {"executed": 0, "failed": 0, "skipped": 0}
-    for purchase in await find_due_purchases(db, now):
+    started = time.perf_counter()
+    logger.info("auto-buy run started (pid=%s now=%s dry_run=%s)", os.getpid(), now.isoformat(), dry_run)
+    q_start = time.perf_counter()
+    due = await find_due_purchases(db, now)
+    logger.info("auto-buy run: %d due purchase(s) found in %.0f ms (db connect + query)",
+                len(due), (time.perf_counter() - q_start) * 1000)
+    for purchase in due:
         try:
             tx = await execute_one(db, purchase, now, gateway, dry_run)
         except Exception:  # never let one bad row stop the batch
@@ -197,8 +209,8 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
             counts["executed"] += 1
         else:
             counts["failed"] += 1
-    if any(counts.values()):
-        logger.info("auto-buy run: %s", counts)
+    logger.info("auto-buy run finished in %.0f ms: %s (pid=%s)",
+                (time.perf_counter() - started) * 1000, counts, os.getpid())
     return counts
 
 
@@ -213,8 +225,30 @@ async def _run_once() -> dict:
 
 def execute_purchases() -> dict:
     """APScheduler entry point (sync, runs in the scheduler's worker thread)."""
+    logger.info("execute_purchases called by APScheduler (pid=%s)", os.getpid())
     try:
         return asyncio.run(_run_once())
     except Exception:
         logger.exception("auto-buy scheduler run failed")
         return {"executed": 0, "failed": 0, "skipped": 0}
+
+
+def job_event_listener(event) -> None:
+    """APScheduler listener: surface the cases where execute_purchases is NOT
+    called, on this module's logger, so they sit next to the run logs.
+
+    Register with EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR.
+    """
+    from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
+    if getattr(event, "job_id", None) != "execute_purchases":
+        return
+    when = getattr(event, "scheduled_run_time", None)
+    if event.code == EVENT_JOB_MISSED:
+        logger.warning("execute_purchases window DISCARDED, not called: scheduled %s but the scheduler "
+                       "woke later than misfire_grace_time (pid=%s)", when, os.getpid())
+    elif event.code == EVENT_JOB_MAX_INSTANCES:
+        logger.warning("execute_purchases window SKIPPED, not called: previous run still in progress "
+                       "(scheduled %s, pid=%s)", when, os.getpid())
+    elif event.code == EVENT_JOB_ERROR:
+        logger.error("execute_purchases raised out of the job: %r (scheduled %s, pid=%s)",
+                     getattr(event, "exception", None), when, os.getpid())

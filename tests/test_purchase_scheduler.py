@@ -226,3 +226,40 @@ async def test_sync_entry_point_runs(db, user, binance_key):
     import asyncio
     counts = await asyncio.to_thread(ps.execute_purchases)
     assert set(counts) == {"executed", "failed", "skipped"}
+
+
+# --------------------------------------------------------------------------- observability
+
+async def test_run_logs_start_and_summary_even_when_nothing_is_due(db, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="autobuy.tasks.purchases")
+    far_past = datetime(2000, 1, 1, tzinfo=timezone.utc)   # nothing can be due before it existed
+    counts = await ps.execute_due_purchases(db, now=far_past, gateway=FakeGateway(), dry_run=True)
+    assert counts == {"executed": 0, "failed": 0, "skipped": 0}
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("auto-buy run started" in m for m in msgs)
+    assert any("0 due purchase(s) found" in m for m in msgs)
+    assert any("auto-buy run finished" in m and "'executed': 0" in m for m in msgs), "summary must log even when idle"
+
+
+async def test_sync_entry_point_logs_that_it_was_called(db, caplog):
+    import asyncio, logging
+    caplog.set_level(logging.INFO, logger="autobuy.tasks.purchases")
+    await asyncio.to_thread(ps.execute_purchases)
+    assert any("execute_purchases called by APScheduler" in r.getMessage() for r in caplog.records)
+
+
+def test_job_event_listener_logs_missed_skipped_and_errors(caplog):
+    import logging
+    from types import SimpleNamespace
+    from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
+    caplog.set_level(logging.INFO, logger="autobuy.tasks.purchases")
+    ev = lambda code, **k: SimpleNamespace(**{"code": code, "job_id": "execute_purchases", "scheduled_run_time": NOW, "exception": None, **k})
+    ps.job_event_listener(ev(EVENT_JOB_MISSED))
+    ps.job_event_listener(ev(EVENT_JOB_MAX_INSTANCES))
+    ps.job_event_listener(ev(EVENT_JOB_ERROR, exception=RuntimeError("boom")))
+    ps.job_event_listener(SimpleNamespace(code=EVENT_JOB_MISSED, job_id="other_job", scheduled_run_time=NOW))
+    ps.job_event_listener(ev(EVENT_JOB_EXECUTED))  # not registered for this; must stay silent
+    levels = [(r.levelname, r.getMessage()) for r in caplog.records if "execute_purchases" in r.getMessage()]
+    assert [l for l, _ in levels] == ["WARNING", "WARNING", "ERROR"]
+    assert "DISCARDED" in levels[0][1] and "SKIPPED" in levels[1][1] and "boom" in levels[2][1]

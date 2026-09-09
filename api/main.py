@@ -22,12 +22,20 @@ async def lifespan(app: FastAPI):
         scheduler.start()
         print(f"✓ Scheduler started (dry_run={settings.autobuy_dry_run})")
         # Auto-Buy purchases (buy + withdraw to wallet): APScheduler, every 5 minutes
+        import logging as _logging
+        import os as _os
+        from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
         from apscheduler.schedulers.background import BackgroundScheduler
-        from api.tasks.purchase_scheduler import execute_purchases
+        from api.tasks.purchase_scheduler import execute_purchases, job_event_listener
         app.state.autobuy_scheduler = BackgroundScheduler(timezone="UTC")
-        app.state.autobuy_scheduler.add_job(execute_purchases, "interval", minutes=5,
-                                            id="execute_purchases", max_instances=1, coalesce=True)
+        job = app.state.autobuy_scheduler.add_job(execute_purchases, "interval", minutes=5,
+                                                  id="execute_purchases", max_instances=1, coalesce=True)
+        app.state.autobuy_scheduler.add_listener(
+            job_event_listener, EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR)
         app.state.autobuy_scheduler.start()
+        _logging.getLogger("autobuy.tasks.purchases").info(
+            "Auto-Buy purchase scheduler started (pid=%s, every 5 minutes, first run %s, "
+            "misfire_grace_time=%ss)", _os.getpid(), job.next_run_time, job.misfire_grace_time)
         print("✓ Auto-Buy purchase scheduler started (every 5 minutes)")
     yield
     # Shutdown
