@@ -17,6 +17,8 @@ from .types import (
     CreateApplicantResponse,
     DashboardResponse,
     EmailSentResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     HistoryResponse,
     InitiateResponse,
     IntegrationInfo,
@@ -45,6 +47,7 @@ from .types import (
     RecurringResponse,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     SendNotificationRequest,
     SendVerificationRequest,
     StatusResponse,
@@ -128,6 +131,14 @@ class AuthApi:
         """Change Password — ``POST /api/auth/change-password``."""
         return self._http.request("POST", "/api/auth/change-password", auth=True, body=body)
 
+    def forgot_password(self, body: ForgotPasswordRequest) -> ForgotPasswordResponse:
+        """Forgot Password — ``POST /api/auth/forgot-password``."""
+        return self._http.request("POST", "/api/auth/forgot-password", auth=False, body=body)
+
+    def reset_password(self, body: ResetPasswordRequest) -> Any:
+        """Reset Password — ``POST /api/auth/reset-password``."""
+        return self._http.request("POST", "/api/auth/reset-password", auth=False, body=body)
+
 
 class AsyncAuthApi:
     """`auth` endpoints (async)."""
@@ -158,6 +169,14 @@ class AsyncAuthApi:
     async def change_password(self, body: ChangePasswordRequest) -> Any:
         """Change Password — ``POST /api/auth/change-password``."""
         return await self._http.request("POST", "/api/auth/change-password", auth=True, body=body)
+
+    async def forgot_password(self, body: ForgotPasswordRequest) -> ForgotPasswordResponse:
+        """Forgot Password — ``POST /api/auth/forgot-password``."""
+        return await self._http.request("POST", "/api/auth/forgot-password", auth=False, body=body)
+
+    async def reset_password(self, body: ResetPasswordRequest) -> Any:
+        """Reset Password — ``POST /api/auth/reset-password``."""
+        return await self._http.request("POST", "/api/auth/reset-password", auth=False, body=body)
 
 
 class UserApi:

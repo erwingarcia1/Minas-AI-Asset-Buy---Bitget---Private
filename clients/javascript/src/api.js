@@ -86,6 +86,24 @@ export class AuthApi {
     return this.http.request("POST", "/api/auth/change-password", { body, auth: true });
   }
 
+  /**
+   * Forgot Password — `POST /api/auth/forgot-password`
+   * @param {import('./types.js').ForgotPasswordRequest} body
+   * @returns {Promise<import('./types.js').ForgotPasswordResponse>}
+   */
+  forgotPassword(body) {
+    return this.http.request("POST", "/api/auth/forgot-password", { body, auth: false });
+  }
+
+  /**
+   * Reset Password — `POST /api/auth/reset-password`
+   * @param {import('./types.js').ResetPasswordRequest} body
+   * @returns {Promise<unknown>}
+   */
+  resetPassword(body) {
+    return this.http.request("POST", "/api/auth/reset-password", { body, auth: false });
+  }
+
 }
 
 /** `user` endpoints. */

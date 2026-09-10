@@ -65,6 +65,12 @@ export const auth = {
   },
   changePassword: (current_password: string, new_password: string) =>
     api.post("/api/auth/change-password", { current_password, new_password }),
+  /** Always `{sent: true}`; the API never reveals whether the email has an account. */
+  forgotPassword: (email: string) =>
+    api.post<{ sent: boolean }>("/api/auth/forgot-password", { email }).then((r) => r.data),
+  /** 400 = invalid/expired/used link, 422 = password policy. */
+  resetPassword: (token: string, new_password: string) =>
+    api.post("/api/auth/reset-password", { token, new_password }),
 };
 
 export const user = {

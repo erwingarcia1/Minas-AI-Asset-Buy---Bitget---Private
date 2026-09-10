@@ -54,7 +54,7 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 
 | Module | Endpoints |
 |---|---|
-| auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` |
+| auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
 | auto-buy (`/api/v2/purchases`) | `POST /` (validates wallet address vs coin chain + network, exchange network support, account ownership) · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency) · `DELETE /{id}` (cancel, history kept) |

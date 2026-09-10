@@ -14,6 +14,8 @@ import type {
   CreateApplicantResponse,
   DashboardResponse,
   EmailSentResponse,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
   HistoryResponse,
   InitiateResponse,
   IntegrationInfo,
@@ -42,6 +44,7 @@ import type {
   RecurringResponse,
   RefreshRequest,
   RegisterRequest,
+  ResetPasswordRequest,
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
@@ -112,6 +115,16 @@ export class AuthApi {
   /** Change Password — `POST /api/auth/change-password` */
   changePassword(body: ChangePasswordRequest): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/auth/change-password", { body, auth: true });
+  }
+
+  /** Forgot Password — `POST /api/auth/forgot-password` */
+  forgotPassword(body: ForgotPasswordRequest): Promise<ForgotPasswordResponse> {
+    return this.http.request<ForgotPasswordResponse>("POST", "/api/auth/forgot-password", { body, auth: false });
+  }
+
+  /** Reset Password — `POST /api/auth/reset-password` */
+  resetPassword(body: ResetPasswordRequest): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/auth/reset-password", { body, auth: false });
   }
 
 }

@@ -47,6 +47,8 @@ export default function Login() {
       </button>
       <p className="text-sm text-gray-600">
         New here? <Link to="/register" className="text-blue-600 underline">Create an account</Link>
+        <span className="mx-2 text-gray-300">·</span>
+        <Link to="/forgot-password" className="text-blue-600 underline">Forgot password?</Link>
       </p>
     </form>
   );

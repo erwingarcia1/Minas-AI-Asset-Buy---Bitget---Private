@@ -14,6 +14,8 @@ import type {
   CreateApplicantResponse,
   DashboardResponse,
   EmailSentResponse,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
   HistoryResponse,
   InitiateResponse,
   IntegrationInfo,
@@ -42,6 +44,7 @@ import type {
   RecurringResponse,
   RefreshRequest,
   RegisterRequest,
+  ResetPasswordRequest,
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
@@ -88,6 +91,10 @@ export declare class AuthApi {
   logout(body: LogoutRequest): Promise<unknown>;
   /** Change Password — `POST /api/auth/change-password` */
   changePassword(body: ChangePasswordRequest): Promise<unknown>;
+  /** Forgot Password — `POST /api/auth/forgot-password` */
+  forgotPassword(body: ForgotPasswordRequest): Promise<ForgotPasswordResponse>;
+  /** Reset Password — `POST /api/auth/reset-password` */
+  resetPassword(body: ResetPasswordRequest): Promise<unknown>;
 }
 
 /** `user` endpoints. */

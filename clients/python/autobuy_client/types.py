@@ -143,6 +143,16 @@ class EmailSentResponse(TypedDict):
     email_id: NotRequired[Optional[str]]
 
 
+class ForgotPasswordRequest(TypedDict):
+    """ForgotPasswordRequest."""
+    email: str
+
+
+class ForgotPasswordResponse(TypedDict):
+    """ForgotPasswordResponse."""
+    sent: NotRequired[bool]
+
+
 class HTTPValidationError(TypedDict):
     """HTTPValidationError."""
     detail: NotRequired[List[ValidationError]]
@@ -444,6 +454,12 @@ class RegisterRequest(TypedDict):
     """RegisterRequest."""
     email: str
     password: str
+
+
+class ResetPasswordRequest(TypedDict):
+    """ResetPasswordRequest."""
+    token: str
+    new_password: str
 
 
 class SendNotificationRequest(TypedDict):

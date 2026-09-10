@@ -118,6 +118,14 @@ export interface EmailSentResponse {
   email_id?: string | null;
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ForgotPasswordResponse {
+  sent?: boolean;
+}
+
 export interface HTTPValidationError {
   detail?: ValidationError[];
 }
@@ -385,6 +393,11 @@ export interface RefreshRequest {
 export interface RegisterRequest {
   email: string;
   password: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
 }
 
 export interface SendNotificationRequest {
