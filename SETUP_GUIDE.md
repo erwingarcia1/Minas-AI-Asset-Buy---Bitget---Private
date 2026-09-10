@@ -74,6 +74,17 @@ alembic upgrade head # apply the real fixes (002+)
 | `001` | Baseline: users, api_keys, recurring_purchases, transactions |
 | `002` | `transactions.recurring_purchase_id` FK → `ON DELETE SET NULL` (deleting a schedule no longer destroys its transaction history) · all datetime columns → `timestamptz` (existing values interpreted as UTC) · index on `transactions (user_id, created_at)` |
 
+## Email locally (Resend)
+
+Emails are sent only when `RESEND_API_KEY` is a real key; otherwise every
+send logs `email skipped (not configured)` and is dropped, so registration,
+KYC and purchases keep working without email. To test real sending locally:
+put a real key and `RESEND_FROM_EMAIL="Minas AutoBuy <noreply@minastrade.com>"`
+(a domain verified in Resend) in `.env`, set `APP_BASE_URL` to your dev
+frontend origin, optionally `LOG_RESET_LINKS=1` to see reset links in the
+log, restart the API, then `POST /api/auth/forgot-password` and look for
+`email sent: id=…` on the `autobuy.integrations.resend` logger.
+
 ## Production deployment
 
 The platform ships as a container (`Dockerfile.api` — the root `Dockerfile`

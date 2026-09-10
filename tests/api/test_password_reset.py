@@ -50,7 +50,7 @@ async def test_forgot_password_sends_link_for_known_email(client, account, sent,
         r = await c.post("/api/auth/forgot-password", json={"email": account.email.upper()})
     assert r.status_code == 200 and r.json() == {"sent": True}
     assert len(sent) == 1 and sent[0]["to"] == account.email
-    assert sent[0]["subject"] == "Reset your AutoBuy password"
+    assert sent[0]["subject"] == f"Reset your {settings.app_name} password"
     assert "https://app.autobuy.test/reset-password?token=" in sent[0]["text"]
     decoded = jwt.decode(link_token(sent[0]), settings.secret_key, algorithms=[settings.algorithm])
     assert decoded["type"] == "password_reset" and decoded["sub"] == str(account.id)

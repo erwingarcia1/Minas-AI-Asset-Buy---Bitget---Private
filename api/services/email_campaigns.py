@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from api.database import AsyncSessionLocal
 from api.models import Transaction, User
+from api.config import settings
 from api.services.email_service import email_service
 from api.services.email_templates import render
 
@@ -25,7 +26,7 @@ def _name(user: User) -> str:
 
 async def send_welcome(user_email: str) -> None:
     html, text = render("welcome", name=user_email.split("@", 1)[0])
-    await email_service._send(user_email, "Welcome to AutoBuy", html, text,
+    await email_service._send(user_email, f"Welcome to {settings.app_name}", html, text,
                               template="welcome")
 
 
@@ -91,8 +92,7 @@ async def send_weekly_summaries() -> None:
             total = sum(float(r[2]) for r in rows_q)
             html, text = render(
                 "purchase_summary", name=_name(user), rows=rows,
-                total_usdt=f"{total:.2f}", count=len(rows), failed=failed,
-                show_unsubscribe=True)
-            await email_service._send(user.email, "Your week at AutoBuy",
+                total_usdt=f"{total:.2f}", count=len(rows), failed=failed)
+            await email_service._send(user.email, f"Your week at {settings.app_name}",
                                       html, text, template="purchase_summary")
     logger.info("weekly summaries sent to %d user(s)", len(user_ids))

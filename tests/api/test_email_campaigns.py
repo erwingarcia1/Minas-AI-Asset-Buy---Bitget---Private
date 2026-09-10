@@ -85,7 +85,8 @@ async def test_welcome_sent_on_register(db, monkeypatch):
             r = await c.post("/api/auth/register",
                              json={"email": email, "password": "Str0ng!passw0rd"})
             assert r.status_code == 201
-        assert capture.sent and capture.sent[0]["subject"] == "Welcome to AutoBuy"
+        from api.config import settings
+        assert capture.sent and capture.sent[0]["subject"] == f"Welcome to {settings.app_name}"
         assert capture.sent[0]["to"] == email
     finally:
         u = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()

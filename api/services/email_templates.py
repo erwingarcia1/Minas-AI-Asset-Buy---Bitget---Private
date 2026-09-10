@@ -1,4 +1,10 @@
-"""Jinja2-rendered email templates (templates/emails/*.html + .txt)."""
+"""Jinja2-rendered email templates (templates/emails/*.html + .txt).
+
+Every template receives ``app_name`` (APP_NAME) and ``support_email``
+(SUPPORT_EMAIL) from configuration. Links in templates must be built with
+``api.utils.links.build_app_link``; no template may contain a placeholder
+("#") link.
+"""
 import os
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -22,9 +28,8 @@ def render(template: str, **context) -> tuple:
     """(html, text) for a template name from TEMPLATES."""
     if template not in TEMPLATES:
         raise KeyError(f"unknown email template {template!r}")
+    context.setdefault("app_name", settings.app_name)
     context.setdefault("support_email", settings.support_email)
-    context.setdefault("show_unsubscribe", False)
-    context.setdefault("unsubscribe_url", "#")
     html = _env.get_template(f"{template}.html").render(**context)
     text = _env.get_template(f"{template}.txt").render(**context)
     return html, text

@@ -114,6 +114,43 @@ next month, one-time completes); three consecutive failures mark the purchase
 `failed`. Buys and withdrawals are simulated while `AUTOBUY_DRY_RUN=1`; real
 withdrawals are implemented for Binance only.
 
+## Email (Resend)
+
+Every email the platform sends (welcome, email verification, password reset,
+password-changed notice, KYC result, purchase executed/failed, first purchase,
+milestones, weekly summary, notification-channel email) goes through one
+module, `api/integrations/resend.py` (logger `autobuy.integrations.resend`).
+Nothing about email is hardcoded; these variables drive it:
+
+| Variable | Purpose |
+|---|---|
+| `RESEND_API_KEY` | Resend API key. Empty or a placeholder = email disabled: each send logs `email skipped (not configured)` at WARNING and is dropped. |
+| `RESEND_FROM_EMAIL` | Sender for every email, e.g. `Minas AutoBuy <noreply@minastrade.com>`. The domain must be verified in Resend. **Verified today: `minastrade.com`.** `minastech.ca` is not verified and cannot send. |
+| `RESEND_REPLY_TO` | Reply-To on every email; defaults to `SUPPORT_EMAIL`. |
+| `SUPPORT_EMAIL` | Support inbox shown in footers and the Reply-To fallback. Never a sender. |
+| `APP_BASE_URL` | Public origin of the web app; the only base for links in emails (reset, verification). Never the request Host. |
+| `APP_NAME` | Product name in subjects and bodies (default `Minas AutoBuy`). |
+| `LOG_RESET_LINKS` | `1` writes password reset links to the API log for local testing. Off by default; refused in production. |
+
+Delivery failures are logged at ERROR with the Resend status and reason.
+Fire-and-forget senders (purchases, KYC, campaigns, notifications) never
+fail their caller; the verification and notification routes return 503 when
+email is not configured and 502 when Resend rejects the send.
+
+**Local testing:** set a real `RESEND_API_KEY` and a verified sender in
+`.env`, `APP_BASE_URL=http://localhost:5173`, optionally `LOG_RESET_LINKS=1`,
+then `POST /api/auth/forgot-password` and watch `docker compose logs -f api`
+for `email sent: id=…`.
+
+**Production requires** a real key, a verified-domain sender and an
+`https://` `APP_BASE_URL` that is not localhost; the boot guard,
+`scripts/validate_env.py` and `scripts/deploy.sh` all refuse otherwise.
+
+**Switching domains later:** verify the new domain in Resend (Domains → add,
+publish the DNS records, wait for "Verified"), change `RESEND_FROM_EMAIL`
+(and `RESEND_REPLY_TO` if needed) in the server's `.env`, then
+`docker compose --profile prod up -d api`.
+
 ## Client SDKs
 
 Generated from `/openapi.json` and kept in [`clients/`](../clients/README.md):

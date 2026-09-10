@@ -221,20 +221,22 @@ def test_binance_account_info_and_balance(monkeypatch):
 
 
 async def test_email_send_real_path(monkeypatch):
+    """The fire-and-forget wrapper delegates to api.integrations.resend (the only Resend client):
+    True on a 2xx from Resend, False (never an exception) on a rejection."""
+    from api.integrations import resend
     import api.services.email_service as em
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "Test <noreply@example.com>")
     sent = []
+
     def handler(request):
         sent.append(request)
         return httpx.Response(200, json={"id": "email-1"})
-    real = httpx.AsyncClient
-    monkeypatch.setattr(em.httpx, "AsyncClient",
-                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(resend, "_transport", httpx.MockTransport(handler))
     svc = em.EmailService(api_key="rk_test")
     assert await svc._send("a@b.co", "Hi", "<p>x</p>", "x") is True
-    assert sent and b"a@b.co" in sent[0].content
+    assert sent and b"a@b.co" in sent[0].content and b"noreply@example.com" in sent[0].content
 
-    def fail_handler(request):
-        return httpx.Response(422, json={"message": "invalid from"})
-    monkeypatch.setattr(em.httpx, "AsyncClient",
-                        lambda **kw: real(transport=httpx.MockTransport(fail_handler), **kw))
+    monkeypatch.setattr(resend, "_transport", httpx.MockTransport(
+        lambda request: httpx.Response(422, json={"message": "invalid from"})))
     assert await svc._send("a@b.co", "Hi", "<p>x</p>", "x") is False

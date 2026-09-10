@@ -23,6 +23,7 @@ import logging
 
 from api.integrations import resend
 from api.integrations.resend import ResendError
+from api.utils.links import build_app_link
 
 logger = logging.getLogger("autobuy.auth")
 
@@ -291,7 +292,9 @@ class ChangePasswordRequest(BaseModel):
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
+    request: Request,
     payload: ChangePasswordRequest,
+    background: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -302,6 +305,8 @@ async def change_password(
     current_user.password_changed_at = datetime.now(timezone.utc)
     await db.commit()
     logger.info("password changed", extra={"user_id": str(current_user.id)})
+    background.add_task(_send_password_changed_email, current_user.email,
+                        current_user.password_changed_at, _client_ip(request))
 
 
 # --------------------------------------------------------------------------
@@ -326,21 +331,44 @@ def make_password_reset_token(user: User) -> str:
 
 
 def password_reset_link(token: str) -> str:
-    base = (settings.app_base_url or (settings.allowed_origins or ["http://localhost:3000"])[0]).rstrip("/")
-    return f"{base}/reset-password?token={token}"
+    """Built only from APP_BASE_URL (never the request Host)."""
+    return build_app_link("/reset-password", token=token)
 
 
 async def _send_password_reset_email(email: str, link: str) -> None:
-    text = (f"We received a request to reset the password for your AutoBuy account.\n\n"
+    app = settings.app_name
+    text = (f"We received a request to reset the password for your {app} account.\n\n"
             f"Open this link within 1 hour to choose a new password:\n{link}\n\n"
             "If you did not request this, you can ignore this email; your password will not change.")
-    html = (f"<p>We received a request to reset the password for your AutoBuy account.</p>"
+    html = (f"<p>We received a request to reset the password for your {app} account.</p>"
             f"<p><a href=\"{link}\">Reset my password</a> (valid for 1 hour)</p>"
             "<p>If you did not request this, you can ignore this email; your password will not change.</p>")
     try:
-        await resend.send_email(email, "Reset your AutoBuy password", html, text_content=text, template="password_reset")
+        await resend.send_email(email, f"Reset your {app} password", html, text_content=text, template="password_reset")
     except ResendError as exc:
-        logger.warning("password reset email not delivered to %s: %s", email, exc)
+        logger.error("password reset email not delivered to %s: %s", email, exc)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+async def _send_password_changed_email(email: str, when: datetime, ip: str) -> None:
+    """Security notice after a reset or a change. Never affects the password change itself."""
+    app = settings.app_name
+    stamp = when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    contact = f"contact {settings.support_email} immediately" if settings.support_email else "contact support immediately"
+    text = (f"The password for your {app} account was changed.\n\n"
+            f"When: {stamp}\nFrom IP address: {ip}\n\n"
+            f"Every other session has been signed out. If this wasn't you, {contact}.")
+    html = (f"<p>The password for your {app} account was changed.</p>"
+            f"<p><strong>When:</strong> {stamp}<br/><strong>From IP address:</strong> {ip}</p>"
+            f"<p>Every other session has been signed out. If this wasn't you, {contact}.</p>")
+    try:
+        await resend.send_email(email, f"Your {app} password was changed", html, text_content=text,
+                                template="password_changed")
+    except ResendError as exc:
+        logger.error("password changed notice not delivered to %s: %s", email, exc)
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
@@ -355,8 +383,8 @@ async def forgot_password(request: Request, response: Response, payload: ForgotP
         link = password_reset_link(make_password_reset_token(user))
         background.add_task(_send_password_reset_email, user.email, link)
         logger.info("password reset requested", extra={"user_id": str(user.id)})
-        if settings.api_env != "production":
-            logger.info("password reset link (non-production only): %s", link)
+        if settings.reset_links_logged:  # explicit opt-in only, never tied to the environment name
+            logger.warning("password reset link (LOG_RESET_LINKS=1): %s", link)
     else:
         logger.info("password reset requested for unknown or suspended email")
     return ForgotPasswordResponse(sent=True)
@@ -399,7 +427,7 @@ async def validate_reset_token(request: Request, response: Response, payload: Re
 @router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 @limiter.limit("5/minute")
 async def reset_password(request: Request, response: Response, payload: ResetPasswordRequest,
-                         db: AsyncSession = Depends(get_db)):
+                         background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     """Set a new password using a reset token from `/forgot-password`.
     The token is single-use and expires after an hour; on success every
     existing session is signed out."""
@@ -415,6 +443,7 @@ async def reset_password(request: Request, response: Response, payload: ResetPas
     await db.commit()
     await _mark_reset_used(decoded["jti"], int(decoded.get("exp", 0)))
     logger.info("password reset completed", extra={"user_id": str(user.id)})
+    background.add_task(_send_password_changed_email, user.email, user.password_changed_at, _client_ip(request))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

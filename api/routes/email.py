@@ -22,6 +22,7 @@ from api.integrations.resend import ResendError
 from api.models import User
 from api.routes.user import get_current_user
 from api.services.rate_limit import limiter, user_or_ip_key
+from api.utils.links import build_app_link
 
 logger = logging.getLogger("autobuy.email.routes")
 
@@ -54,8 +55,8 @@ def make_verification_token(user_id: str) -> str:
 
 
 def verification_link(token: str) -> str:
-    base = (settings.app_base_url or (settings.allowed_origins or ["http://localhost:3000"])[0]).rstrip("/")
-    return f"{base}/verify-email?token={token}"
+    """Built only from APP_BASE_URL (never the request Host)."""
+    return build_app_link("/verify-email", token=token)
 
 
 def _deliver_error(exc: ResendError) -> HTTPException:
@@ -77,13 +78,14 @@ async def send_verification(
     if payload.email.lower() != current_user.email.lower():
         raise HTTPException(status_code=403, detail="You can only verify your own account email")
     link = verification_link(make_verification_token(str(current_user.id)))
-    text = (f"Confirm your AutoBuy email address by opening this link within 24 hours:\n{link}\n\n"
-            "If you did not create an AutoBuy account, ignore this message.")
-    body = (f"<p>Confirm your AutoBuy email address by clicking the link below within 24 hours.</p>"
+    app = settings.app_name
+    text = (f"Confirm your {app} email address by opening this link within 24 hours:\n{link}\n\n"
+            f"If you did not create a {app} account, ignore this message.")
+    body = (f"<p>Confirm your {app} email address by clicking the link below within 24 hours.</p>"
             f'<p><a href="{html.escape(link, quote=True)}">Verify my email</a></p>'
-            f"<p>If you did not create an AutoBuy account, ignore this message.</p>")
+            f"<p>If you did not create a {app} account, ignore this message.</p>")
     try:
-        email_id = await resend.send_email(current_user.email, "Verify your AutoBuy email", body,
+        email_id = await resend.send_email(current_user.email, f"Verify your {app} email", body,
                                            text_content=text, template="verification")
     except ResendError as exc:
         logger.warning("verification email not sent for %s: %s", current_user.id, exc)

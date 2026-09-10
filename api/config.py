@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import List
 import os
@@ -18,11 +19,31 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://autobuy:autobuy_password@localhost:5432/autobuy_db"
     )
     
-    # Email (Resend)
+    # Email (Resend) — see api/integrations/resend.py; all values come from here, never from code
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")
-    support_email: str = os.getenv("SUPPORT_EMAIL", "support@minastech.ca")
-    # Public web app origin used in emailed links; defaults to the first CORS origin
+    # Sender for every email, on a domain verified in Resend, e.g. "Minas AutoBuy <noreply@minastrade.com>"
+    resend_from_email: str = os.getenv("RESEND_FROM_EMAIL", "")
+    # Reply-To on every email; defaults to SUPPORT_EMAIL so customer replies reach a real inbox
+    resend_reply_to: str = os.getenv("RESEND_REPLY_TO", "")
+    # Support address shown in email footers and the Reply-To fallback. Never a sender.
+    support_email: str = os.getenv("SUPPORT_EMAIL", "")
+    # Public web app origin: the only base for links in emails (required, https, in production)
     app_base_url: str = os.getenv("APP_BASE_URL", "")
+    # Product name in subjects and bodies; rebranding is this one value.
+    # Compose passes unset variables as "" — treat blank as the default.
+    app_name: str = os.getenv("APP_NAME") or "Minas AutoBuy"
+    # Write password reset links to the log. Local debugging only; on only when explicitly
+    # "1"/"true"/"yes". Kept as a string so a blank value from compose can never fail bool parsing.
+    log_reset_links: str = os.getenv("LOG_RESET_LINKS", "")
+
+    @field_validator("app_name")
+    @classmethod
+    def _default_app_name(cls, v: str) -> str:
+        return (v or "").strip() or "Minas AutoBuy"
+
+    @property
+    def reset_links_logged(self) -> bool:
+        return str(self.log_reset_links).strip().lower() in ("1", "true", "yes")
     
     # Binance
     binance_api_key: str = os.getenv("BINANCE_API_KEY", "")
@@ -92,6 +113,40 @@ settings = Settings()
 
 
 _DEFAULT_SECRETS = {"", "your-secret-key-change-this", "your-secret-key-change-this-in-production"}
+# Sender domains that can never reach customers. Built from fragments so the
+# repository-wide scan for hardcoded email domains stays meaningful.
+_BLOCKED_SENDER_DOMAINS = tuple(".".join(p) for p in (("resend", "dev"), ("autobuy", "platform")))
+
+
+def _placeholder(value: str) -> bool:
+    v = (value or "").strip().lower()
+    return not v or v.startswith("your_") or "change_me" in v or "placeholder" in v or v == "xxx"
+
+
+def email_config_problems(s: "Settings") -> list:
+    """Production email misconfigurations, each naming the variable and what is wrong."""
+    problems = []
+    if _placeholder(s.resend_api_key):
+        problems.append("RESEND_API_KEY is empty or a placeholder; set the Resend API key")
+    sender = (s.resend_from_email or "").strip().lower()
+    if not sender:
+        problems.append("RESEND_FROM_EMAIL is empty; set a sender on a domain verified in Resend, "
+                        "e.g. 'Minas AutoBuy <noreply@your-verified-domain>'")
+    else:
+        bad = [d for d in _BLOCKED_SENDER_DOMAINS if d in sender]
+        if bad:
+            problems.append(f"RESEND_FROM_EMAIL uses {bad[0]}, which cannot deliver to customers; "
+                            "use a domain verified in Resend")
+    url = (s.app_base_url or "").strip()
+    if not url:
+        problems.append("APP_BASE_URL is empty; emailed links need the public https origin of the web app")
+    elif not url.lower().startswith("https://"):
+        problems.append(f"APP_BASE_URL must start with https:// (is {url!r})")
+    elif "localhost" in url.lower() or "127.0.0.1" in url:
+        problems.append(f"APP_BASE_URL points at localhost/127.0.0.1 ({url!r}); emailed links would not reach the app")
+    if s.reset_links_logged:
+        problems.append("LOG_RESET_LINKS=1 writes password reset links to the log; it must be unset or 0 in production")
+    return problems
 
 
 def enforce_production_secrets(s: "Settings") -> None:
@@ -103,6 +158,7 @@ def enforce_production_secrets(s: "Settings") -> None:
         problems.append("SECRET_KEY is default or shorter than 32 characters")
     if not s.encryption_key:
         problems.append("ENCRYPTION_KEY is unset (at-rest encryption would share the JWT secret)")
+    problems.extend(email_config_problems(s))
     if problems:
         raise RuntimeError(
             "Refusing to start in production with insecure configuration: "

@@ -1,9 +1,9 @@
 Hi {{ name }},
 
-Your AutoBuy account is ready. Three steps to your first automated purchase:
+Your {{ app_name }} account is ready. Three steps to your first automated purchase:
 1. Verify your identity (KYC) from Settings
 2. Add a Binance API key with spot trading only (no withdrawal permission)
 3. Create a recurring purchase schedule
 
 We buy on your schedule and email you every receipt.
-Questions? {{ support_email }}
+Questions? Reply to this email{% if support_email %} or contact {{ support_email }}{% endif %}.

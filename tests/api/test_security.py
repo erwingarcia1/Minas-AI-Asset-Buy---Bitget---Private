@@ -24,7 +24,10 @@ def test_production_guard_refuses_default_secrets(monkeypatch):
     with pytest.raises(RuntimeError, match="ENCRYPTION_KEY"):
         enforce_production_secrets(s)
     monkeypatch.setenv("ENCRYPTION_KEY", "y" * 40)
-    enforce_production_secrets(Settings(_env_file=None))  # no raise
+    # the guard also requires production email + link configuration (tests blank RESEND_API_KEY)
+    enforce_production_secrets(Settings(_env_file=None, resend_api_key="re_live_ok",
+                                        resend_from_email="Minas AutoBuy <noreply@example.com>",
+                                        app_base_url="https://app.example.com", log_reset_links=""))  # no raise
 
 
 def test_guard_is_noop_in_development():

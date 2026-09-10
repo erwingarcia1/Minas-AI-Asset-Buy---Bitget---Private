@@ -89,7 +89,11 @@ def sumsub_unconfigured(monkeypatch):
 @pytest.fixture
 def resend_env(monkeypatch):
     monkeypatch.setenv("RESEND_API_KEY", API_KEY)
-    monkeypatch.delenv("RESEND_FROM_EMAIL", raising=False)
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "Test Sender <noreply@example.test>")
+    monkeypatch.delenv("RESEND_REPLY_TO", raising=False)
+    monkeypatch.delenv("SUPPORT_EMAIL", raising=False)
+    monkeypatch.setattr(settings, "resend_reply_to", "")
+    monkeypatch.setattr(settings, "support_email", "")
     rec = Recorder().on("POST", "/emails", 200, {"id": "email-abc123"})
     monkeypatch.setattr(resend, "_transport", rec.transport)
     return rec
@@ -244,17 +248,17 @@ async def test_send_email_success(resend_env):
     assert email_id == "email-abc123"
     req = resend_env.requests[-1]
     assert str(req.url) == resend.RESEND_URL and req.headers["authorization"] == f"Bearer {API_KEY}"
-    assert resend_env.last_json() == {"from": "noreply@autobuy.platform", "to": ["to@example.com"],
+    assert resend_env.last_json() == {"from": "Test Sender <noreply@example.test>", "to": ["to@example.com"],
                                       "subject": "Hi", "html": "<p>hello</p>", "text": "hello"}
 
 
 async def test_send_email_custom_from_and_env_override(resend_env, monkeypatch):
-    await resend.send_email("to@example.com", "Hi", "<p>x</p>", from_email="ops@autobuy.platform", reply_to="support@x.co")
-    assert resend_env.last_json()["from"] == "ops@autobuy.platform"
+    await resend.send_email("to@example.com", "Hi", "<p>x</p>", from_email="ops@example.test", reply_to="support@x.co")
+    assert resend_env.last_json()["from"] == "ops@example.test"
     assert resend_env.last_json()["reply_to"] == "support@x.co"
-    monkeypatch.setenv("RESEND_FROM_EMAIL", "hello@autobuy.platform")
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "hello@example.test")
     await resend.send_email("to@example.com", "Hi", "<p>x</p>")
-    assert resend_env.last_json()["from"] == "hello@autobuy.platform"
+    assert resend_env.last_json()["from"] == "hello@example.test"
 
 
 async def test_send_email_errors(resend_env, resend_unconfigured, monkeypatch):
@@ -450,7 +454,7 @@ async def test_send_verification_route(client, user, resend_env, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json() == {"sent": True, "email_id": "email-abc123"}
     sent = resend_env.last_json()
-    assert sent["to"] == [user.email] and sent["subject"] == "Verify your AutoBuy email"
+    assert sent["to"] == [user.email] and sent["subject"] == f"Verify your {settings.app_name} email"
     assert "https://app.autobuy.test/verify-email?token=" in sent["text"]
     assert 'href="https://app.autobuy.test/verify-email?token=' in sent["html"]
 

@@ -15,9 +15,12 @@ import sys
 from pathlib import Path
 
 REQUIRED = ("API_ENV", "SECRET_KEY", "ENCRYPTION_KEY", "POSTGRES_PASSWORD",
-            "DATABASE_URL", "REDIS_URL", "ALLOWED_ORIGINS")
-RECOMMENDED = ("APP_BASE_URL", "RESEND_API_KEY", "SUMSUB_APP_TOKEN", "SUMSUB_SECRET_KEY",
+            "DATABASE_URL", "REDIS_URL", "ALLOWED_ORIGINS",
+            "RESEND_API_KEY", "RESEND_FROM_EMAIL", "APP_BASE_URL")
+RECOMMENDED = ("SUPPORT_EMAIL", "RESEND_REPLY_TO", "APP_NAME", "SUMSUB_APP_TOKEN", "SUMSUB_SECRET_KEY",
                "SUMSUB_WEBHOOK_SECRET", "SUMSUB_LEVEL_NAME")
+# Sender domains that can never deliver to customers.
+BLOCKED_SENDER_DOMAINS = ("resend.dev", "autobuy.platform")
 PLACEHOLDER = re.compile(r"CHANGE_ME|your[-_]|change[-_]this|example|placeholder|xxx", re.I)
 WEAK_SECRETS = {"", "your-secret-key-change-this", "your-secret-key-change-this-in-production",
                 "autobuy_password"}
@@ -73,8 +76,21 @@ def check(env: dict[str, str]) -> tuple[list[str], list[str]]:
         warnings.append("ALLOWED_ORIGINS contains a plain-http origin")
     if any("localhost" in o for o in origins):
         warnings.append("ALLOWED_ORIGINS contains localhost")
-    if env.get("APP_BASE_URL", "").startswith("http://"):
-        warnings.append("APP_BASE_URL is plain http — emailed links will not be secure")
+
+    # Email + links: the API's production boot guard refuses these too; fail early here.
+    sender = env.get("RESEND_FROM_EMAIL", "").strip().lower()
+    for bad in BLOCKED_SENDER_DOMAINS:
+        if bad in sender:
+            errors.append(f"RESEND_FROM_EMAIL uses {bad}, which cannot deliver to customers; use a domain verified in Resend")
+    url = env.get("APP_BASE_URL", "").strip()
+    if url and not url.lower().startswith("https://"):
+        errors.append(f"APP_BASE_URL must start with https:// (is {url!r})")
+    if url and ("localhost" in url.lower() or "127.0.0.1" in url):
+        errors.append(f"APP_BASE_URL points at localhost/127.0.0.1 ({url!r}); emailed links would not reach the app")
+    if env.get("LOG_RESET_LINKS", "").lower() in ("1", "true", "yes"):
+        errors.append("LOG_RESET_LINKS=1 writes password reset links to the log; it must be unset or 0 in production")
+    if not env.get("SUPPORT_EMAIL") and not env.get("RESEND_REPLY_TO"):
+        warnings.append("neither RESEND_REPLY_TO nor SUPPORT_EMAIL is set — customer replies to emails go nowhere")
 
     if env.get("AUTOBUY_DRY_RUN", "1") in ("0", "false", "no"):
         warnings.append("AUTOBUY_DRY_RUN=0 — REAL ORDERS will execute")

@@ -1,59 +1,33 @@
-"""Transactional email via the Resend REST API.
+"""Fire-and-forget email for callers that must never fail on email delivery
+(purchase execution, KYC webhooks, campaigns, the notification dispatcher).
 
-Fire-and-forget by design: every public method logs failures and never raises,
-so an email outage can never fail a purchase or a webhook. With no
-RESEND_API_KEY configured (dev), sends are logged and skipped.
+A thin wrapper over :mod:`api.integrations.resend`, the platform's only
+Resend client: no Resend logic of its own. ``_send`` returns True/False and
+never raises; every failure has already been logged on
+``autobuy.integrations.resend`` (ERROR with status and reason, or WARNING
+when email is not configured). The class is kept so test doubles can
+subclass it and override ``_send``.
 """
-import logging
-
-import httpx
+from __future__ import annotations
 
 from api.config import settings
-
-logger = logging.getLogger("autobuy.email")
-
-RESEND_URL = "https://api.resend.com/emails"
+from api.integrations import resend
+from api.integrations.resend import ResendError
 
 
 class EmailService:
-    def __init__(self, api_key: str = "", from_email: str = ""):
-        self.api_key = api_key or settings.resend_api_key
-        self.from_email = from_email or settings.support_email
+    def __init__(self, api_key: str = "", from_email: str = "") -> None:
+        # Accepted only for compatibility with existing test doubles. The key
+        # and sender come from configuration (RESEND_API_KEY / RESEND_FROM_EMAIL).
+        pass
 
     async def _send(self, to: str, subject: str, html: str, text: str,
                     template: str = "generic") -> bool:
-        import time as _time
-        from api.services.metrics import email_send_duration_seconds, emails_total
-        start = _time.perf_counter()
         try:
-            ok = await self._send_inner(to, subject, html, text)
-        finally:
-            email_send_duration_seconds.labels(template).observe(
-                _time.perf_counter() - start)
-        emails_total.labels(template, "ok" if ok else "failed").inc()
-        return ok
-
-    async def _send_inner(self, to: str, subject: str, html: str, text: str) -> bool:
-        if not self.api_key or self.api_key.startswith("your_"):
-            # unset or the .env.example placeholder: treat as unconfigured
-            logger.info("email skipped (no RESEND_API_KEY): to=%s subject=%r", to, subject)
-            return False
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    RESEND_URL,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    json={"from": self.from_email, "to": [to],
-                          "subject": subject, "html": html, "text": text},
-                )
-            if resp.status_code >= 400:
-                logger.error("email send failed (%s): %s", resp.status_code, resp.text[:300])
-                return False
-            logger.info("email sent: to=%s subject=%r", to, subject)
+            await resend.send_email(to, subject, html, text_content=text, template=template)
             return True
-        except Exception:
-            logger.exception("email send raised: to=%s subject=%r", to, subject)
-            return False
+        except ResendError:
+            return False  # logged by the integration
 
     async def send_purchase_notification(self, user_email: str, purchase, transaction) -> bool:
         crypto = transaction.crypto
@@ -66,8 +40,7 @@ class EmailService:
             subject = f"✗ Purchase failed: {crypto}"
             text = (f"We tried to buy {crypto} for {purchase.amount_usdt:.2f} USDT but it failed: "
                     f"{transaction.error_message}. We'll retry automatically in about an hour.")
-        html = f"<p>{text}</p>"
-        return await self._send(user_email, subject, html, text)
+        return await self._send(user_email, subject, f"<p>{text}</p>", text, template="purchase")
 
     async def send_kyc_notification(self, user_email: str, kyc_status: str) -> bool:
         if kyc_status == "verified":
@@ -75,11 +48,11 @@ class EmailService:
             text = "Your account has been verified. Your scheduled purchases can now execute."
         elif kyc_status == "rejected":
             subject = "✗ Identity verification rejected"
-            text = ("Your identity verification was rejected. "
-                    f"Contact {self.from_email} if you believe this is a mistake.")
+            contact = f"Contact {settings.support_email}" if settings.support_email else "Contact support"
+            text = f"Your identity verification was rejected. {contact} if you believe this is a mistake."
         else:
             return False  # no mail for intermediate states
-        return await self._send(user_email, subject, f"<p>{text}</p>", text)
+        return await self._send(user_email, subject, f"<p>{text}</p>", text, template="kyc")
 
 
 email_service = EmailService()

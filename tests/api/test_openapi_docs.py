@@ -25,7 +25,8 @@ async def test_openapi_schema_valid_and_complete():
     assert spec["openapi"].startswith("3.")
     info = spec["info"]
     assert info["title"] == "AutoBuy Crypto API" and info["version"] == "0.2.0"
-    assert info["contact"]["email"] == "support@minastech.ca"
+    from api.config import settings
+    assert info["contact"].get("email", "") == settings.support_email
     assert {s["url"].rstrip("/") for s in spec["servers"]} == {
         "http://localhost:8000", "https://api.autobuy.app"}
     # every operation must carry a real description (from its docstring)

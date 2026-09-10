@@ -13,6 +13,8 @@ setup_logging()
 async def lifespan(app: FastAPI):
     # Startup
     enforce_production_secrets(settings)
+    from api.integrations.resend import check_startup_config
+    check_startup_config()
     await init_db()
     print("✓ Database initialized")
     if settings.scheduler_enabled:
@@ -67,7 +69,7 @@ app = FastAPI(
         "Validation failures return **422**; rate limits return **429** with "
         "`Retry-After`. Full guides: `docs/API.md`, `docs/DEPLOYMENT.md`."
     ),
-    contact={"name": "AutoBuy support", "email": "support@minastech.ca"},
+    contact={"name": f"{settings.app_name} support", **({"email": settings.support_email} if settings.support_email else {})},
     license_info={"name": "MIT"},
     servers=[
         {"url": "http://localhost:8000", "description": "Development"},

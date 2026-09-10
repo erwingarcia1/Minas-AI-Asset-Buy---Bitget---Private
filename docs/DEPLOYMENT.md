@@ -63,8 +63,24 @@ platform` performs its own, narrower check afterwards.
 | `AUTOBUY_DRY_RUN` | default `1` | **`0` enables real orders** |
 | `SCHEDULER_ENABLED` | default `1` | emergency stop switch |
 | `ALLOWED_ORIGINS` | recommended | CSV or JSON array |
-| `RESEND_API_KEY`, `SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`, `SUMSUB_WEBHOOK_SECRET` | for email/KYC | placeholders are treated as unset |
+| `RESEND_API_KEY` | ✔ | Resend API key; placeholder = email disabled (refused in production) |
+| `RESEND_FROM_EMAIL` | ✔ | Sender on a domain verified in Resend (`minastrade.com` today); `resend.dev`/`autobuy.platform` refused |
+| `APP_BASE_URL` | ✔ (https) | Only base for links in emails; localhost refused in production |
+| `RESEND_REPLY_TO`, `SUPPORT_EMAIL`, `APP_NAME`, `LOG_RESET_LINKS` | optional | Reply-To (falls back to `SUPPORT_EMAIL`), footer address, product name, dev-only link logging (must be 0 in prod) |
+| `SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`, `SUMSUB_WEBHOOK_SECRET` | for KYC | placeholders are treated as unset |
 | `RATE_LIMIT_ENABLED`, `MAX_BODY_BYTES`, `SCHEDULER_POLL_SECONDS`, `LOG_LEVEL` | optional | sensible defaults |
+
+## Email (Resend)
+
+One sender module (`api/integrations/resend.py`), config-only. The verified
+Resend domain is **minastrade.com**; `minastech.ca` is not verified and
+must only appear as `SUPPORT_EMAIL` / `RESEND_REPLY_TO`, never as the
+sender. Production refuses to start or deploy unless `RESEND_API_KEY` is
+real, `RESEND_FROM_EMAIL` is on a verified domain, `APP_BASE_URL` is an
+`https://` non-localhost origin, and `LOG_RESET_LINKS` is off. To change
+domain: verify it in Resend, edit `RESEND_FROM_EMAIL` in the server `.env`,
+then `docker compose --profile prod up -d api`. Full variable table and local
+testing steps: `docs/API.md` → "Email (Resend)".
 
 ## Database
 
