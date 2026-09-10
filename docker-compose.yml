@@ -62,6 +62,7 @@ services:
       - "8000:8000"
     environment:
       API_ENV: ${API_ENV:-production}
+      REQUIRE_PRODUCTION: ${REQUIRE_PRODUCTION:-}
       DATABASE_URL: postgresql+asyncpg://autobuy:${POSTGRES_PASSWORD:-autobuy_password}@postgres:5432/autobuy_db
       REDIS_URL: redis://redis:6379/0
       # Empty values are rejected by the app's production boot guard (and by

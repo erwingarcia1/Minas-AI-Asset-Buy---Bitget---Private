@@ -234,45 +234,10 @@ deploy_bot() {
 }
 
 deploy_platform() {
-    echo "==> [platform] Checking required secrets in .env ..."
-    local var
-    for var in SECRET_KEY ENCRYPTION_KEY; do
-        if ! $SUDO grep -qE "^${var}=..+" .env; then
-            echo "ERROR: $var is not set in .env — the platform API refuses to boot without it." >&2
-            echo "       Generate one with:  openssl rand -hex 32" >&2
-            echo "       then add '${var}=<value>' to .env and re-run." >&2
-            exit 1
-        fi
-    done
-    echo "==> [platform] Checking email + link configuration in .env (the API refuses to boot on these) ..."
-    envval() { $SUDO grep -E "^$1=" .env | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"; }
-    v="$(envval RESEND_API_KEY)"
-    case "$(printf '%s' "$v" | tr 'A-Z' 'a-z')" in
-        ""|your_*|*change_me*|*placeholder*|xxx)
-            echo "ERROR: RESEND_API_KEY is empty or a placeholder in .env — set the Resend API key (https://resend.com/api-keys)." >&2; exit 1;;
-    esac
-    v="$(envval RESEND_FROM_EMAIL)"
-    if [ -z "$v" ]; then
-        echo "ERROR: RESEND_FROM_EMAIL is empty in .env — set a sender on a domain verified in Resend, e.g. 'Minas AutoBuy <noreply@minastrade.com>'." >&2; exit 1
-    fi
-    case "$(printf '%s' "$v" | tr 'A-Z' 'a-z')" in
-        *resend.dev*|*autobuy.platform*)
-            echo "ERROR: RESEND_FROM_EMAIL ($v) uses a domain that cannot deliver to customers — use a domain verified in Resend." >&2; exit 1;;
-    esac
-    v="$(envval APP_BASE_URL)"
-    if [ -z "$v" ]; then
-        echo "ERROR: APP_BASE_URL is empty in .env — set the public https origin of the web app (every emailed link is built from it)." >&2; exit 1
-    fi
-    case "$(printf '%s' "$v" | tr 'A-Z' 'a-z')" in
-        https://*) ;;
-        *) echo "ERROR: APP_BASE_URL must start with https:// (is '$v')." >&2; exit 1;;
-    esac
-    case "$(printf '%s' "$v" | tr 'A-Z' 'a-z')" in
-        *localhost*|*127.0.0.1*) echo "ERROR: APP_BASE_URL points at localhost/127.0.0.1 ('$v') — emailed links would not reach the app." >&2; exit 1;;
-    esac
-    case "$(envval LOG_RESET_LINKS | tr 'A-Z' 'a-z')" in
-        1|true|yes) echo "ERROR: LOG_RESET_LINKS=1 writes password reset links to the log — it must be unset or 0 in production." >&2; exit 1;;
-    esac
+    echo "==> [platform] Checking the server .env (API_ENV must be exactly production, secrets, email, links) ..."
+    # shellcheck source=scripts/lib/platform_env_checks.sh
+    . "$(dirname "${BASH_SOURCE[0]:-$0}")/lib/platform_env_checks.sh" 2>/dev/null || . scripts/lib/platform_env_checks.sh
+    PLATFORM_ENV_SUDO="$SUDO" check_platform_env .env || exit 1
     echo "==> [platform] Validating docker-compose.yml ..."
     if ! compose -p autobuy-platform --profile prod config -q; then
         echo "ERROR: docker-compose.yml failed validation — fix it before deploying." >&2

@@ -52,8 +52,10 @@ def check(env: dict[str, str]) -> tuple[list[str], list[str]]:
         elif placeholder(key):
             errors.append(f"{key} still holds a placeholder value")
 
-    if env.get("API_ENV") and env["API_ENV"] != "production":
-        errors.append(f"API_ENV must be 'production' (is '{env['API_ENV']}')")
+    if env.get("API_ENV") != "production":
+        errors.append(f"API_ENV must be exactly 'production' (is '{env.get('API_ENV', '')}')")
+    if env.get("REQUIRE_PRODUCTION", "").lower() not in ("1", "true", "yes"):
+        errors.append("REQUIRE_PRODUCTION=1 must be set on the server so the API refuses any other API_ENV")
     for key in ("SECRET_KEY", "ENCRYPTION_KEY"):
         val = env.get(key, "")
         if val in WEAK_SECRETS:

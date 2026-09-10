@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     api_host: str = os.getenv("API_HOST", "0.0.0.0")  # nosec B104 - container bind; restrict via API_HOST
     api_port: int = int(os.getenv("API_PORT", "8000"))
     api_env: str = os.getenv("API_ENV", "development")
+    # Set to "1" on production hosts (.env.production.example / scripts/deploy.sh check it):
+    # the API then refuses to start unless API_ENV is exactly "production".
+    require_production: str = os.getenv("REQUIRE_PRODUCTION", "")
     secret_key: str = os.getenv("SECRET_KEY", "your-secret-key-change-this")
     # Separate key for at-rest encryption so JWT signing and Fernet rotate
     # independently. Falls back to SECRET_KEY in dev; required in production.
@@ -40,6 +43,10 @@ class Settings(BaseSettings):
     @classmethod
     def _default_app_name(cls, v: str) -> str:
         return (v or "").strip() or "Minas AutoBuy"
+
+    @property
+    def production_required(self) -> bool:
+        return str(self.require_production).strip().lower() in ("1", "true", "yes")
 
     @property
     def reset_links_logged(self) -> bool:
@@ -149,9 +156,21 @@ def email_config_problems(s: "Settings") -> list:
     return problems
 
 
+_PRODUCTION_LOOKALIKES = {"prod", "production", "live", "prd"}
+
+
 def enforce_production_secrets(s: "Settings") -> None:
-    """Refuse to boot a production instance on default/weak secrets."""
-    if s.api_env != "production":
+    """Refuse to boot a production instance on default/weak secrets, and refuse
+    any API_ENV that merely looks like production: everything (this guard,
+    HSTS, Alembic-only schema) keys on the exact string "production"."""
+    env = s.api_env or ""
+    if env != "production" and env.strip().lower() in _PRODUCTION_LOOKALIKES:
+        raise RuntimeError(f"API_ENV must be exactly 'production' (is {env!r}); the production "
+                           "safeguards only apply to that exact value")
+    if s.production_required and env != "production":
+        raise RuntimeError(f"REQUIRE_PRODUCTION is set but API_ENV is {env!r}; on a production host "
+                           "API_ENV must be exactly 'production'")
+    if env != "production":
         return
     problems = []
     if s.secret_key in _DEFAULT_SECRETS or len(s.secret_key) < 32:
