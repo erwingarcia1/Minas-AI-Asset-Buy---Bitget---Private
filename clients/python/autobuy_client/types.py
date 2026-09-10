@@ -462,6 +462,16 @@ class ResetPasswordRequest(TypedDict):
     new_password: str
 
 
+class ResetTokenRequest(TypedDict):
+    """ResetTokenRequest."""
+    token: str
+
+
+class ResetTokenValidity(TypedDict):
+    """ResetTokenValidity."""
+    valid: bool
+
+
 class SendNotificationRequest(TypedDict):
     """SendNotificationRequest."""
     email: str

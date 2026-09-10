@@ -15,6 +15,7 @@ from api.database import get_db
 from api.models import User
 from api.routes.user import UTCModel, get_current_user
 from fastapi import Request
+from fastapi.responses import JSONResponse
 from api.services.rate_limit import limiter, is_locked_out, register_failed_login, clear_failed_logins
 
 import hashlib
@@ -85,6 +86,14 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
     _strength = field_validator("new_password")(validate_password_strength)
+
+
+class ResetTokenRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=2048)
+
+
+class ResetTokenValidity(BaseModel):
+    valid: bool
 
 
 class UserOut(UTCModel):
@@ -353,6 +362,40 @@ async def forgot_password(request: Request, response: Response, payload: ForgotP
     return ForgotPasswordResponse(sent=True)
 
 
+async def _resolve_reset_token(token: str, db: AsyncSession):
+    """Every check a reset token must pass, without consuming it.
+    Returns (decoded claims, user) or None when the token is unusable."""
+    try:
+        decoded = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
+        return None
+    if decoded.get("type") != "password_reset" or not decoded.get("sub") or not decoded.get("jti"):
+        return None
+    try:
+        user_id = UUID(decoded["sub"])
+    except (ValueError, TypeError):
+        return None
+    if await _is_reset_used(decoded["jti"]):
+        return None
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or user.suspended or decoded.get("pv") != _password_version(user.password_hash):
+        return None
+    return decoded, user
+
+
+@router.post("/reset-password/validate", response_model=ResetTokenValidity,
+             responses={400: {"model": ResetTokenValidity, "description": "Token is invalid, expired or already used"}})
+@limiter.limit("10/minute")
+async def validate_reset_token(request: Request, response: Response, payload: ResetTokenRequest,
+                               db: AsyncSession = Depends(get_db)):
+    """Check a reset token without consuming it: 200 `{valid: true}` when
+    `/reset-password` would accept it, 400 `{valid: false}` otherwise. Lets
+    the reset page show the expired-link state before asking for a password."""
+    if await _resolve_reset_token(payload.token, db) is None:
+        return JSONResponse(status_code=400, content={"valid": False})
+    return ResetTokenValidity(valid=True)
+
+
 @router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 @limiter.limit("5/minute")
 async def reset_password(request: Request, response: Response, payload: ResetPasswordRequest,
@@ -360,22 +403,10 @@ async def reset_password(request: Request, response: Response, payload: ResetPas
     """Set a new password using a reset token from `/forgot-password`.
     The token is single-use and expires after an hour; on success every
     existing session is signed out."""
-    invalid = HTTPException(status_code=400, detail="Invalid or expired reset link")
-    try:
-        decoded = jwt.decode(payload.token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError:
-        raise invalid
-    if decoded.get("type") != "password_reset" or not decoded.get("sub") or not decoded.get("jti"):
-        raise invalid
-    try:
-        user_id = UUID(decoded["sub"])
-    except (ValueError, TypeError):
-        raise invalid
-    if await _is_reset_used(decoded["jti"]):
-        raise invalid
-    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if user is None or user.suspended or decoded.get("pv") != _password_version(user.password_hash):
-        raise invalid
+    resolved = await _resolve_reset_token(payload.token, db)
+    if resolved is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    decoded, user = resolved
     if verify_password(payload.new_password, user.password_hash):
         raise HTTPException(status_code=422, detail="New password must differ from the current password")
 

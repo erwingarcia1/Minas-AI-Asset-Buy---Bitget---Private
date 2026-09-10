@@ -68,6 +68,9 @@ export const auth = {
   /** Always `{sent: true}`; the API never reveals whether the email has an account. */
   forgotPassword: (email: string) =>
     api.post<{ sent: boolean }>("/api/auth/forgot-password", { email }).then((r) => r.data),
+  /** true when /reset-password would accept the token; does not consume it. 400 -> {valid: false}. */
+  validateResetToken: (token: string) =>
+    api.post<{ valid: boolean }>("/api/auth/reset-password/validate", { token }).then((r) => r.data),
   /** 400 = invalid/expired/used link, 422 = password policy. */
   resetPassword: (token: string, new_password: string) =>
     api.post("/api/auth/reset-password", { token, new_password }),

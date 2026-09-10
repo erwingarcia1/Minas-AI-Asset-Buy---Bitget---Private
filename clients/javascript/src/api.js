@@ -96,6 +96,15 @@ export class AuthApi {
   }
 
   /**
+   * Validate Reset Token — `POST /api/auth/reset-password/validate`
+   * @param {import('./types.js').ResetTokenRequest} body
+   * @returns {Promise<import('./types.js').ResetTokenValidity>}
+   */
+  validateResetToken(body) {
+    return this.http.request("POST", "/api/auth/reset-password/validate", { body, auth: false });
+  }
+
+  /**
    * Reset Password — `POST /api/auth/reset-password`
    * @param {import('./types.js').ResetPasswordRequest} body
    * @returns {Promise<unknown>}

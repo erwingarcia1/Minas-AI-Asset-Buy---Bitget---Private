@@ -400,6 +400,14 @@ export interface ResetPasswordRequest {
   new_password: string;
 }
 
+export interface ResetTokenRequest {
+  token: string;
+}
+
+export interface ResetTokenValidity {
+  valid: boolean;
+}
+
 export interface SendNotificationRequest {
   email: string;
   subject: string;

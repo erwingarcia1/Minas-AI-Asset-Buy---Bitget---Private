@@ -118,3 +118,35 @@ async def test_suspended_accounts_get_no_link(client, db, account, sent):
     async with client as c:
         r = await c.post("/api/auth/forgot-password", json={"email": account.email})
     assert r.status_code == 200 and sent == []
+
+
+# --------------------------------------------------------------------------- /reset-password/validate
+
+async def test_validate_does_not_consume_a_valid_token(client, db, account, sent):
+    async with client as c:
+        await c.post("/api/auth/forgot-password", json={"email": account.email})
+        token = link_token(sent[0])
+        for _ in range(3):  # repeated validation must not burn the token
+            r = await c.post("/api/auth/reset-password/validate", json={"token": token})
+            assert r.status_code == 200 and r.json() == {"valid": True}
+        r = await c.post("/api/auth/reset-password", json={"token": token, "new_password": NEW})
+        assert r.status_code == 204, "token still usable after validation"
+
+
+async def test_validate_returns_false_after_a_successful_reset(client, account):
+    token = auth_mod.make_password_reset_token(account)
+    async with client as c:
+        assert (await c.post("/api/auth/reset-password", json={"token": token, "new_password": NEW})).status_code == 204
+        r = await c.post("/api/auth/reset-password/validate", json={"token": token})
+        assert r.status_code == 400 and r.json() == {"valid": False}
+
+
+async def test_validate_rejects_garbage_expired_and_wrong_type(client, account):
+    now = datetime.now(timezone.utc)
+    expired = jwt.encode({"sub": str(account.id), "type": "password_reset", "jti": "v1", "pv": auth_mod._password_version(account.password_hash),
+                          "iat": now - timedelta(hours=2), "exp": now - timedelta(hours=1)}, settings.secret_key, algorithm=settings.algorithm)
+    access = auth_headers(account)["Authorization"].split()[1]
+    async with client as c:
+        for tok in ("not-a-token", expired, access):
+            r = await c.post("/api/auth/reset-password/validate", json={"token": tok})
+            assert r.status_code == 400 and r.json() == {"valid": False}, tok[:15]

@@ -48,6 +48,8 @@ from .types import (
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    ResetTokenRequest,
+    ResetTokenValidity,
     SendNotificationRequest,
     SendVerificationRequest,
     StatusResponse,
@@ -135,6 +137,10 @@ class AuthApi:
         """Forgot Password — ``POST /api/auth/forgot-password``."""
         return self._http.request("POST", "/api/auth/forgot-password", auth=False, body=body)
 
+    def validate_reset_token(self, body: ResetTokenRequest) -> ResetTokenValidity:
+        """Validate Reset Token — ``POST /api/auth/reset-password/validate``."""
+        return self._http.request("POST", "/api/auth/reset-password/validate", auth=False, body=body)
+
     def reset_password(self, body: ResetPasswordRequest) -> Any:
         """Reset Password — ``POST /api/auth/reset-password``."""
         return self._http.request("POST", "/api/auth/reset-password", auth=False, body=body)
@@ -173,6 +179,10 @@ class AsyncAuthApi:
     async def forgot_password(self, body: ForgotPasswordRequest) -> ForgotPasswordResponse:
         """Forgot Password — ``POST /api/auth/forgot-password``."""
         return await self._http.request("POST", "/api/auth/forgot-password", auth=False, body=body)
+
+    async def validate_reset_token(self, body: ResetTokenRequest) -> ResetTokenValidity:
+        """Validate Reset Token — ``POST /api/auth/reset-password/validate``."""
+        return await self._http.request("POST", "/api/auth/reset-password/validate", auth=False, body=body)
 
     async def reset_password(self, body: ResetPasswordRequest) -> Any:
         """Reset Password — ``POST /api/auth/reset-password``."""

@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { auth } from "../services/api";
 
@@ -17,8 +17,24 @@ export default function ResetPasswordPage() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(!token);
+  const [checking, setChecking] = useState(Boolean(token));
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Validate the link before showing the form so a used or expired link is
+  // reported immediately; the server re-checks on submit regardless.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    auth.validateResetToken(token)
+      .then((r) => { if (!cancelled && !r.valid) setInvalid(true); })
+      .catch((err: unknown) => {
+        const status = (err as { response?: { status?: number } }).response?.status;
+        if (!cancelled && status === 400) setInvalid(true);
+      })
+      .finally(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, [token]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -42,7 +58,9 @@ export default function ResetPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
       <div className="w-full max-w-sm space-y-4 rounded-lg bg-white p-6 shadow-sm">
-        {invalid ? (
+        {checking ? (
+          <p role="status" className="text-sm text-gray-500">Checking your reset link…</p>
+        ) : invalid ? (
           <>
             <h1 className="text-xl font-semibold">This reset link is no longer valid</h1>
             <p className="text-sm text-gray-600">Links expire after 1 hour and can only be used once.</p>

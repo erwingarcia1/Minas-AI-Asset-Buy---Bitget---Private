@@ -45,6 +45,8 @@ import type {
   RefreshRequest,
   RegisterRequest,
   ResetPasswordRequest,
+  ResetTokenRequest,
+  ResetTokenValidity,
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
@@ -120,6 +122,11 @@ export class AuthApi {
   /** Forgot Password — `POST /api/auth/forgot-password` */
   forgotPassword(body: ForgotPasswordRequest): Promise<ForgotPasswordResponse> {
     return this.http.request<ForgotPasswordResponse>("POST", "/api/auth/forgot-password", { body, auth: false });
+  }
+
+  /** Validate Reset Token — `POST /api/auth/reset-password/validate` */
+  validateResetToken(body: ResetTokenRequest): Promise<ResetTokenValidity> {
+    return this.http.request<ResetTokenValidity>("POST", "/api/auth/reset-password/validate", { body, auth: false });
   }
 
   /** Reset Password — `POST /api/auth/reset-password` */

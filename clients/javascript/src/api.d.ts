@@ -45,6 +45,8 @@ import type {
   RefreshRequest,
   RegisterRequest,
   ResetPasswordRequest,
+  ResetTokenRequest,
+  ResetTokenValidity,
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
@@ -93,6 +95,8 @@ export declare class AuthApi {
   changePassword(body: ChangePasswordRequest): Promise<unknown>;
   /** Forgot Password — `POST /api/auth/forgot-password` */
   forgotPassword(body: ForgotPasswordRequest): Promise<ForgotPasswordResponse>;
+  /** Validate Reset Token — `POST /api/auth/reset-password/validate` */
+  validateResetToken(body: ResetTokenRequest): Promise<ResetTokenValidity>;
   /** Reset Password — `POST /api/auth/reset-password` */
   resetPassword(body: ResetPasswordRequest): Promise<unknown>;
 }

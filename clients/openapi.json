@@ -342,6 +342,58 @@
         }
       }
     },
+    "/api/auth/reset-password/validate": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Validate Reset Token",
+        "description": "Check a reset token without consuming it: 200 `{valid: true}` when\n`/reset-password` would accept it, 400 `{valid: false}` otherwise. Lets\nthe reset page show the expired-link state before asking for a password.",
+        "operationId": "validate_reset_token_api_auth_reset_password_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetTokenValidity"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Token is invalid, expired or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetTokenValidity"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/reset-password": {
       "post": {
         "tags": [
@@ -5321,6 +5373,34 @@
           "new_password"
         ],
         "title": "ResetPasswordRequest"
+      },
+      "ResetTokenRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "ResetTokenRequest"
+      },
+      "ResetTokenValidity": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "ResetTokenValidity"
       },
       "SendNotificationRequest": {
         "properties": {
