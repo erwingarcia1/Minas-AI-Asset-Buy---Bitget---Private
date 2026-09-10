@@ -113,7 +113,8 @@ class Settings(BaseSettings):
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     
     class Config:
-        env_file = ".env"
+        # Tests set AUTOBUY_SKIP_DOTENV=1 and own every variable; .env must not steer them.
+        env_file = None if os.getenv("AUTOBUY_SKIP_DOTENV") == "1" else ".env"
         extra = "ignore"  # unknown env keys must not crash startup
 
 settings = Settings()

@@ -282,6 +282,7 @@ async def test_send_email_errors(resend_env, resend_unconfigured, monkeypatch):
 
 async def test_send_email_transport_failure(monkeypatch):
     monkeypatch.setenv("RESEND_API_KEY", API_KEY)
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "Test Sender <noreply@example.test>")  # the suite never reads .env
     def boom(request):
         raise httpx.ReadTimeout("slow", request=request)
     monkeypatch.setattr(resend, "_transport", httpx.MockTransport(boom))

@@ -74,6 +74,20 @@ alembic upgrade head # apply the real fixes (002+)
 | `001` | Baseline: users, api_keys, recurring_purchases, transactions |
 | `002` | `transactions.recurring_purchase_id` FK → `ON DELETE SET NULL` (deleting a schedule no longer destroys its transaction history) · all datetime columns → `timestamptz` (existing values interpreted as UTC) · index on `transactions (user_id, created_at)` |
 
+## Running tests
+
+```bash
+python3 -m pytest tests/ -q          # full suite; frontend: cd frontend && npx vitest run
+```
+
+The suite is isolated from your dev data: `tests/conftest.py` sets
+`DATABASE_URL` to **`autobuy_test`** (created on first run and migrated to
+Alembic head) and `REDIS_URL` to **Redis db 1**, refuses any database not
+ending in `_test` or any other Redis db, and sets `AUTOBUY_SKIP_DOTENV=1` so
+`.env` is never read. The running API's `autobuy_db` / Redis db 0 are never
+touched. Use `TEST_DATABASE_URL` / `TEST_REDIS_URL` to point at another
+Postgres/Redis (the guards still apply).
+
 ## Email locally (Resend)
 
 Emails are sent only when `RESEND_API_KEY` is a real key; otherwise every

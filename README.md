@@ -360,6 +360,15 @@ allowlists empty.
 
 ## Tests
 
-```sh
+```bash
 python3 -m pytest tests/ -q
 ```
+
+Tests never touch `autobuy_db`. `tests/conftest.py` points the suite at a
+throwaway **`autobuy_test`** database (created and migrated to Alembic head
+automatically) and **Redis db 1**, refuses to run against any database whose
+name does not end in `_test` or any other Redis db, and disables `.env`
+loading so real keys and senders on a dev box can never reach a test.
+Override the targets with `TEST_DATABASE_URL` / `TEST_REDIS_URL`; the same
+guards apply. CI (`.github/workflows/api-tests.yml`) runs the full suite the
+same way with an 85 % coverage gate on `api/`.

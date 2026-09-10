@@ -3,9 +3,9 @@ name: API tests
 on:
   push:
     branches: ["*"]
-    paths: ["api/**", "tests/api/**", "alembic/**", "requirements.txt", ".github/workflows/api-tests.yml"]
+    paths: ["api/**", "tests/**", "alembic/**", "templates/**", "requirements.txt", ".github/workflows/api-tests.yml"]
   pull_request:
-    paths: ["api/**", "tests/api/**", "alembic/**", "requirements.txt"]
+    paths: ["api/**", "tests/**", "alembic/**", "templates/**", "requirements.txt"]
 
 jobs:
   test:
@@ -34,12 +34,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Apply migrations
-        run: alembic upgrade head
-      - name: Run API test suite with coverage gate
-        run: pytest tests/api -q --cov=api --cov-fail-under=85
+      - name: Migrations apply on an empty database
+        run: alembic upgrade head   # against the service's autobuy_db; the suite migrates its own autobuy_test
+      - name: Run the full test suite with coverage gate
+        # tests/conftest.py owns DATABASE_URL/REDIS_URL: autobuy_test + Redis db 1, never .env.
+        # test_webapp.py is the legacy Flask UI (requirements-legacy.txt) and is not part of the API suite.
+        run: pytest tests --ignore=tests/test_webapp.py -q --cov=api --cov-fail-under=85
         env:
           PYTHONPATH: .
-          SCHEDULER_ENABLED: "0"
-          RATE_LIMIT_ENABLED: "0"
-          REDIS_URL: redis://localhost:6379/0
+          TEST_DATABASE_URL: postgresql+asyncpg://autobuy:autobuy_password@localhost:5432/autobuy_test
+          TEST_REDIS_URL: redis://localhost:6379/1

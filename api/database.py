@@ -4,7 +4,8 @@ from sqlalchemy import event
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+if os.getenv("AUTOBUY_SKIP_DOTENV") != "1":   # tests set this: they own every variable they need
+    load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

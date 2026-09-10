@@ -9,14 +9,15 @@ from sqlalchemy import engine_from_config, pool
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-load_dotenv()
+if os.getenv("AUTOBUY_SKIP_DOTENV") != "1":   # tests own DATABASE_URL and skip .env
+    load_dotenv()
 
 from api.database import Base  # noqa: E402
 import api.models  # noqa: F401,E402  (registers all tables on Base.metadata)
 
 config = context.config
 
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
