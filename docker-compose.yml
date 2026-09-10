@@ -9,7 +9,8 @@
 #   docker compose up -d                          # dev: Postgres + Redis only
 #   docker compose --profile prod up -d --build   # production: + the API
 #   docker compose --profile monitoring up -d     # + Prometheus on :9090
-name: autobuy-platform
+
+name: minas-ai-asset-buy---bitget---private
 
 services:
   postgres:

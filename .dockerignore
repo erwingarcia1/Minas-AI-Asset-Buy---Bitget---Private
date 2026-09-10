@@ -27,11 +27,6 @@ data/
 tests/
 docs/
 deploy/
-deployment/
 frontend/
 mobile/
-api/
-alembic/
-templates/
-scripts/
 *.md
