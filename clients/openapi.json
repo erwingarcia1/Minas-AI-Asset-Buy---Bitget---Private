@@ -4,7 +4,7 @@
     "title": "AutoBuy Crypto API",
     "description": "Automated cryptocurrency purchasing platform: schedule recurring USDT buys (daily/weekly/biweekly/monthly), executed on Binance with KYC gating, encrypted key storage, and full transaction history.\n\nAll protected endpoints expect `Authorization: Bearer <access token>`. Validation failures return **422**; rate limits return **429** with `Retry-After`. Full guides: `docs/API.md`, `docs/DEPLOYMENT.md`.",
     "contact": {
-      "name": "AutoBuy support",
+      "name": "Minas AutoBuy support",
       "email": "support@minastech.ca"
     },
     "license": {
@@ -2662,8 +2662,27 @@
           "kyc"
         ],
         "summary": "Kyc Status",
-        "description": "Sync and return the caller's KYC status from Sumsub.",
+        "description": "The caller's KYC status, synced from Sumsub while it is still pending.\n\nWorks on localhost without the webhook: while the stored status is\n`pending` and an applicant exists, Sumsub is asked for the applicant's\nreview state and `users.kyc_status` is updated from it. A final stored\nstatus (`verified` / `rejected`) is returned as-is without calling Sumsub\nunless `?sync=1` is passed (the page does that after SDK events and on\n\"Refresh\", so a rejected-then-resubmitted applicant can move back to\npending).",
         "operationId": "kyc_status_api_kyc_status_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sync",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Force a Sumsub lookup even when the stored status is final",
+              "default": false,
+              "title": "Sync"
+            },
+            "description": "Force a Sumsub lookup even when the stored status is final"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2674,13 +2693,18 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/api/kyc/webhook": {
@@ -5449,6 +5473,57 @@
           "kyc_status": {
             "type": "string",
             "title": "Kyc Status"
+          },
+          "applicant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicant Id"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
+          },
+          "reject_labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reject Labels",
+            "default": []
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable",
+            "default": true
+          },
+          "synced": {
+            "type": "boolean",
+            "title": "Synced",
+            "default": false
           }
         },
         "type": "object",

@@ -487,6 +487,12 @@ class SendVerificationRequest(TypedDict):
 class StatusResponse(TypedDict):
     """StatusResponse."""
     kyc_status: str
+    applicant_id: NotRequired[Optional[str]]
+    review_status: NotRequired[Optional[str]]
+    reject_labels: NotRequired[List[str]]
+    rejection_reason: NotRequired[Optional[str]]
+    retryable: NotRequired[bool]
+    synced: NotRequired[bool]
 
 
 class TimelinePoint(TypedDict):

@@ -420,6 +420,12 @@ export interface SendVerificationRequest {
 
 export interface StatusResponse {
   kyc_status: string;
+  applicant_id?: string | null;
+  review_status?: string | null;
+  reject_labels?: string[];
+  rejection_reason?: string | null;
+  retryable?: boolean;
+  synced?: boolean;
 }
 
 export interface TimelinePoint {

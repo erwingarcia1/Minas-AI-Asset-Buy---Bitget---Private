@@ -675,10 +675,11 @@ export class KycApi {
 
   /**
    * Kyc Status — `GET /api/kyc/status`
+   * @param {{ sync?: boolean }} [query]
    * @returns {Promise<import('./types.js').StatusResponse>}
    */
-  kycStatus() {
-    return this.http.request("GET", "/api/kyc/status", { auth: true });
+  kycStatus(query) {
+    return this.http.request("GET", "/api/kyc/status", { query, auth: true });
   }
 
   /**

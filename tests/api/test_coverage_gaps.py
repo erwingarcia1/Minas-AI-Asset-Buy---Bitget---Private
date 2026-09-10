@@ -121,19 +121,30 @@ async def test_kyc_unconfigured_503(client, db, user, monkeypatch):
     await db.commit()
     async with client as c:
         assert (await c.post("/api/kyc/initiate", headers=auth_headers(user))).status_code == 503
+    # status degrades gracefully: the stored status is returned instead of a 503 (works on localhost)
+    import api.integrations.sumsub as sumsub_mod
+    monkeypatch.setattr(sumsub_mod, "is_configured", lambda: False)
     from api.main import app
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
-        assert (await c.get("/api/kyc/status", headers=auth_headers(user))).status_code == 503
+        r = await c.get("/api/kyc/status", headers=auth_headers(user))
+    assert r.status_code == 200 and r.json()["kyc_status"] == "pending" and r.json()["synced"] is False
 
 
 async def test_kyc_status_syncs_from_provider(client, db, user, monkeypatch):
-    monkeypatch.setattr(kyc_mod, "SumsubClient", FakeSumsub)
+    import api.integrations.sumsub as sumsub_mod
+
+    async def fake_status(applicant_id):
+        return {"applicant_id": applicant_id, "review_status": "completed", "review_answer": "GREEN",
+                "reject_labels": [], "kyc_status": "verified",
+                "raw": {"reviewStatus": "completed", "reviewResult": {"reviewAnswer": "GREEN"}}}
+    monkeypatch.setattr(sumsub_mod, "is_configured", lambda: True)
+    monkeypatch.setattr(sumsub_mod, "get_applicant_status", fake_status)
     user.kyc_status = "pending"
     user.kyc_sumsub_id = "applicant-1"
     await db.commit()
     async with client as c:
         r = await c.get("/api/kyc/status", headers=auth_headers(user))
-    assert r.json() == {"kyc_status": "verified"}
+    assert r.json()["kyc_status"] == "verified" and r.json()["synced"] is True
     await db.refresh(user)
     assert user.kyc_status == "verified"
 
@@ -143,18 +154,25 @@ async def test_kyc_status_without_applicant_returns_stored(client, db, user):
     user.kyc_sumsub_id = None
     await db.commit()
     async with client as c:
-        assert (await c.get("/api/kyc/status",
-                            headers=auth_headers(user))).json() == {"kyc_status": "pending"}
+        body = (await c.get("/api/kyc/status", headers=auth_headers(user))).json()
+    assert body["kyc_status"] == "pending" and body["applicant_id"] is None and body["synced"] is False
 
 
 async def test_kyc_provider_outage(client, db, user, monkeypatch):
+    import api.integrations.sumsub as sumsub_mod
+    from api.services.sumsub_client import SumsubError
+
+    async def down(applicant_id):
+        raise SumsubError("Sumsub unreachable: timeout")
+    monkeypatch.setattr(sumsub_mod, "is_configured", lambda: True)
+    monkeypatch.setattr(sumsub_mod, "get_applicant_status", down)
     monkeypatch.setattr(kyc_mod, "SumsubClient", BrokenSumsub)
     user.kyc_status = "pending"
     user.kyc_sumsub_id = "applicant-1"
     await db.commit()
     async with client as c:
         r = await c.get("/api/kyc/status", headers=auth_headers(user))
-        assert r.status_code == 200 and r.json() == {"kyc_status": "pending"}  # stale, not error
+        assert r.status_code == 200 and r.json()["kyc_status"] == "pending" and r.json()["synced"] is False  # stale, not error
     from api.main import app
     user.kyc_sumsub_id = None
     await db.commit()

@@ -264,7 +264,7 @@ export declare class KycApi {
   /** Initiate Kyc — `POST /api/kyc/initiate` */
   initiateKyc(): Promise<InitiateResponse>;
   /** Kyc Status — `GET /api/kyc/status` */
-  kycStatus(): Promise<StatusResponse>;
+  kycStatus(query?: { sync?: boolean }): Promise<StatusResponse>;
   /** Sumsub Webhook — `POST /api/kyc/webhook` */
   sumsubWebhook(): Promise<unknown>;
   /** Create Applicant — `POST /api/kyc/create-applicant` */

@@ -761,9 +761,9 @@ class KycApi:
         """Initiate Kyc — ``POST /api/kyc/initiate``."""
         return self._http.request("POST", "/api/kyc/initiate", auth=True)
 
-    def kyc_status(self) -> StatusResponse:
+    def kyc_status(self, *, sync: Optional[bool] = None) -> StatusResponse:
         """Kyc Status — ``GET /api/kyc/status``."""
-        return self._http.request("GET", "/api/kyc/status", auth=True)
+        return self._http.request("GET", "/api/kyc/status", auth=True, query={"sync": sync})
 
     def sumsub_webhook(self) -> Any:
         """Sumsub Webhook — ``POST /api/kyc/webhook``."""
@@ -788,9 +788,9 @@ class AsyncKycApi:
         """Initiate Kyc — ``POST /api/kyc/initiate``."""
         return await self._http.request("POST", "/api/kyc/initiate", auth=True)
 
-    async def kyc_status(self) -> StatusResponse:
+    async def kyc_status(self, *, sync: Optional[bool] = None) -> StatusResponse:
         """Kyc Status — ``GET /api/kyc/status``."""
-        return await self._http.request("GET", "/api/kyc/status", auth=True)
+        return await self._http.request("GET", "/api/kyc/status", auth=True, query={"sync": sync})
 
     async def sumsub_webhook(self) -> Any:
         """Sumsub Webhook — ``POST /api/kyc/webhook``."""

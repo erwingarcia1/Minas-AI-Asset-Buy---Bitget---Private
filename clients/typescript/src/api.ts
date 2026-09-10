@@ -467,8 +467,8 @@ export class KycApi {
   }
 
   /** Kyc Status — `GET /api/kyc/status` */
-  kycStatus(): Promise<StatusResponse> {
-    return this.http.request<StatusResponse>("GET", "/api/kyc/status", { auth: true });
+  kycStatus(query?: { sync?: boolean }): Promise<StatusResponse> {
+    return this.http.request<StatusResponse>("GET", "/api/kyc/status", { query, auth: true });
   }
 
   /** Sumsub Webhook — `POST /api/kyc/webhook` */

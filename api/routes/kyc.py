@@ -6,7 +6,7 @@ anywhere else (self-serve verification was a compliance hole).
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +30,13 @@ class InitiateResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    kyc_status: str
+    kyc_status: str                         # pending | verified | rejected (platform status)
+    applicant_id: Optional[str] = None
+    review_status: Optional[str] = None     # Sumsub: init (nothing submitted) | pending (under review) | completed
+    reject_labels: List[str] = []
+    rejection_reason: Optional[str] = None  # Sumsub moderation comment, when synced
+    retryable: bool = True                  # False when Sumsub marked the rejection FINAL
+    synced: bool = False                    # True when this response came from Sumsub, not the stored status
 
 
 class CreateApplicantRequest(BaseModel):
@@ -83,22 +89,43 @@ async def initiate_kyc(
 
 @router.get("/status", response_model=StatusResponse)
 async def kyc_status(
+    sync: bool = Query(False, description="Force a Sumsub lookup even when the stored status is final"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Sync and return the caller's KYC status from Sumsub."""
+    """The caller's KYC status, synced from Sumsub while it is still pending.
+
+    Works on localhost without the webhook: while the stored status is
+    `pending` and an applicant exists, Sumsub is asked for the applicant's
+    review state and `users.kyc_status` is updated from it. A final stored
+    status (`verified` / `rejected`) is returned as-is without calling Sumsub
+    unless `?sync=1` is passed (the page does that after SDK events and on
+    "Refresh", so a rejected-then-resubmitted applicant can move back to
+    pending)."""
+    stored = StatusResponse(kyc_status=current_user.kyc_status, applicant_id=current_user.kyc_sumsub_id)
     if not current_user.kyc_sumsub_id:
-        return StatusResponse(kyc_status=current_user.kyc_status)
-    client = _client()
+        return stored
+    if current_user.kyc_status in ("verified", "rejected") and not sync:
+        return stored
+    if not sumsub.is_configured():
+        logger.warning("kyc status not synced for %s: Sumsub is not configured", current_user.id)
+        return stored
     try:
-        status = await client.get_applicant_status(current_user.kyc_sumsub_id)
+        info = await sumsub.get_applicant_status(current_user.kyc_sumsub_id)
     except SumsubError as exc:
         logger.warning("kyc status fetch failed for %s: %s", current_user.id, exc)
-        return StatusResponse(kyc_status=current_user.kyc_status)  # stale, not an error
+        return stored  # stale, not an error
+    status = info["kyc_status"]
     if status != current_user.kyc_status:
         current_user.kyc_status = status
         await db.commit()
-    return StatusResponse(kyc_status=status)
+        logger.info("kyc status for user %s -> %s (status sync)", current_user.id, status)
+    review_result = (info.get("raw") or {}).get("reviewResult") or {}
+    return StatusResponse(
+        kyc_status=status, applicant_id=current_user.kyc_sumsub_id, review_status=info.get("review_status") or None,
+        reject_labels=list(info.get("reject_labels") or []),
+        rejection_reason=review_result.get("moderationComment") or review_result.get("clientComment") or None,
+        retryable=review_result.get("reviewRejectType") != "FINAL", synced=True)
 
 
 async def apply_review_event(db: AsyncSession, payload: dict) -> dict:
