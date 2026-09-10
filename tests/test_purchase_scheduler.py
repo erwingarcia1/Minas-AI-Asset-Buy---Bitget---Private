@@ -263,3 +263,60 @@ def test_job_event_listener_logs_missed_skipped_and_errors(caplog):
     levels = [(r.levelname, r.getMessage()) for r in caplog.records if "execute_purchases" in r.getMessage()]
     assert [l for l, _ in levels] == ["WARNING", "WARNING", "ERROR"]
     assert "DISCARDED" in levels[0][1] and "SKIPPED" in levels[1][1] and "boom" in levels[2][1]
+
+
+# --------------------------------------------------------------------------- single-instance safety + grace
+
+class SlowGateway(FakeGateway):
+    """Holds each execution long enough for a concurrent run to collide."""
+    def execute(self, account, purchase, dry_run):
+        import time as _t
+        _t.sleep(0.6)
+        return super().execute(account, purchase, dry_run)
+
+
+async def test_concurrent_runs_execute_each_purchase_exactly_once(db, user, binance_key, caplog):
+    """Two runs on two connections (as two gunicorn workers would be): one takes the
+    advisory lock and executes; the other returns immediately with nothing done."""
+    import asyncio, logging
+    from api.database import AsyncSessionLocal
+    caplog.set_level(logging.INFO, logger="autobuy.tasks.purchases")
+    p1 = await make_purchase(db, user, binance_key, next_execution=NOW)
+    p2 = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7", next_execution=NOW)
+    gw = SlowGateway()
+    async with AsyncSessionLocal() as s1, AsyncSessionLocal() as s2:
+        r1, r2 = await asyncio.gather(ps.execute_due_purchases(s1, now=NOW, gateway=gw, dry_run=True),
+                                      ps.execute_due_purchases(s2, now=NOW, gateway=gw, dry_run=True))
+    assert sorted([r1["executed"], r2["executed"]]) == [0, 2], (r1, r2)
+    assert len(gw.calls) == 2, "each purchase executed exactly once"
+    assert len(await tx_for(db, p1)) == 1 and len(await tx_for(db, p2)) == 1
+    assert any("another worker holds the run lock" in r.getMessage() for r in caplog.records)
+
+
+async def test_lock_is_released_after_a_run(db, user, binance_key):
+    from sqlalchemy import text
+    await make_purchase(db, user, binance_key, next_execution=NOW)
+    await ps.execute_due_purchases(db, now=NOW, gateway=FakeGateway(), dry_run=True)
+    held = (await db.execute(text("select count(*) from pg_locks where locktype='advisory' and objid=:k"),
+                             {"k": ps.ADVISORY_LOCK_KEY})).scalar()
+    assert held == 0
+
+
+def test_build_scheduler_sets_grace_and_listener():
+    from apscheduler.events import EVENT_JOB_MISSED
+    sched = ps.build_scheduler()
+    job = sched.get_job("execute_purchases")
+    assert job is not None and job.misfire_grace_time == 120 and job.max_instances == 1 and job.coalesce
+    assert job.trigger.interval.total_seconds() == 300
+    assert any(cb is ps.job_event_listener and (mask & EVENT_JOB_MISSED) for cb, mask in sched._listeners)
+
+
+async def test_recurring_tick_has_grace():
+    from api.services.recurring_scheduler import RecurringScheduler
+    rs = RecurringScheduler(poll_seconds=60)
+    rs.start()
+    try:
+        tick = [j for j in rs._scheduler.get_jobs() if j.name.endswith("tick")][0]
+        assert tick.misfire_grace_time == 60
+    finally:
+        rs.stop()

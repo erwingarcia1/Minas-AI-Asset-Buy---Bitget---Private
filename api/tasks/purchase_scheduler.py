@@ -30,7 +30,7 @@ from calendar import monthrange
 from datetime import datetime, timedelta
 from typing import Optional, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import NullPool
@@ -43,6 +43,12 @@ logger = logging.getLogger("autobuy.tasks.purchases")
 
 MAX_ATTEMPTS = 3
 BATCH_LIMIT = 200
+# Session-level Postgres advisory lock held for the whole run: with one
+# scheduler per gunicorn worker, only the first worker to reach a window
+# executes; the others log and return. Distinct from the recurring tick's key.
+ADVISORY_LOCK_KEY = 0x41425032  # "ABP2"
+MISFIRE_GRACE_SECONDS = 120
+INTERVAL_MINUTES = 5
 
 # Exchange network codes for withdrawals (Binance naming; testnet uses the same
 # code against the exchange's testnet endpoint).
@@ -116,12 +122,17 @@ def add_frequency(dt: datetime, frequency: str) -> Optional[datetime]:
 # --------------------------------------------------------------------------- core
 
 async def find_due_purchases(db: AsyncSession, now: datetime, limit: int = BATCH_LIMIT) -> list[Purchase]:
-    """Active purchases due at `now`, oldest due first, with owner + account loaded."""
+    """Active purchases due at `now`, oldest due first, with owner + account loaded.
+
+    Rows are taken FOR UPDATE SKIP LOCKED, so a row another transaction is
+    already processing is left out instead of waited for or double-processed.
+    """
     rows = (await db.execute(
         select(Purchase)
         .options(selectinload(Purchase.user), selectinload(Purchase.exchange_account))
         .where(Purchase.status == "active", Purchase.next_execution.is_not(None), Purchase.next_execution <= now)
-        .order_by(Purchase.next_execution).limit(limit))).scalars().all()
+        .order_by(Purchase.next_execution).limit(limit)
+        .with_for_update(skip_locked=True))).scalars().all()
     return list(rows)
 
 
@@ -191,24 +202,36 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
     counts = {"executed": 0, "failed": 0, "skipped": 0}
     started = time.perf_counter()
     logger.info("auto-buy run started (pid=%s now=%s dry_run=%s)", os.getpid(), now.isoformat(), dry_run)
-    q_start = time.perf_counter()
-    due = await find_due_purchases(db, now)
-    logger.info("auto-buy run: %d due purchase(s) found in %.0f ms (db connect + query)",
-                len(due), (time.perf_counter() - q_start) * 1000)
-    for purchase in due:
+
+    # The advisory lock lives on its own connection so that the session's
+    # per-purchase commits cannot release it part-way through the run.
+    async with db.bind.connect() as lock_conn:
+        got = (await lock_conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": ADVISORY_LOCK_KEY})).scalar()
+        if not got:
+            logger.info("auto-buy run skipped: another worker holds the run lock (pid=%s)", os.getpid())
+            return counts
         try:
-            tx = await execute_one(db, purchase, now, gateway, dry_run)
-        except Exception:  # never let one bad row stop the batch
-            logger.exception("purchase %s raised unexpectedly", purchase.id)
-            await db.rollback()
-            counts["failed"] += 1
-            continue
-        if tx is None:
-            counts["skipped"] += 1
-        elif tx.status == "success":
-            counts["executed"] += 1
-        else:
-            counts["failed"] += 1
+            q_start = time.perf_counter()
+            due = await find_due_purchases(db, now)
+            logger.info("auto-buy run: %d due purchase(s) found in %.0f ms (db connect + query)",
+                        len(due), (time.perf_counter() - q_start) * 1000)
+            for purchase in due:
+                try:
+                    tx = await execute_one(db, purchase, now, gateway, dry_run)
+                except Exception:  # never let one bad row stop the batch
+                    logger.exception("purchase %s raised unexpectedly", purchase.id)
+                    await db.rollback()
+                    counts["failed"] += 1
+                    continue
+                if tx is None:
+                    counts["skipped"] += 1
+                elif tx.status == "success":
+                    counts["executed"] += 1
+                else:
+                    counts["failed"] += 1
+        finally:
+            await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
+            await lock_conn.commit()
     logger.info("auto-buy run finished in %.0f ms: %s (pid=%s)",
                 (time.perf_counter() - started) * 1000, counts, os.getpid())
     return counts
@@ -231,6 +254,19 @@ def execute_purchases() -> dict:
     except Exception:
         logger.exception("auto-buy scheduler run failed")
         return {"executed": 0, "failed": 0, "skipped": 0}
+
+
+def build_scheduler():
+    """The APScheduler instance main.py starts: one interval job with a
+    generous misfire grace (late wake-ups run instead of being discarded) and
+    the miss/skip/error listener attached. Not started."""
+    from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
+    from apscheduler.schedulers.background import BackgroundScheduler
+    sched = BackgroundScheduler(timezone="UTC")
+    sched.add_job(execute_purchases, "interval", minutes=INTERVAL_MINUTES, id="execute_purchases",
+                  max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE_SECONDS)
+    sched.add_listener(job_event_listener, EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR)
+    return sched
 
 
 def job_event_listener(event) -> None:
