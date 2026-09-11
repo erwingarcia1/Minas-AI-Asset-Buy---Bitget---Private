@@ -203,15 +203,72 @@ async def test_purchase_type_validation_and_alias(client, user, binance_key):
 
 @pytest.mark.parametrize("purchase_type", ["autobuy", "dca"])
 async def test_both_modes_require_wallet_and_network(client, user, binance_key, purchase_type):
+    """autobuy needs a real wallet; dca does not, but a wallet it does carry must be valid."""
     H = auth(user)
     b = body(binance_key, purchase_type=purchase_type); del b["wallet_address"]
-    assert (await client.post(P, json=b, headers=H)).status_code == 422
-    assert (await client.post(P, json=body(binance_key, purchase_type=purchase_type, wallet_address=""), headers=H)).status_code == 422
-    b = body(binance_key, purchase_type=purchase_type); del b["blockchain_network"]
-    assert (await client.post(P, json=b, headers=H)).status_code == 422
-    # and the wallet must be valid for the coin/network in both modes
+    r = await client.post(P, json=b, headers=H)
+    if purchase_type == "autobuy":
+        assert r.status_code == 422 and "wallet_address is required" in r.text
+        assert (await client.post(P, json=body(binance_key, purchase_type=purchase_type, wallet_address=""), headers=H)).status_code == 422
+    else:
+        assert r.status_code == 201, r.text
+        assert (await client.post(P, json=body(binance_key, purchase_type=purchase_type, wallet_address=""), headers=H)).status_code == 201
+    # the wallet must be valid for the coin/network in both modes when given
     r = await client.post(P, json=body(binance_key, purchase_type=purchase_type, wallet_address=BTC_TEST), headers=H)
     assert r.status_code == 422 and r.json()["detail"]["error"] == "invalid_wallet_address"
+
+
+@pytest.mark.parametrize("purchase_type", ["autobuy", "dca"])
+async def test_burn_and_placeholder_addresses_are_always_rejected(client, user, binance_key, purchase_type):
+    H = auth(user)
+    for bad in ("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "1BitcoinEaterAddressDontSendf59kuE"):
+        r = await client.post(P, json=body(binance_key, purchase_type=purchase_type, wallet_address=bad), headers=H)
+        assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_address_denylisted", r.text
+    r = await client.post(P, json=body(binance_key, crypto_symbol="ETH", purchase_type=purchase_type,
+                                       wallet_address="0x000000000000000000000000000000000000DEAD"), headers=H)
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_address_denylisted"
+    r = await client.post("/api/wallets", json={"address": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "blockchain_network": "mainnet"}, headers=H)
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_address_denylisted"
+
+
+async def test_dca_without_wallet_lists_null_and_executes(client, db, user, binance_key):
+    H = auth(user)
+    b = body(binance_key, purchase_type="dca"); del b["wallet_address"]
+    r = await client.post(P, json=b, headers=H)
+    assert r.status_code == 201
+    pid = r.json()["purchase_id"]
+    listed = (await client.get(P, headers=H)).json()
+    assert next(x for x in listed if x["id"] == pid)["wallet_address"] is None
+
+
+async def test_switch_to_withdraw_requires_address_network_and_confirmation(client, db, user, binance_key):
+    H = auth(user)
+    b = body(binance_key, purchase_type="dca"); del b["wallet_address"]
+    pid = (await client.post(P, json=b, headers=H)).json()["purchase_id"]
+    # no address
+    r = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy"}, headers=H)
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_address_required"
+    # no confirmation
+    r = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy", "wallet_address": BTC_MAIN, "blockchain_network": "mainnet"}, headers=H)
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_confirmation_mismatch"
+    # burn address, even confirmed
+    r = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy", "wallet_address": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+                                             "confirm_wallet_address": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "blockchain_network": "mainnet"}, headers=H)
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_address_denylisted"
+    # wrong network for the address
+    r = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy", "wallet_address": BTC_MAIN,
+                                             "confirm_wallet_address": BTC_MAIN, "blockchain_network": "testnet"}, headers=H)
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "invalid_wallet_address"
+    # all good
+    r = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy", "wallet_address": BTC_MAIN,
+                                             "confirm_wallet_address": BTC_MAIN, "blockchain_network": "mainnet"}, headers=H)
+    assert r.status_code == 200, r.text
+    assert r.json()["purchase_type"] == "autobuy" and r.json()["wallet_address"] == BTC_MAIN
+    # back to accumulate keeps the wallet; switching to autobuy again still needs confirmation
+    r = await client.put(f"{P}/{pid}", json={"purchase_type": "dca"}, headers=H)
+    assert r.status_code == 200 and r.json()["purchase_type"] == "dca" and r.json()["wallet_address"] == BTC_MAIN
+    r = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy", "wallet_address": BTC_MAIN, "blockchain_network": "mainnet"}, headers=H)
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "wallet_confirmation_mismatch"
 
 
 async def test_dca_skips_exchange_withdrawal_network_check(client, user, binance_key, monkeypatch):

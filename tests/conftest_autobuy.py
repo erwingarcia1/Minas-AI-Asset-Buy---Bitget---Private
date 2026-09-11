@@ -16,7 +16,7 @@ from api.database import AsyncSessionLocal, Base, engine
 from api.models import APIKey, Purchase, User
 from api.routes.exchange import encrypt_value
 
-BTC_MAIN = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+BTC_MAIN = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
 BTC_TEST = "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn"
 ETH = "0x52908400098527886E0F7030069857D2E4169EE7"
 SOL = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"

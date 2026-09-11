@@ -1,7 +1,7 @@
 import { api } from "./client";
 import type {
   AdminAlert, AdminStats, AdminTxRow, AdminUserRow, ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate,
-  AutoBuyPurchaseCreated, AutoBuyTransaction, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
+  AutoBuyPurchaseCreated, AutoBuyPurchaseUpdate, AutoBuyTransaction, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
   PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
@@ -77,7 +77,7 @@ export const autoBuyAPI = {
   create: (body: AutoBuyPurchaseCreate) => data<AutoBuyPurchaseCreated>(api.post("/v2/purchases", body)),
   list: () => data<AutoBuyPurchase[]>(api.get("/v2/purchases")),
   get: (id: string) => data<AutoBuyPurchase & { transactions: AutoBuyTransaction[] }>(api.get(`/v2/purchases/${id}`)),
-  update: (id: string, body: { status?: "active" | "paused"; amount_usd?: number; frequency?: AutoBuyPurchaseCreate["frequency"] }) =>
+  update: (id: string, body: AutoBuyPurchaseUpdate) =>
     data<AutoBuyPurchase>(api.put(`/v2/purchases/${id}`, body)),
   remove: (id: string) => api.delete(`/v2/purchases/${id}`),
   transactions: (id: string, status_filter?: string) =>

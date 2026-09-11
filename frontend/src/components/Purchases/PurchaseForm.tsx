@@ -45,12 +45,13 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const hasAddress = address.trim().length > 0;
   // Validation runs on blur (touched) and, once touched, on every keystroke.
   const verdict = useMemo(() => (addressTouched || hasAddress) && hasAddress ? addressVerdict(address, crypto, network) : null, [address, crypto, network, addressTouched, hasAddress]);
-  const addressMissing = !hasAddress && addressTouched;   // required in both modes
+  const addressMissing = withdraw && !hasAddress && addressTouched;   // required only when withdrawing
   const amountError = validateAmountUsd(Number(amount));
   const networkWarning = withdraw && account && !canExchangeWithdrawToNetwork(account.exchange, network)
     ? `${account.exchange} does not support withdrawals to ${network}. Supported: ${(EXCHANGE_NETWORKS[account.exchange] ?? []).join(", ") || "none"}.`
     : null;
-  const addressOk = verdict?.ok === true;
+  // withdraw: a valid address is required; accumulate: no address, or a valid one
+  const addressOk = withdraw ? verdict?.ok === true : (!hasAddress || verdict?.ok === true);
   const canSubmit = !busy && !!account && !amountError && addressOk && !networkWarning;
 
   function reset() {
@@ -66,7 +67,8 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
     setBusy(true);
     try {
       const created = await autoBuyAPI.create({
-        crypto_symbol: crypto, amount_usd: Number(amount), wallet_address: address.trim(),
+        crypto_symbol: crypto, amount_usd: Number(amount),
+        ...(address.trim() ? { wallet_address: address.trim() } : {}),
         blockchain_network: network, frequency, exchange_account_id: account.id,
         purchase_type: withdraw ? "autobuy" : "dca",
         withdraw_immediately: withdraw,
@@ -116,8 +118,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
 
         <div className="sm:col-span-2 lg:col-span-3">
           <label className="label" htmlFor="pf-address">
-            Wallet address <span className="text-red-600">*</span>
-            {!withdraw && <span className="font-normal text-slate-400"> (kept for later withdrawals)</span>}
+            Wallet address {withdraw ? <span className="text-red-600">*</span> : <span className="font-normal text-slate-400">(optional — accumulate never withdraws; add one later to switch)</span>}
           </label>
           <div className="relative">
             <input id="pf-address" className={`input pr-10 font-mono ${verdict ? (verdict.ok ? "border-green-500 focus:ring-green-500" : "border-red-500 focus:ring-red-500") : addressMissing ? "border-red-500" : ""}`}
@@ -159,7 +160,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           <span className="block text-slate-600">
             {withdraw
               ? "Auto-Buy: each purchase is bought on the exchange and sent to your wallet right away."
-              : "Accumulate on exchange (DCA): purchases are bought and held on the exchange. Your wallet is kept on file for later withdrawals."}
+              : "Accumulate on exchange (DCA): purchases are bought and held on the exchange. No wallet is needed; you can switch to withdrawing later."}
           </span>
         </span>
       </label>

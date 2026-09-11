@@ -309,3 +309,39 @@ def test_build_scheduler_sets_grace_and_listener():
     assert job is not None and job.misfire_grace_time == 120 and job.max_instances == 1 and job.coalesce
     assert job.trigger.interval.total_seconds() == 300
     assert any(cb is ps.job_event_listener and (mask & EVENT_JOB_MISSED) for cb, mask in sched._listeners)
+
+
+async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binance_key, monkeypatch, caplog):
+    import logging
+    from api.services import binance_client as bc
+
+    class TickerClient:
+        def __init__(self, *a, **k): pass
+        @staticmethod
+        def spot_symbol(b, q): return f"{b}{q}"
+        def get_ticker(self, symbol): return {"last": 77042.68, "ask": 77042.84, "bid": 77042.83, "ts": "1789130047195"}
+        def get_ticker_price(self, symbol): return 77042.68
+    monkeypatch.setattr(bc, "_LegacyClient", TickerClient)
+    p = await make_purchase(db, user, binance_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
+    with caplog.at_level(logging.INFO, logger="autobuy.exchange_client"):
+        await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    tx = (await tx_for(db, p))[0]
+    assert tx.status == "success" and tx.fill_price == 77042.84, "best ask, unrounded"
+    assert tx.amount_executed == pytest.approx(15 / 77042.84)
+    assert any("dry-run priced BTCUSDT at ask 77042.84" in r.getMessage() for r in caplog.records)
+
+
+async def test_dry_run_fails_closed_when_no_live_price(db, user, binance_key, monkeypatch):
+    from api.services import binance_client as bc
+
+    class NoPrice:
+        def __init__(self, *a, **k): pass
+        @staticmethod
+        def spot_symbol(b, q): return f"{b}{q}"
+        def get_ticker(self, symbol): return {"last": None, "ask": None, "bid": None, "ts": None}
+    monkeypatch.setattr(bc, "_LegacyClient", NoPrice)
+    p = await make_purchase(db, user, binance_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
+    counts = await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    assert counts["failed"] == 1
+    tx = (await tx_for(db, p))[0]
+    assert tx.status == "failed" and "PRICE_UNAVAILABLE" in tx.error_message and tx.amount_executed is None

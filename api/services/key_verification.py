@@ -126,18 +126,22 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
         return outcome
 
     perms = ", ".join(info.get("permissions") or [])
+    unconfirmed = ", ".join(info.get("unconfirmed") or [])
+    possible = (f"WARNING: treat this key as able to withdraw. {venue} reports permission codes this platform "
+                f"cannot confirm ({unconfirmed or perms or 'none reported'}); use it for accumulate purchases only "
+                "unless you have checked on the exchange that withdrawals are disabled.")
     if can_trade is True:
         detail = f"Key verified on {venue}: spot trading enabled"
         if can_withdraw:
             detail += ". WARNING: this key can also withdraw — restrict it to spot trading only."
         elif can_withdraw is None:
-            detail += f" (withdrawal permission could not be determined from: {perms})"
+            detail += ". " + possible
     elif perms:
-        detail = (f"Key verified on {venue}: it authenticates, but {venue} reports its permissions as codes "
-                  f"this platform does not interpret ({perms}); trade permission is assumed and will be "
-                  "confirmed by the first order")
+        detail = (f"Key verified on {venue}: it authenticates, but its permissions are reported as codes this "
+                  f"platform cannot confirm ({perms}); trade permission will be confirmed by the first order. " + possible)
     else:
-        detail = f"Key verified on {venue} (permissions are not reported by this exchange)"
+        detail = (f"Key verified on {venue}; {venue} does not report the key's permissions, so treat it as able "
+                  "to withdraw unless you have disabled that on the exchange")
     outcome = Verification(verified=True, result="ok", detail=detail, withdrawal_enabled=can_withdraw)
     _record(key, outcome, now)
     await db.commit()

@@ -106,8 +106,11 @@ export default function Settings() {
                 {k.verification_status === "failed" && k.verification_error && (
                   <p className="mt-1 text-xs text-red-600" role="alert">{k.verification_error}{k.last_checked_at ? ` (checked ${fmtDate(k.last_checked_at)})` : ""}</p>
                 )}
-                {k.verification_status === "verified" && k.withdrawal_enabled && (
+                {k.verification_status === "verified" && k.withdrawal_enabled === true && (
                   <p className="mt-1 text-xs text-amber-700" role="status">This key can withdraw funds. Restrict it to spot trading only on {capitalize(k.exchange)}.</p>
+                )}
+                {k.verification_status === "verified" && k.withdrawal_enabled == null && (
+                  <p className="mt-1 text-xs text-amber-700" role="status">Withdrawal permission could not be confirmed for this key — treat it as able to withdraw. Use it for accumulate purchases only unless you have disabled withdrawals on {capitalize(k.exchange)}.</p>
                 )}
                 {k.verification_status === "verified" && k.verified_at && (
                   <p className="mt-1 text-xs text-slate-400">Verified {fmtDate(k.verified_at)}</p>

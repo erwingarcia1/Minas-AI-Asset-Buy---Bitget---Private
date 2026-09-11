@@ -106,11 +106,24 @@ class BitgetClient:
             raise BitgetAPIError("SYMBOL", f"unknown spot symbol {symbol!r}")
         return data[0]
 
-    def get_ticker_price(self, symbol):
+    def get_ticker(self, symbol):
+        """Live ticker: {"last", "ask", "bid", "ts"} (floats / epoch ms), straight from
+        /api/v2/spot/market/tickers with no rounding."""
         data = self._request("GET", "/api/v2/spot/market/tickers", params={"symbol": symbol}, auth=False)
         if not data:
             raise BitgetAPIError("SYMBOL", f"no ticker for {symbol!r}")
-        return float(data[0]["lastPr"])
+        t = data[0]
+
+        def num(key):
+            v = t.get(key)
+            return float(v) if v not in (None, "") else None
+        return {"last": num("lastPr"), "ask": num("askPr"), "bid": num("bidPr"), "ts": t.get("ts")}
+
+    def get_ticker_price(self, symbol):
+        price = self.get_ticker(symbol)["last"]
+        if price is None:
+            raise BitgetAPIError("SYMBOL", f"ticker for {symbol!r} carries no last price")
+        return price
 
     # -------------------------------------------------------------- private
 

@@ -48,8 +48,8 @@ class Purchase(Base):
     crypto_symbol = Column(String(10), nullable=False)
     amount_usd = Column(Float, nullable=False)
     frequency = Column(String(20), nullable=False)          # one_time | daily | weekly | monthly
-    # Required in both modes: autobuy withdraws to it after every buy, dca keeps it for later withdrawals.
-    wallet_address = Column(String(128), nullable=False)
+    # autobuy: required, withdrawn to after every buy. dca: optional (kept for a later switch to withdraw).
+    wallet_address = Column(String(128), nullable=True)
     blockchain_network = Column(String(20), nullable=False)  # mainnet | testnet
     purchase_type = Column(Enum(*PURCHASE_TYPES, name="purchase_type"), nullable=False, default="autobuy",
                            server_default="autobuy")

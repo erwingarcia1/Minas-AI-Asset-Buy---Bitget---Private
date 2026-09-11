@@ -66,3 +66,12 @@ describe("Settings: exchange keys", () => {
     await screen.findByText(/rejected the credentials \(error 40012\)/);
   });
 });
+
+describe("Settings: unconfirmed withdrawal permission", () => {
+  it("warns that the key may be able to withdraw when the exchange did not confirm otherwise", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([{ ...VERIFIED_WITHDRAW, withdrawal_enabled: null }] as never);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByTestId("exchange-key");
+    expect(screen.getByRole("status")).toHaveTextContent(/could not be confirmed.*treat it as able to withdraw/);
+  });
+});

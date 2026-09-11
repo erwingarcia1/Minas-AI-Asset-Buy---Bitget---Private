@@ -213,7 +213,7 @@ export interface AutoBuyPurchase {
   crypto_symbol: string;
   amount_usd: number;
   frequency: AutoBuyFrequency;
-  wallet_address: string;
+  wallet_address: string | null;   // null on accumulate purchases without a wallet on file
   blockchain_network: BlockchainNetwork;
   purchase_type?: PurchaseType;     // absent on API builds older than migration 012
   withdraw_immediately?: boolean;   // absent on API builds older than migration 011
@@ -231,7 +231,7 @@ export interface AutoBuyPurchase {
 export interface AutoBuyPurchaseCreate {
   crypto_symbol: string;
   amount_usd: number;
-  wallet_address: string;           // required in both modes
+  wallet_address?: string;          // required for autobuy; optional for dca (accumulate never withdraws)
   blockchain_network: BlockchainNetwork;
   frequency: AutoBuyFrequency;
   exchange_account_id: string;
@@ -294,3 +294,15 @@ export interface AdminStats {
 export interface AdminUserRow { id: string; email: string; role: string; kyc_status: string; suspended: boolean; created_at: string; invested_usdt: number }
 export interface AdminTxRow { id: string; user_id: string; crypto: string; cost_usdt: number; status: string; error_message?: string | null; created_at: string }
 export interface AdminAlert { name: string; severity: "ok" | "warning" | "critical"; value: string; detail: string }
+
+/** PUT /api/v2/purchases/{id}: pause/resume, amount, frequency, or a mode switch.
+ *  Switching to autobuy needs the wallet, its network and the address typed again. */
+export interface AutoBuyPurchaseUpdate {
+  status?: "active" | "paused";
+  amount_usd?: number;
+  frequency?: AutoBuyFrequency;
+  purchase_type?: PurchaseType;
+  wallet_address?: string;
+  blockchain_network?: BlockchainNetwork;
+  confirm_wallet_address?: string;
+}

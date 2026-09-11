@@ -3,6 +3,7 @@ import { autoBuyAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
 import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/types";
+import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
 import { capitalize, fmtDate } from "@/utils/format";
 
 const FREQ: Record<string, string> = { one_time: "One-time", daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
@@ -16,6 +17,7 @@ interface Props {
 
 export default function PurchaseList({ purchases, onChanged, onError }: Props) {
   const [open, setOpen] = useState<AutoBuyPurchase | null>(null);
+  const [switching, setSwitching] = useState<AutoBuyPurchase | null>(null);
   const apiLacksModes = purchases.length > 0 && purchases.every((p) => purchaseMode(p) === null);
 
   async function act(fn: () => Promise<unknown>) {
@@ -46,7 +48,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                 <td className="px-4 py-2">{FREQ[p.frequency] ?? capitalize(p.frequency)}</td>
                 <td className="px-4 py-2">
                   <StatusBadge status={purchaseMode(p) === "autobuy" ? "autobuy" : purchaseMode(p) === "dca" ? "accumulate" : "unknown mode"} />
-                  <div className="mt-1 font-mono text-xs text-slate-400" title={p.wallet_address}>{p.wallet_address.slice(0, 12)}…</div>
+                  <div className="mt-1 font-mono text-xs text-slate-400" title={p.wallet_address ?? ""}>{p.wallet_address ? `${p.wallet_address.slice(0, 12)}…` : "no wallet on file"}</div>
                 </td>
                 <td className="px-4 py-2"><StatusBadge status={p.status} />{p.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.last_error}>{p.last_error}</div>}</td>
                 <td className="whitespace-nowrap px-4 py-2 text-xs">{fmtDate(p.next_execution)}</td>
@@ -54,6 +56,12 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                   <button className="btn-secondary !py-1" onClick={() => setOpen(open?.id === p.id ? null : p)}>{open?.id === p.id ? "Hide" : "Transactions"}</button>
                   {p.status === "active" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "paused" }))}>Pause</button>}
                   {p.status === "paused" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
+                  {["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
+                    <button className="btn-secondary !py-1" onClick={() => setSwitching(p)}>Switch to withdraw</button>
+                  )}
+                  {["active", "paused"].includes(p.status) && purchaseMode(p) === "autobuy" && (
+                    <button className="btn-secondary !py-1" onClick={() => { if (confirm(`Keep future ${p.crypto_symbol} buys on the exchange instead of withdrawing them?`)) void act(() => autoBuyAPI.update(p.id, { purchase_type: "dca" })); }}>Switch to accumulate</button>
+                  )}
                   {!["cancelled", "completed"].includes(p.status) && (
                     <button className="btn-danger !py-1" onClick={() => { if (confirm(`Cancel the ${p.crypto_symbol} purchase? Its history is kept.`)) void act(() => autoBuyAPI.remove(p.id)); }}>Delete</button>
                   )}
@@ -64,6 +72,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
         </table>
       </div>
       {open && <TransactionHistory purchase={open} />}
+      {switching && <SwitchToWithdrawDialog purchase={switching} onDone={() => { setSwitching(null); onChanged(); }} onCancel={() => setSwitching(null)} />}
     </div>
   );
 }

@@ -13,6 +13,7 @@ from api.database import get_db
 from api.models import User, Wallet, utcnow
 from api.models.purchase import BLOCKCHAIN_NETWORKS
 from api.routes.user import get_current_user
+from api.utils.address_denylist import DENYLIST_REASON, is_denylisted
 from api.utils.network_validator import detect_chain, get_address_network, validate_address_for_network
 
 logger = logging.getLogger("autobuy.wallets")
@@ -62,6 +63,9 @@ async def add_wallet(payload: WalletCreateRequest, current_user: User = Depends(
                      db: AsyncSession = Depends(get_db)):
     """Save a wallet. The address must be a valid Bitcoin, Ethereum or Solana
     address usable on the declared network; addresses are unique platform-wide."""
+    if is_denylisted(payload.address):
+        raise HTTPException(status_code=422, detail={"error": "wallet_address_denylisted",
+                                                    "details": {"address": payload.address, "message": DENYLIST_REASON}})
     if not validate_address_for_network(payload.address, payload.blockchain_network):
         raise HTTPException(status_code=422, detail={
             "error": "invalid_wallet_address",

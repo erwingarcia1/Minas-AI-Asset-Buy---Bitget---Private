@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { addressVerdict, detectChain, getAddressNetwork, validateAddressForNetwork, validateBitcoinAddress, validateEthereumAddress, validateSolanaAddress } from "@/utils/addressValidation";
+import { addressVerdict, detectChain, getAddressNetwork, isDenylisted, validateAddressForNetwork, validateBitcoinAddress, validateEthereumAddress, validateSolanaAddress } from "@/utils/addressValidation";
 import { canExchangeWithdrawToNetwork } from "@/utils/exchangeNetworks";
 
-const BTC = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", P2SH = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy";
+const BTC = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", P2SH = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy";
 const SEGWIT = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", TESTNET = "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn", TB1 = "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx";
 const ETH = "0x52908400098527886E0F7030069857D2E4169EE7", SOL = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
@@ -34,5 +34,17 @@ describe("address validation (mirrors the API)", () => {
   it("exchange network support", () => {
     expect(canExchangeWithdrawToNetwork("binance", "testnet")).toBe(true);
     expect(canExchangeWithdrawToNetwork("kraken", "mainnet")).toBe(false);
+  });
+});
+
+describe("burn / placeholder denylist", () => {
+  it("rejects known unspendable addresses in every chain, case-insensitively for EVM", () => {
+    expect(isDenylisted("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")).toBe(true);
+    expect(isDenylisted("0x000000000000000000000000000000000000dEaD")).toBe(true);
+    expect(isDenylisted("0x0000000000000000000000000000000000000000")).toBe(true);
+    expect(isDenylisted("11111111111111111111111111111111")).toBe(true);
+    expect(isDenylisted(BTC)).toBe(false);
+    expect(addressVerdict("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "BTC", "mainnet")).toMatchObject({ ok: false });
+    expect(addressVerdict("0x000000000000000000000000000000000000dEaD", "ETH", "mainnet")?.reason).toMatch(/burn/);
   });
 });

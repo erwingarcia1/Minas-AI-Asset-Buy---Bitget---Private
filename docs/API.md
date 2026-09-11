@@ -58,7 +58,7 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 | auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password/validate` (`{token}` → 200 `{valid: true}` / 400 `{valid: false}`, does not consume the token) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
-| auto-buy (`/api/v2/purchases`) | `POST /` (validates wallet address vs coin chain + network, exchange network support, account ownership) · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency) · `DELETE /{id}` (cancel, history kept) |
+| auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; any wallet is validated against the coin's chain + network, rejected if it is a known burn/unspendable address, and checked for exchange network support on autobuy) · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `DELETE /{id}` (cancel, history kept) |
 | wallets (`/api/wallets`) | `POST /` (format must match network; Bitcoin testnet/mainnet distinguished; Ethereum/Solana valid on both) · `GET /?blockchain_network=` · `DELETE /{id}` |
 | email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
 | webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
@@ -179,3 +179,12 @@ notification email, lifecycle campaign emails, SMS/push dispatcher, Slack ops
 alerts and outbound user webhooks (`purchase.<event>`, HMAC-signed) all hang
 off those events. Dry-run emails are prefixed `[DRY RUN]`. The weekly digest
 runs on the Auto-Buy scheduler (Mondays 09:00 UTC, one worker via advisory lock).
+
+## Dry-run pricing
+
+With `AUTOBUY_DRY_RUN=1` nothing is sent to the exchange, but each attempt is
+priced from the venue's live ticker at the moment of the run: the best ask
+(what a market buy would pay), or the last trade only when the venue reports
+no ask. The price is stored unrounded as `fill_price`, the ticker snapshot is
+logged on `autobuy.exchange_client`, and if no positive live price is
+available the attempt fails with `PRICE_UNAVAILABLE` — there is no fallback price.

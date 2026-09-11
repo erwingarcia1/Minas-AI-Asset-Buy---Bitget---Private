@@ -6,6 +6,7 @@ platform's needs (dry-run simulation, fill math) without rewriting any of it.
 All methods are synchronous (the legacy client uses `requests`); async callers
 run them via `asyncio.to_thread`.
 """
+import logging
 import uuid
 
 from binance_client import BinanceClient as _LegacyBinance
@@ -15,6 +16,8 @@ from okx_client import OKXClient as _LegacyOKX
 from exchange_errors import ExchangeAPIError
 
 from api.services.metrics import time_binance
+
+logger = logging.getLogger("autobuy.exchange_client")
 
 LEGACY_CLIENTS = {
     "binance": _LegacyBinance,
@@ -28,36 +31,40 @@ _LegacyClient = _LegacyBinance
 
 
 # Bitget reports a key's permissions in /api/v2/spot/account/info "authorities".
-# The documented values are words ("readonly", "trade", "withdraw", "transfer");
-# live accounts return undocumented short codes instead (a read + spot-trade
-# key answered ["taxw", "p2pw", "wtow", "stow", "smow"] on 2026-09-11). Only
-# the tokens below are interpreted — "stow" as spot trade, inferred from that
-# key — everything else is recorded verbatim and left "unknown" rather than
-# guessed, so an authenticated key is never wrongly rejected for lacking trade
-# permission, and withdrawal is only flagged on the documented value.
+# The documented values (spot docs, changelog, checked 2026-09-11) are the
+# words "readonly", "trade", "withdraw", "transfer"; live accounts return
+# undocumented short codes instead (a read + spot-trade key answered
+# ["taxw", "p2pw", "wtow", "stow", "smow"]). Only the documented words plus
+# "stow" (spot trade, inferred from that key) are interpreted. Any other code
+# is UNCONFIRMED: the key is verified (it authenticated) but its withdrawal
+# permission is reported as "possible", which the UI shows as a warning.
 BITGET_TRADE_TOKENS = {"trade", "stow"}
 BITGET_WITHDRAW_TOKENS = {"withdraw"}
 BITGET_TRANSFER_TOKENS = {"transfer"}
+BITGET_KNOWN_TOKENS = BITGET_TRADE_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_TRANSFER_TOKENS | {"readonly", "read"}
 
 
 def interpret_bitget_authorities(auths: list) -> dict:
-    """{can_trade, can_withdraw, permissions_known} from Bitget's authorities list.
+    """{can_trade, can_withdraw, permissions_known, unconfirmed} from Bitget's
+    authorities list.
 
-    can_trade / can_withdraw are True when a known token is present, False when
-    the list is non-empty and fully understood without it, and None (unknown)
-    when the list is empty or contains codes this code does not interpret.
+    can_trade / can_withdraw are True when a known token is present, False only
+    when every token is understood and the permission is absent, and None
+    ("possible" — treat as enabled) when the list is empty or carries codes
+    this code cannot confirm. ``unconfirmed`` lists those codes.
     """
-    known_tokens = BITGET_TRADE_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_TRANSFER_TOKENS | {"readonly", "read"}
     tokens = {a.strip().lower() for a in auths if a}
+    unconfirmed = sorted(tokens - BITGET_KNOWN_TOKENS)
     if not tokens:
-        return {"can_trade": None, "can_withdraw": None, "permissions_known": False}
+        return {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": []}
     trade = bool(tokens & BITGET_TRADE_TOKENS)
     withdraw = bool(tokens & BITGET_WITHDRAW_TOKENS)
-    fully_understood = tokens <= known_tokens
+    fully_understood = not unconfirmed
     return {
         "can_trade": True if trade else (False if fully_understood else None),
         "can_withdraw": True if withdraw else (False if fully_understood else None),
         "permissions_known": trade or withdraw or fully_understood,
+        "unconfirmed": unconfirmed,
     }
 
 
@@ -140,15 +147,32 @@ class BinanceClient:
         Dry runs price the order but place nothing.
         """
         try:
-            price = self._client.get_ticker_price(symbol)
             if dry_run:
+                # Price a dry run at the venue's live best ask (what a market buy
+                # would pay), falling back to the last trade only when the
+                # venue's ticker has no ask. No rounding, no fixed fallback: a
+                # missing or non-positive price fails the run.
+                if hasattr(self._client, "get_ticker"):
+                    ticker = self._client.get_ticker(symbol)
+                    price = ticker.get("ask") or ticker.get("last")
+                    source = "ask" if ticker.get("ask") else "last"
+                else:
+                    ticker = {"last": self._client.get_ticker_price(symbol)}
+                    price, source = ticker["last"], "last"
+                if not price or price <= 0:
+                    raise BinanceClientError(f"live price for {symbol} unavailable from {self.exchange} "
+                                             f"(ticker: {ticker}); dry run aborted", "PRICE_UNAVAILABLE")
+                logger.info("dry-run priced %s at %s %.8g (last=%s ask=%s bid=%s ts=%s)", symbol, source, price,
+                            ticker.get("last"), ticker.get("ask"), ticker.get("bid"), ticker.get("ts"))
                 return {
                     "order_id": f"DRY-{uuid.uuid4().hex[:12]}",
                     "amount_crypto": usdt_amount / price,
                     "exchange_rate": price,
                     "cost_usdt": usdt_amount,
                     "dry_run": True,
+                    "price_source": f"{self.exchange}:{source}",
                 }
+            price = self._client.get_ticker_price(symbol)
 
             info = self._client.get_symbol_info(symbol)
             if info["status"] != "online":

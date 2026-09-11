@@ -22,6 +22,7 @@ from api.models.purchase import BLOCKCHAIN_NETWORKS, PURCHASE_FREQUENCIES, PURCH
 from api.routes.user import get_current_user
 from api.utils.exchange_networks import (
     SUPPORTED_CRYPTOS, can_exchange_withdraw_to_network, chain_for_crypto, supported_networks)
+from api.utils.address_denylist import DENYLIST_REASON, is_denylisted
 from api.utils.network_validator import validate_address_for_network
 
 logger = logging.getLogger("autobuy.purchases.v2")
@@ -36,8 +37,9 @@ MIN_AMOUNT_USD, MAX_AMOUNT_USD = 10.0, 1_000_000.0
 class PurchaseCreateRequest(BaseModel):
     crypto_symbol: str = Field(min_length=2, max_length=10)
     amount_usd: float = Field(ge=MIN_AMOUNT_USD, le=MAX_AMOUNT_USD)
-    wallet_address: str = Field(min_length=20, max_length=128)
-    blockchain_network: str
+    # autobuy: required. dca (accumulate): optional — nothing is ever withdrawn.
+    wallet_address: Optional[str] = Field(default=None, max_length=128)
+    blockchain_network: str = "mainnet"
     frequency: str
     exchange_account_id: UUID
     # autobuy (default): buy, then withdraw to wallet_address right away
@@ -61,6 +63,10 @@ class PurchaseCreateRequest(BaseModel):
             if "purchase_type" in self.model_fields_set and self.purchase_type != implied:
                 raise ValueError("withdraw_immediately contradicts purchase_type; send purchase_type only")
             self.purchase_type = implied
+        if self.purchase_type == "autobuy" and not self.wallet_address:
+            raise ValueError("wallet_address is required for withdraw-immediately (autobuy) purchases")
+        if self.wallet_address is not None and len(self.wallet_address) < 20:
+            raise ValueError("wallet_address is too short to be a valid address")
         return self
 
     @field_validator("crypto_symbol")
@@ -91,14 +97,37 @@ class PurchaseCreateRequest(BaseModel):
 
     @field_validator("wallet_address")
     @classmethod
-    def _address(cls, v: str) -> str:
-        return v.strip()
+    def _address(cls, v):
+        v = (v or "").strip()
+        return v or None
 
 
 class PurchaseUpdateRequest(BaseModel):
     status: Optional[str] = None            # active | paused
     amount_usd: Optional[float] = Field(default=None, ge=MIN_AMOUNT_USD, le=MAX_AMOUNT_USD)
     frequency: Optional[str] = None
+    # Mode switch. Going to autobuy (withdraw immediately) needs a real wallet
+    # address, its network, and the address typed again as confirmation.
+    purchase_type: Optional[str] = None
+    wallet_address: Optional[str] = Field(default=None, max_length=128)
+    blockchain_network: Optional[str] = None
+    confirm_wallet_address: Optional[str] = None
+
+    @field_validator("purchase_type")
+    @classmethod
+    def _purchase_type(cls, v):
+        return None if v is None else PurchaseCreateRequest._purchase_type(v)
+
+    @field_validator("blockchain_network")
+    @classmethod
+    def _network(cls, v):
+        return None if v is None else PurchaseCreateRequest._network(v)
+
+    @field_validator("wallet_address", "confirm_wallet_address")
+    @classmethod
+    def _address(cls, v):
+        v = (v or "").strip()
+        return v or None
 
     @field_validator("status")
     @classmethod
@@ -136,7 +165,7 @@ class PurchaseOut(BaseModel):
     crypto_symbol: str
     amount_usd: float
     frequency: str
-    wallet_address: str
+    wallet_address: Optional[str] = None   # None on accumulate purchases without a wallet on file
     blockchain_network: str
     purchase_type: str            # autobuy | dca
     withdraw_immediately: bool    # derived: purchase_type == "autobuy" (compatibility)
@@ -196,6 +225,18 @@ def _reject(error: str, details: dict) -> HTTPException:
     return HTTPException(status_code=422, detail={"error": error, "details": details})
 
 
+def _check_wallet(address: str, network: str, crypto: str, chain: Optional[str]) -> None:
+    """422 unless the address is a valid, spendable address for the coin's chain and network."""
+    if is_denylisted(address):
+        raise _reject("wallet_address_denylisted", {
+            "wallet_address": address, "message": DENYLIST_REASON})
+    if not validate_address_for_network(address, network, chain=chain):
+        raise _reject("invalid_wallet_address", {
+            "wallet_address": address, "blockchain_network": network, "expected_chain": chain,
+            "message": f"Address is not a valid {chain} {network} address for {crypto}",
+        })
+
+
 # --------------------------------------------------------------------------- routes
 
 @router.post("", response_model=PurchaseCreatedOut, status_code=status.HTTP_201_CREATED)
@@ -206,19 +247,15 @@ async def create_purchase(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a purchase. `purchase_type` selects the mode: `autobuy` (default:
-    buy, then withdraw the coins to `wallet_address`) or `dca` (buy and
-    accumulate on the exchange; the wallet is kept for later withdrawals).
-    Both modes require a wallet address and network. Rejects (422 with
-    `{error, details}`) when the wallet address does not match the coin's
-    chain or the declared network, when the exchange account cannot withdraw
+    buy, then withdraw the coins to `wallet_address`, which is required) or
+    `dca` (buy and accumulate on the exchange; no wallet needed — one may be
+    given for a later switch). Rejects (422 with `{error, details}`) when a
+    wallet address does not match the coin's chain or the declared network, is
+    a known burn/unspendable address, when the exchange account cannot withdraw
     to that network (autobuy), or when the exchange account is not the caller's."""
     chain = chain_for_crypto(payload.crypto_symbol)
-    if not validate_address_for_network(payload.wallet_address, payload.blockchain_network, chain=chain):
-        raise _reject("invalid_wallet_address", {
-            "wallet_address": payload.wallet_address, "blockchain_network": payload.blockchain_network,
-            "expected_chain": chain,
-            "message": f"Address is not a valid {chain} {payload.blockchain_network} address for {payload.crypto_symbol}",
-        })
+    if payload.wallet_address is not None:
+        _check_wallet(payload.wallet_address, payload.blockchain_network, payload.crypto_symbol, chain)
 
     account = (await db.execute(select(APIKey).where(
         APIKey.id == payload.exchange_account_id, APIKey.user_id == current_user.id))).scalar_one_or_none()
@@ -268,13 +305,47 @@ async def get_purchase(purchase_id: UUID, current_user: User = Depends(get_curre
 @router.put("/{purchase_id}", response_model=PurchaseOut)
 async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
                           current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Pause (`status: paused`), resume (`status: active`) or change amount/frequency.
-    Cancelled, completed and failed purchases cannot be changed."""
+    """Pause (`status: paused`), resume (`status: active`), change amount/frequency,
+    or switch mode. Switching to `autobuy` (withdraw immediately) requires
+    `wallet_address`, `blockchain_network` and `confirm_wallet_address` equal to
+    the address; the address must be valid, spendable and supported by the
+    exchange. Cancelled, completed and failed purchases cannot be changed."""
     p = await _owned_purchase(db, purchase_id, current_user)
     if p.status in ("cancelled", "completed", "failed"):
         raise HTTPException(status_code=409, detail=f"Purchase is {p.status} and cannot be changed")
-    if payload.status is None and payload.amount_usd is None and payload.frequency is None:
+    if (payload.status is None and payload.amount_usd is None and payload.frequency is None
+            and payload.purchase_type is None and payload.wallet_address is None):
         raise HTTPException(status_code=400, detail="Nothing to update")
+    if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
+        # switching ON withdraw-immediately: real address + network + typed confirmation, every time
+        address = payload.wallet_address
+        network = payload.blockchain_network or p.blockchain_network
+        if not address:
+            raise _reject("wallet_address_required", {
+                "message": "Switching to withdraw immediately needs the wallet address the coins will be sent to"})
+        if payload.confirm_wallet_address != address:
+            raise _reject("wallet_confirmation_mismatch", {
+                "message": "Type the wallet address again in confirm_wallet_address to confirm the switch"})
+        _check_wallet(address, network, p.crypto_symbol, chain_for_crypto(p.crypto_symbol))
+        account = p.exchange_account
+        if account is not None and not can_exchange_withdraw_to_network(account.exchange, network):
+            raise _reject("network_not_supported_by_exchange", {
+                "exchange": account.exchange, "blockchain_network": network,
+                "supported_networks": supported_networks(account.exchange)})
+        p.wallet_address, p.blockchain_network, p.purchase_type = address, network, "autobuy"
+        logger.info("purchase switched to autobuy", extra={"purchase_id": str(p.id), "user_id": str(current_user.id),
+                                                           "network": network})
+    elif payload.purchase_type == "dca" and p.purchase_type != "dca":
+        p.purchase_type = "dca"   # the wallet on file is kept for a later switch back
+        logger.info("purchase switched to dca", extra={"purchase_id": str(p.id), "user_id": str(current_user.id)})
+    elif payload.wallet_address is not None:
+        # changing the wallet on an existing purchase: same checks as creation
+        network = payload.blockchain_network or p.blockchain_network
+        _check_wallet(payload.wallet_address, network, p.crypto_symbol, chain_for_crypto(p.crypto_symbol))
+        if p.purchase_type == "autobuy" and payload.confirm_wallet_address != payload.wallet_address:
+            raise _reject("wallet_confirmation_mismatch", {
+                "message": "Type the wallet address again in confirm_wallet_address to change where coins are sent"})
+        p.wallet_address, p.blockchain_network = payload.wallet_address, network
     if payload.status == "active" and p.status == "paused":
         p.failure_count = 0
         p.last_error = None

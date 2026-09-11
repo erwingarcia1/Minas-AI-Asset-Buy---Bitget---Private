@@ -46,19 +46,39 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/Purchase created \(autobuy\)/);
   });
 
-  it("unticking 'Withdraw immediately' submits DCA mode and still requires the wallet address", async () => {
+  it("unticking 'Withdraw immediately' submits DCA mode without a wallet address", async () => {
     render(<PurchaseForm />);
     await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText(/Withdraw immediately/));
     expect(screen.getByText(/Accumulate on exchange \(DCA\)/)).toBeInTheDocument();
-    // No address yet: submit is blocked and the required hint appears after blur.
+    expect(screen.getByText(/optional/)).toBeInTheDocument();
+    // no address at all: allowed in accumulate mode
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
+    const body = vi.mocked(autoBuyAPI.create).mock.calls[0][0];
+    expect(body.purchase_type).toBe("dca");
+    expect(body.withdraw_immediately).toBe(false);
+    expect("wallet_address" in body).toBe(false);
+  });
+
+  it("a wallet given in accumulate mode must still be valid, and burn addresses are always rejected", async () => {
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" } });
+    expect(screen.getByText(/unspendable, burn or placeholder/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled();
+  });
+
+  it("withdraw mode requires a wallet address", async () => {
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
     expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
     fireEvent.blur(screen.getByLabelText(/Wallet address/));
     expect(screen.getByText(/A wallet address is required/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
-    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
-    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
-    expect(autoBuyAPI.create).toHaveBeenCalledWith(expect.objectContaining({ purchase_type: "dca", withdraw_immediately: false, wallet_address: BTC }));
   });
 
   it("warns and blocks when the exchange cannot withdraw to the network", async () => {

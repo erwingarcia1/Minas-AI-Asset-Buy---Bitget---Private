@@ -216,7 +216,8 @@ async def verify_key(
     await db.refresh(key)
     return KeyVerifyResponse(
         verified=outcome.verified, result=outcome.result, detail=outcome.detail,
-        withdrawal_permission_warning=bool(outcome.withdrawal_enabled),
+        # warn unless the venue confirmed the key cannot withdraw (None = unconfirmed/possible)
+        withdrawal_permission_warning=outcome.verified and outcome.withdrawal_enabled is not False,
         verification_status=key.verification_status, verification_error=key.verification_error,
         verified_at=key.verified_at, last_checked_at=key.last_checked_at,
         withdrawal_enabled=key.withdrawal_enabled, key=_to_response(key),

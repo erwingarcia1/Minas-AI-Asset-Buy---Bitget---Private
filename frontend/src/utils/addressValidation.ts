@@ -147,10 +147,26 @@ export function validateAddressForNetwork(address: string, network: Network, cha
   return true;
 }
 
+/** Known unspendable / burn / placeholder addresses (mirrors api/utils/address_denylist.py). Always rejected. */
+export const ADDRESS_DENYLIST = new Set([
+  "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "1111111111111111111114oLvT2", "1BitcoinEaterAddressDontSendf59kuE",
+  "1CounterpartyXXXXXXXXXXXXXXXUXCHtA",
+  "0x0000000000000000000000000000000000000000", "0x000000000000000000000000000000000000dead",
+  "0x0000000000000000000000000000000000000001", "0xffffffffffffffffffffffffffffffffffffffff",
+  "11111111111111111111111111111111", "1nc1nerator11111111111111111111111111111111",
+]);
+export const DENYLIST_REASON = "This is a known unspendable, burn or placeholder address; coins sent there are lost. Enter a wallet you control.";
+
+export function isDenylisted(address: string): boolean {
+  const a = address.trim();
+  return ADDRESS_DENYLIST.has(a) || (a.toLowerCase().startsWith("0x") && ADDRESS_DENYLIST.has(a.toLowerCase()));
+}
+
 /** Form helper: null while empty, otherwise a verdict with a human reason. */
 export function addressVerdict(address: string, crypto: string, network: Network): { ok: boolean; reason: string } | null {
   const a = address.trim();
   if (!a) return null;
+  if (isDenylisted(a)) return { ok: false, reason: DENYLIST_REASON };
   const chain = CRYPTO_CHAINS[crypto];
   const actual = detectChain(a);
   if (!actual) return { ok: false, reason: "Not a valid Bitcoin, Ethereum or Solana address" };

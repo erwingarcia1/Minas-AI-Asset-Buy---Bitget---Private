@@ -152,7 +152,8 @@ async def test_permissions_not_reported_still_verifies(db, user, binance_key, cl
     await db.commit()
     before = binance_key.updated_at
     body = (await verify(client, user, binance_key)).json()
-    assert body["verified"] is True and body["withdrawal_enabled"] is None and "not reported" in body["detail"]
+    assert body["verified"] is True and body["withdrawal_enabled"] is None and "does not report" in body["detail"]
+    assert body["withdrawal_permission_warning"] is True
     await assert_row(db, binance_key, verified=True, status="verified", withdrawal=None, before=before)
 
 
@@ -220,15 +221,15 @@ async def test_executor_refuses_unverified_key(db, user, binance_key):
 def test_bitget_authorities_interpretation():
     from api.services.binance_client import interpret_bitget_authorities as f
     # documented words
-    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True}
-    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True}
-    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True}
-    # the undocumented codes a live read + spot-trade key returns: trade recognised, withdrawal unknown
+    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": []}
+    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": []}
+    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True, "unconfirmed": []}
+    # the undocumented codes a live read + spot-trade key returns: trade recognised, withdrawal POSSIBLE (None)
     live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
-    assert live == {"can_trade": True, "can_withdraw": None, "permissions_known": True}
-    # nothing / only unknown codes: never a rejection
-    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False}
-    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False}
+    assert live == {"can_trade": True, "can_withdraw": None, "permissions_known": True, "unconfirmed": ["p2pw", "smow", "taxw", "wtow"]}
+    # nothing / only unknown codes: never a rejection, never "safe"
+    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": []}
+    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": ["zzz"]}
 
 
 async def test_bitget_live_shaped_authorities_verify_with_unknown_withdrawal(db, user, binance_key, client):
@@ -239,8 +240,9 @@ async def test_bitget_live_shaped_authorities_verify_with_unknown_withdrawal(db,
     before = binance_key.updated_at
     body = (await verify(client, user, binance_key)).json()
     assert body["verified"] is True and body["result"] == "ok"
-    assert "could not be determined" in body["detail"] and "stow" in body["detail"]
-    assert body["withdrawal_enabled"] is None and body["withdrawal_permission_warning"] is False
+    assert "treat this key as able to withdraw" in body["detail"] and "taxw" in body["detail"]
+    assert body["withdrawal_enabled"] is None and body["withdrawal_permission_warning"] is True, \
+        "unconfirmed codes are never reported as safe"
     await assert_row(db, binance_key, verified=True, status="verified", withdrawal=None, before=before)
 
 
@@ -249,4 +251,5 @@ async def test_unknown_codes_only_still_verify(db, user, binance_key, client):
     binance_key.exchange = "bitget"
     await db.commit()
     body = (await verify(client, user, binance_key)).json()
-    assert body["verified"] is True and "does not interpret (zzz)" in body["detail"]
+    assert body["verified"] is True and "cannot confirm (zzz)" in body["detail"]
+    assert body["withdrawal_permission_warning"] is True
