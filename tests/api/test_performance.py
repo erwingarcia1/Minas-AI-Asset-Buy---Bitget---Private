@@ -20,21 +20,25 @@ perf = pytest.mark.skipif(not os.getenv("RUN_PERF"), reason="set RUN_PERF=1 to r
 
 
 async def test_scheduler_query_uses_index(db):
-    plan = "\n".join(r[0] for r in (await db.execute(text(
-        "EXPLAIN SELECT * FROM recurring_purchases "
-        "WHERE enabled = true AND next_purchase_date <= now()"))).all())
-    # planner may still seq-scan a near-empty table; assert the index exists instead
+    """The due-purchase scan (status, next_execution) is backed by an index."""
     idx = (await db.execute(text(
-        "SELECT indexname FROM pg_indexes WHERE tablename='recurring_purchases'"))).scalars().all()
-    assert "ix_recurring_purchases_enabled_next" in idx, idx
+        "SELECT indexname FROM pg_indexes WHERE tablename='purchases'"))).scalars().all()
+    assert "ix_purchases_status_next_execution" in idx, idx
 
 
 async def test_transaction_indexes_exist(db):
     idx = set((await db.execute(text(
-        "SELECT indexname FROM pg_indexes WHERE tablename='transactions'"))).scalars().all())
-    assert {"ix_transactions_user_id_created_at", "ix_transactions_user_id_status",
-            "ix_transactions_executed_at",
-            "ix_transactions_binance_order_id"} <= idx, idx
+        "SELECT indexname FROM pg_indexes WHERE tablename='purchase_transactions'"))).scalars().all())
+    assert {"ix_purchase_transactions_purchase_created", "ix_purchase_transactions_status_created",
+            "uq_purchase_transactions_exchange_tx_id"} <= idx, idx
+
+
+async def test_legacy_tables_are_gone(db):
+    """Migration 014 dropped recurring_purchases and transactions."""
+    names = set((await db.execute(text(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"))).scalars().all())
+    assert not ({"recurring_purchases", "transactions"} & names)
+    assert {"purchases", "purchase_transactions", "wallets"} <= names
 
 
 @perf
