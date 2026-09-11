@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import RecurringPurchase, Transaction, User
+from api.models import Purchase, Transaction, User
 from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
 from fastapi import Request
 from api.services.rate_limit import limiter, user_or_ip_key
@@ -28,19 +28,25 @@ class CryptoHolding(BaseModel):
 
 
 class ActivePurchase(UTCModel):
+    """An active Auto-Buy purchase (either type). Field names are kept from the
+    original schedule shape so existing clients keep working: ``crypto`` is
+    the purchase's crypto_symbol, ``amount_usdt`` its amount_usd and
+    ``next_purchase_date`` its next_execution."""
     id: UUID
     crypto: str
     amount_usdt: float
     frequency: str
-    next_purchase_date: datetime
+    next_purchase_date: Optional[datetime] = None
+    purchase_type: str = "autobuy"   # autobuy (withdraw to wallet) | dca (accumulate on exchange)
 
 
-class UpcomingPurchase(UTCModel):
-    id: UUID
-    crypto: str
-    amount_usdt: float
-    frequency: str
-    next_purchase_date: datetime
+class UpcomingPurchase(ActivePurchase):
+    pass
+
+
+def _schedule_row(cls, p: Purchase):
+    return cls(id=p.id, crypto=p.crypto_symbol, amount_usdt=p.amount_usd, frequency=p.frequency,
+               next_purchase_date=p.next_execution, purchase_type=p.purchase_type)
 
 
 class DashboardResponse(BaseModel):
@@ -122,27 +128,25 @@ async def dashboard(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Main dashboard: holdings, active schedules, upcoming buys, monthly average."""
+    """Main dashboard: holdings, active Auto-Buy purchases (both ``autobuy``
+    and ``dca`` types), the ones due within 30 days, and the monthly average."""
     holdings = await _holdings(db, current_user.id)
 
     active = (
         await db.execute(
-            select(RecurringPurchase)
-            .where(
-                RecurringPurchase.user_id == current_user.id,
-                RecurringPurchase.enabled.is_(True),
-            )
-            .order_by(RecurringPurchase.next_purchase_date.asc())
+            select(Purchase)
+            .where(Purchase.user_id == current_user.id, Purchase.status == "active")
+            .order_by(Purchase.next_execution.asc().nulls_last())
         )
     ).scalars().all()
 
     horizon = to_db_datetime(utc_now() + timedelta(days=30))
-    upcoming = [p for p in active if p.next_purchase_date <= horizon]
+    upcoming = [p for p in active if p.next_execution is not None and p.next_execution <= horizon]
 
     return DashboardResponse(
         holdings=holdings,
-        active_purchases=[ActivePurchase.model_validate(p) for p in active],
-        upcoming_purchases=[UpcomingPurchase.model_validate(p) for p in upcoming],
+        active_purchases=[_schedule_row(ActivePurchase, p) for p in active],
+        upcoming_purchases=[_schedule_row(UpcomingPurchase, p) for p in upcoming],
         monthly_average_usdt=await _monthly_average(db, current_user.id),
     )
 
@@ -170,9 +174,9 @@ async def quick_stats(
     ).scalar_one()
     active_count = (
         await db.execute(
-            select(func.count(RecurringPurchase.id)).where(
-                RecurringPurchase.user_id == current_user.id,
-                RecurringPurchase.enabled.is_(True),
+            select(func.count(Purchase.id)).where(
+                Purchase.user_id == current_user.id,
+                Purchase.status == "active",
             )
         )
     ).scalar_one()

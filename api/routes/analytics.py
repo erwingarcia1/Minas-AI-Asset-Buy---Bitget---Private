@@ -16,7 +16,9 @@ import api.services.market_data as market_mod
 
 router = APIRouter()
 
-BUYS_PER_MONTH = {"daily": 30.44, "weekly": 4.35, "biweekly": 2.17, "monthly": 1.0}
+BUYS_PER_MONTH = {"daily": 30.44, "weekly": 4.35, "biweekly": 2.17, "monthly": 1.0, "one_time": 0.0}
+ESTIMATES_NOTE = ("Estimates only, not financial advice; past performance doesn't guarantee "
+                  "future results.")
 
 
 class HoldingPerformance(BaseModel):
@@ -128,12 +130,14 @@ class RecurringProjection(BaseModel):
     frequency: str
     amount_usdt: float
     monthly_usdt: float
+    purchase_type: str = "autobuy"   # autobuy | dca
 
 
 class RecurringResponse(BaseModel):
     schedules: List[RecurringProjection]
     expected_monthly_usdt: float
     projected_annual_usdt: float
+    note: str = ESTIMATES_NOTE
 
 
 @router.get("/recurring", response_model=RecurringResponse)
@@ -141,15 +145,19 @@ async def recurring(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Spend projections from the enabled schedules."""
-    schedules = (await db.execute(
-        select(RecurringPurchase).where(
-            RecurringPurchase.user_id == current_user.id,
-            RecurringPurchase.enabled.is_(True)))).scalars().all()
+    """Spend projection from the user's active Auto-Buy purchases (both
+    ``autobuy`` and ``dca`` types). One-time purchases contribute nothing to
+    the recurring monthly figure. Estimates only."""
+    from api.models import Purchase
+    purchases = (await db.execute(
+        select(Purchase).where(
+            Purchase.user_id == current_user.id,
+            Purchase.status == "active"))).scalars().all()
     rows = [RecurringProjection(
-        crypto=p.crypto, frequency=p.frequency, amount_usdt=p.amount_usdt,
-        monthly_usdt=round(p.amount_usdt * BUYS_PER_MONTH[p.frequency], 2))
-        for p in schedules]
+        crypto=p.crypto_symbol, frequency=p.frequency, amount_usdt=p.amount_usd,
+        monthly_usdt=round(p.amount_usd * BUYS_PER_MONTH.get(p.frequency, 0.0), 2),
+        purchase_type=p.purchase_type)
+        for p in purchases]
     monthly = round(sum(r.monthly_usdt for r in rows), 2)
     return RecurringResponse(schedules=rows, expected_monthly_usdt=monthly,
                              projected_annual_usdt=round(monthly * 12, 2))
@@ -173,7 +181,13 @@ async def volatility(
 ):
     """30-day daily-return volatility per held/scheduled coin, with a DCA-cadence
     suggestion: higher volatility rewards smaller, more frequent buys."""
+    from api.models import Purchase
     cryptos = {c for c, _, _ in await _holdings(db, current_user.id)}
+    # scheduled coins: active Auto-Buy purchases (both types) plus any legacy schedules still enabled
+    cryptos |= {p.crypto_symbol for p in (await db.execute(
+        select(Purchase).where(
+            Purchase.user_id == current_user.id,
+            Purchase.status == "active"))).scalars().all()}
     cryptos |= {p.crypto for p in (await db.execute(
         select(RecurringPurchase).where(
             RecurringPurchase.user_id == current_user.id,

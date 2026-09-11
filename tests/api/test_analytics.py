@@ -3,7 +3,7 @@ import pytest
 
 import api.routes.analytics as an_mod
 import api.services.market_data as md_mod
-from api.models import RecurringPurchase, Transaction, utcnow
+from api.models import Purchase, RecurringPurchase, Transaction, utcnow
 from tests.api.conftest import auth_headers
 
 PRICES = {"BTC": 60000.0, "ETH": 2500.0}
@@ -37,13 +37,22 @@ async def seeded(db, user):
                     cost_usdt=300.0, status="completed"),
         Transaction(user_id=user.id, crypto="SOL", amount_crypto=5,
                     cost_usdt=400.0, status="failed"),  # must not count
-        RecurringPurchase(user_id=user.id, crypto="BTC", amount_usdt=100,
-                          frequency="weekly", next_purchase_date=utcnow()),
-        RecurringPurchase(user_id=user.id, crypto="ETH", amount_usdt=50,
+        # Auto-Buy purchases drive the spend projection (both types)
+        Purchase(user_id=user.id, crypto_symbol="BTC", amount_usd=100, frequency="weekly",
+                 purchase_type="autobuy", wallet_address="bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+                 blockchain_network="mainnet", next_execution=utcnow()),
+        Purchase(user_id=user.id, crypto_symbol="ETH", amount_usd=50, frequency="daily",
+                 purchase_type="dca", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
+                 blockchain_network="mainnet", next_execution=utcnow()),
+        Purchase(user_id=user.id, crypto_symbol="DOGE", amount_usd=25, frequency="monthly",
+                 purchase_type="dca", status="paused", wallet_address="DOGEwallet000000000000000000000000",
+                 blockchain_network="mainnet", next_execution=utcnow()),  # paused: excluded
+        Purchase(user_id=user.id, crypto_symbol="SOL", amount_usd=500, frequency="one_time",
+                 purchase_type="autobuy", wallet_address="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+                 blockchain_network="mainnet", next_execution=utcnow()),  # one-time: 0 / month
+        # legacy schedule: no longer part of the projection
+        RecurringPurchase(user_id=user.id, crypto="XRP", amount_usdt=999,
                           frequency="daily", next_purchase_date=utcnow()),
-        RecurringPurchase(user_id=user.id, crypto="DOGE", amount_usdt=25,
-                          frequency="monthly", enabled=False,
-                          next_purchase_date=utcnow()),  # disabled: excluded
     ])
     await db.commit()
     return user
@@ -98,9 +107,13 @@ async def test_comparison_and_diversification(seeded, market):
 async def test_recurring_projection(seeded, market):
     async with client() as c:
         r = (await c.get("/api/analytics/recurring", headers=auth_headers(seeded))).json()
-    assert {s["crypto"] for s in r["schedules"]} == {"BTC", "ETH"}  # disabled excluded
+    assert {s["crypto"] for s in r["schedules"]} == {"BTC", "ETH", "SOL"}  # paused excluded, legacy XRP ignored
+    assert {s["purchase_type"] for s in r["schedules"]} == {"autobuy", "dca"}
+    by = {s["crypto"]: s for s in r["schedules"]}
+    assert by["SOL"]["monthly_usdt"] == 0.0, "one-time purchases add nothing to the recurring projection"
     assert r["expected_monthly_usdt"] == pytest.approx(100 * 4.35 + 50 * 30.44, abs=0.1)
     assert r["projected_annual_usdt"] == pytest.approx(r["expected_monthly_usdt"] * 12, abs=0.1)
+    assert r["note"].startswith("Estimates only, not financial advice")
 
 
 async def test_volatility_recommendations(seeded, market):

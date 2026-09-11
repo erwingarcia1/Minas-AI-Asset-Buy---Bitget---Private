@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from api.config import enforce_production_secrets, settings
@@ -108,9 +108,26 @@ app.add_middleware(
 # Health check endpoint
 @app.get("/health")
 @limiter.exempt
-async def health_check():
-    """Health check endpoint for monitoring."""
+async def health_check(request: Request):
+    """Health check endpoint for monitoring.
+
+    ``scheduler`` is the legacy recurring tick as seen by this worker (kept
+    for existing monitors). ``schedulers`` reports both schedulers from the
+    Redis heartbeats, so the values are the same whichever worker answers:
+    the admin pause switch, and per scheduler running/paused, last run time,
+    last result (``ok`` | ``failed`` | ``error`` | ``skipped_paused``) and the
+    consecutive-failure count.
+    """
+    from api.services import scheduler_state
     from api.services.recurring_scheduler import scheduler
+    from api.tasks.purchase_scheduler import INTERVAL_MINUTES
+    try:
+        pause = await scheduler_state.pause_info()
+    except scheduler_state.PauseStateUnavailable:
+        pause = {"paused": None, "since": None, "by": None}
+    recurring = await scheduler_state.status("recurring")
+    autobuy = await scheduler_state.status("autobuy")
+    autobuy_sched = getattr(request.app.state, "autobuy_scheduler", None)
     return {
         "status": "healthy",
         "environment": settings.api_env,
@@ -119,6 +136,33 @@ async def health_check():
             "running": scheduler.running,
             "dry_run": scheduler.dry_run,
             "last_tick_at": scheduler.last_tick_at.isoformat() if scheduler.last_tick_at else None,
+        },
+        "schedulers": {
+            "paused": pause["paused"],           # None = Redis unreadable (both fail closed)
+            "paused_since": pause["since"],
+            "paused_by": pause["by"],
+            "recurring": {
+                "running": scheduler.running,
+                "paused": pause["paused"],
+                "dry_run": scheduler.dry_run,
+                "poll_seconds": scheduler.poll_seconds,
+                "last_run_at": recurring["last_run_at"]
+                    or (scheduler.last_tick_at.isoformat() if scheduler.last_tick_at else None),
+                "last_result": recurring["last_result"],
+                "last_detail": recurring["last_detail"],
+                "consecutive_failures": recurring["consecutive_failures"],
+            },
+            "autobuy": {
+                "running": bool(autobuy_sched is not None and autobuy_sched.running),
+                "paused": pause["paused"],
+                "dry_run": settings.autobuy_dry_run,
+                "interval_minutes": INTERVAL_MINUTES,
+                "last_run_at": autobuy["last_run_at"],
+                "last_result": autobuy["last_result"],
+                "last_detail": autobuy["last_detail"],
+                "last_counts": autobuy["last_counts"],
+                "consecutive_failures": autobuy["consecutive_failures"],
+            },
         },
     }
 

@@ -270,44 +270,123 @@ class AlertItem(BaseModel):
     detail: str
 
 
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _severity_for_failures(fails: Optional[int]) -> str:
+    if fails is None:
+        return "warning"
+    return "critical" if fails >= 5 else "warning" if fails >= 2 else "ok"
+
+
 @router.get("/alerts", response_model=List[AlertItem])
 async def alerts(admin: User = Depends(require_admin),
                  db: AsyncSession = Depends(get_db)):
-    """Live evaluation of the docs/ALERTING.md conditions the app can see."""
+    """Live evaluation of the docs/ALERTING.md conditions the app can see,
+    for BOTH schedulers: the legacy recurring tick (``scheduler_*``) and the
+    Auto-Buy execute_purchases job (``autobuy_*``). Heartbeats come from Redis,
+    so they describe whichever worker actually ran, not the one answering."""
+    from api.models import PurchaseTransaction
+    from api.services import scheduler_state
     from api.services.metrics import (
         active_purchases_total, scheduler_consecutive_failures)
     from api.services.recurring_scheduler import scheduler
+    from api.tasks.purchase_scheduler import INTERVAL_MINUTES, MISFIRE_GRACE_SECONDS
 
+    now = datetime.now(timezone.utc)
     items = []
-    fails = int(scheduler_consecutive_failures._value.get())
+
+    # -- pause switch (both schedulers) --
+    try:
+        pause = await scheduler_state.pause_info()
+        items.append(AlertItem(
+            name="schedulers_paused",
+            severity="warning" if pause["paused"] else "ok",
+            value="paused" if pause["paused"] else "running",
+            detail=("Admin pause switch for both schedulers"
+                    + (f"; paused by {pause['by']} since {pause['since']}" if pause["paused"] else ""))))
+    except scheduler_state.PauseStateUnavailable:
+        pause = {"paused": None}
+        items.append(AlertItem(
+            name="schedulers_paused", severity="critical", value="unknown",
+            detail="Redis unreadable: both schedulers fail closed and skip every run until it is back"))
+
+    # -- legacy recurring scheduler --
+    rec = await scheduler_state.status("recurring")
+    fails = rec["consecutive_failures"]
+    if fails is None:
+        fails = int(scheduler_consecutive_failures._value.get())
     items.append(AlertItem(
         name="scheduler_consecutive_failures",
-        severity="critical" if fails >= 5 else "warning" if fails >= 2 else "ok",
+        severity=_severity_for_failures(fails),
         value=str(fails),
-        detail="Consecutive failed purchase executions (critical at 5)"))
+        detail="Legacy recurring scheduler: consecutive failed purchase executions (critical at 5)"))
 
-    last = scheduler.last_tick_at
-    stalled = (last is None or
-               datetime.now(timezone.utc) - last > timedelta(minutes=5))
+    last = _parse_iso(rec["last_run_at"]) or scheduler.last_tick_at
+    stalled = (last is None or now - last > timedelta(minutes=5))
     items.append(AlertItem(
         name="scheduler_tick",
         severity=("critical" if scheduler.running and stalled and last is not None
-                  else "warning" if not scheduler.running else "ok"),
+                  else "warning" if not scheduler.running or last is None else "ok"),
         value=last.isoformat() if last else "never",
-        detail="Last scheduler tick (critical if silent >5m while running)"))
+        detail=("Legacy recurring scheduler: last tick (critical if silent >5m while running)"
+                + (f"; last result {rec['last_result']}" if rec["last_result"] else ""))))
 
-    active = int(active_purchases_total._value.get())
-    day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+    # -- Auto-Buy execute_purchases job --
+    ab = await scheduler_state.status("autobuy")
+    ab_fails = ab["consecutive_failures"]
+    items.append(AlertItem(
+        name="autobuy_consecutive_failures",
+        severity=_severity_for_failures(ab_fails),
+        value="unknown" if ab_fails is None else str(ab_fails),
+        detail="Auto-Buy job: consecutive runs that raised or failed every due purchase (critical at 5)"))
+
+    overdue_after = timedelta(minutes=INTERVAL_MINUTES * 2, seconds=MISFIRE_GRACE_SECONDS)
+    ab_last = _parse_iso(ab["last_run_at"])
+    if ab_last is None:
+        ab_sev = "warning"
+    elif now - ab_last > overdue_after:
+        ab_sev = "critical"
+    elif ab["last_result"] in ("error", "failed"):
+        ab_sev = "warning"
+    else:
+        ab_sev = "ok"
+    items.append(AlertItem(
+        name="autobuy_run",
+        severity=ab_sev,
+        value=ab["last_run_at"] or "never",
+        detail=(f"Auto-Buy job: last execute_purchases run (every {INTERVAL_MINUTES} min; "
+                f"critical if silent >{int(overdue_after.total_seconds() // 60)} min)"
+                + (f"; last result {ab['last_result']}" if ab["last_result"] else "")
+                + (f" {ab['last_counts']}" if ab["last_counts"] else ""))))
+
+    # -- execution failures in the last 24h, both systems --
+    day_ago = now - timedelta(days=1)
     failed_24h = (await db.execute(select(func.count(Transaction.id)).where(
         Transaction.status == "failed",
         Transaction.created_at >= day_ago))).scalar_one()
     items.append(AlertItem(
         name="failed_transactions_24h",
         severity="warning" if failed_24h > 10 else "ok",
-        value=str(failed_24h), detail="Failed executions in the last 24h"))
+        value=str(failed_24h), detail="Legacy recurring scheduler: failed executions in the last 24h"))
+    ab_failed_24h = (await db.execute(select(func.count(PurchaseTransaction.id)).where(
+        PurchaseTransaction.status == "failed",
+        PurchaseTransaction.created_at >= day_ago))).scalar_one()
+    items.append(AlertItem(
+        name="autobuy_failed_transactions_24h",
+        severity="warning" if ab_failed_24h > 10 else "ok",
+        value=str(ab_failed_24h), detail="Auto-Buy job: failed execution attempts in the last 24h"))
+
+    active = int(active_purchases_total._value.get())
     items.append(AlertItem(
         name="active_purchases", severity="ok", value=str(active),
-        detail="Enabled schedules at last tick"))
+        detail="Legacy recurring scheduler: enabled schedules at last tick"))
     return items
 
 
@@ -315,16 +394,19 @@ async def alerts(admin: User = Depends(require_admin),
 
 @router.post("/scheduler/pause", status_code=204)
 async def pause_scheduler(admin: User = Depends(require_admin)):
-    """Emergency stop: no purchases execute until resumed (or restart)."""
-    from api.services.recurring_scheduler import scheduler
-    scheduler.stop()
-    audit(admin, "scheduler_paused")
+    """Emergency stop for BOTH schedulers (legacy recurring tick and the
+    Auto-Buy execute_purchases job) in every worker. Sets a switch in Redis
+    that each run checks first; it survives API restarts until resumed.
+    While paused, runs log that they were skipped and report
+    ``skipped_paused`` in /health."""
+    from api.services import scheduler_state
+    info = await scheduler_state.pause(str(admin.id))
+    audit(admin, "schedulers_paused", since=info["since"])
 
 
 @router.post("/scheduler/resume", status_code=204)
 async def resume_scheduler(admin: User = Depends(require_admin)):
-    """Restart the paused scheduler."""
-    from api.services.recurring_scheduler import scheduler
-    if not scheduler.running:
-        scheduler.start()
-    audit(admin, "scheduler_resumed")
+    """Clear the pause switch; both schedulers execute again from their next run."""
+    from api.services import scheduler_state
+    await scheduler_state.resume()
+    audit(admin, "schedulers_resumed")

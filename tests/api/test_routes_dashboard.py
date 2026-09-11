@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 
-from api.models import RecurringPurchase, Transaction, utcnow
+from api.models import Purchase, RecurringPurchase, Transaction, utcnow
 from tests.api.conftest import auth_headers
 
 
@@ -17,13 +17,19 @@ async def rich_user(db, user):
                     cost_usdt=50.0, status="completed"),
         Transaction(user_id=user.id, crypto="SOL", amount_crypto=1.0,
                     cost_usdt=999.0, status="failed"),
-        RecurringPurchase(user_id=user.id, crypto="ETH", amount_usdt=50,
-                          frequency="weekly", next_purchase_date=utcnow() + timedelta(days=3)),
-        RecurringPurchase(user_id=user.id, crypto="SOL", amount_usdt=25,
-                          frequency="monthly", enabled=False,
-                          next_purchase_date=utcnow() + timedelta(days=3)),
-        RecurringPurchase(user_id=user.id, crypto="DOGE", amount_usdt=15,
-                          frequency="monthly", next_purchase_date=utcnow() + timedelta(days=60)),
+        # Auto-Buy purchases (the dashboard's source of schedules): both types count
+        Purchase(user_id=user.id, crypto_symbol="ETH", amount_usd=50, frequency="weekly",
+                 purchase_type="autobuy", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
+                 blockchain_network="mainnet", next_execution=utcnow() + timedelta(days=3)),
+        Purchase(user_id=user.id, crypto_symbol="SOL", amount_usd=25, frequency="monthly",
+                 purchase_type="dca", status="paused", wallet_address="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+                 blockchain_network="mainnet", next_execution=utcnow() + timedelta(days=3)),
+        Purchase(user_id=user.id, crypto_symbol="DOGE", amount_usd=15, frequency="monthly",
+                 purchase_type="dca", wallet_address="DOGEwallet000000000000000000000000",
+                 blockchain_network="mainnet", next_execution=utcnow() + timedelta(days=60)),
+        # legacy schedule: must no longer surface on the dashboard
+        RecurringPurchase(user_id=user.id, crypto="LTC", amount_usdt=40,
+                          frequency="weekly", next_purchase_date=utcnow() + timedelta(days=1)),
     ])
     await db.commit()
     return user
@@ -44,8 +50,12 @@ async def test_active_vs_upcoming(client, rich_user):
         d = (await c.get("/api/dashboard/", headers=auth_headers(rich_user))).json()
     active = {p["crypto"] for p in d["active_purchases"]}
     upcoming = {p["crypto"] for p in d["upcoming_purchases"]}
-    assert active == {"ETH", "DOGE"}, "disabled schedules are not active"
-    assert upcoming == {"ETH"}, "only schedules due within 30 days are upcoming"
+    assert active == {"ETH", "DOGE"}, "paused purchases are not active; both autobuy and dca count"
+    assert upcoming == {"ETH"}, "only purchases due within 30 days are upcoming"
+    assert "LTC" not in active, "legacy recurring_purchases rows are ignored"
+    types = {p["crypto"]: p["purchase_type"] for p in d["active_purchases"]}
+    assert types == {"ETH": "autobuy", "DOGE": "dca"}
+    assert {p["amount_usdt"] for p in d["active_purchases"]} == {50.0, 15.0}
 
 
 async def test_quick_stats(client, rich_user):
@@ -53,7 +63,7 @@ async def test_quick_stats(client, rich_user):
         qs = (await c.get("/api/dashboard/stats", headers=auth_headers(rich_user))).json()
     assert qs["total_invested_usdt"] == 350.0
     assert qs["transaction_count"] == 4
-    assert qs["active_purchases"] == 2
+    assert qs["active_purchases"] == 2, "active Auto-Buy purchases, not legacy schedules"
     assert qs["kyc_status"] == "verified"
 
 

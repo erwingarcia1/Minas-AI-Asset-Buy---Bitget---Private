@@ -64,8 +64,8 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 | exchange (`/api/exchange`) | `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` |
 | purchases (`/api/purchases`) | `POST/GET /` · `GET/PUT/DELETE /{id}` · `PATCH /{id}/toggle` |
 | transactions (`/api/transactions`) | `GET /` (paginated ≤100) · `/{id}` · `/stats/summary` · `/crypto/{c}` · `/status/{s}` |
-| dashboard (`/api/dashboard`) | `GET /` · `/stats` · `/analytics/timeline?days=N` |
-| service | `GET /health` · `GET /metrics` (Prometheus; keep private) |
+| dashboard (`/api/dashboard`) | `GET /` (active/upcoming = the user's active Auto-Buy purchases, both types) · `/stats` · `/analytics/timeline?days=N` |
+| service | `GET /health` (`schedulers`: pause switch + per-scheduler running/paused, last run, last result, consecutive failures for both the legacy recurring tick and the Auto-Buy job) · `GET /metrics` (Prometheus; keep private) |
 
 Full request/response schemas with examples live in `/docs`.
 

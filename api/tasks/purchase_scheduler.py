@@ -203,6 +203,22 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
     started = time.perf_counter()
     logger.info("auto-buy run started (pid=%s now=%s dry_run=%s)", os.getpid(), now.isoformat(), dry_run)
 
+    # Admin pause switch (Redis, shared by every worker, survives restarts).
+    # Fails closed: no readable switch -> no run.
+    from api.services import scheduler_state
+    try:
+        pause = await scheduler_state.pause_info()
+    except scheduler_state.PauseStateUnavailable as exc:
+        logger.error("auto-buy run skipped: cannot read the pause switch from Redis (%s); "
+                     "failing closed (pid=%s)", exc, os.getpid())
+        return counts
+    if pause["paused"]:
+        logger.warning("auto-buy run skipped: schedulers PAUSED by admin %s since %s (pid=%s)",
+                       pause["by"], pause["since"], os.getpid())
+        await scheduler_state.record_run("autobuy", "skipped_paused",
+                                         detail=f"paused by {pause['by']} since {pause['since']}")
+        return counts
+
     # The advisory lock lives on its own connection so that the session's
     # per-purchase commits cannot release it part-way through the run.
     async with db.bind.connect() as lock_conn:
@@ -234,6 +250,11 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
             await lock_conn.commit()
     logger.info("auto-buy run finished in %.0f ms: %s (pid=%s)",
                 (time.perf_counter() - started) * 1000, counts, os.getpid())
+    # Heartbeat for /health and the admin alerts (only the worker that held
+    # the lock reports; a run with failures and no success counts as failed).
+    ok = not (counts["failed"] and not counts["executed"])
+    await scheduler_state.record_run("autobuy", "ok" if ok else "failed", counts=counts)
+    await scheduler_state.bump_failures("autobuy", ok)
     return counts
 
 
@@ -251,8 +272,11 @@ def execute_purchases() -> dict:
     logger.info("execute_purchases called by APScheduler (pid=%s)", os.getpid())
     try:
         return asyncio.run(_run_once())
-    except Exception:
+    except Exception as exc:
         logger.exception("auto-buy scheduler run failed")
+        from api.services import scheduler_state
+        scheduler_state.record_run_sync("autobuy", "error", detail=repr(exc))
+        scheduler_state.bump_failures_sync("autobuy", ok=False)
         return {"executed": 0, "failed": 0, "skipped": 0}
 
 

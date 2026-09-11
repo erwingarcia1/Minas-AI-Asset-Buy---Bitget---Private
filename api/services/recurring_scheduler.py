@@ -90,6 +90,19 @@ class RecurringScheduler:
     async def tick(self) -> int:
         """Execute every due purchase once. Returns how many were processed."""
         self.last_tick_at = datetime.now(timezone.utc)
+        # Admin pause switch shared with the Auto-Buy job (Redis, all workers,
+        # survives restarts). Fails closed when Redis cannot be read.
+        from api.services import scheduler_state
+        try:
+            pause = await scheduler_state.pause_info()
+        except scheduler_state.PauseStateUnavailable as exc:
+            logger.error("tick skipped: cannot read the pause switch from Redis (%s); failing closed", exc)
+            return 0
+        if pause["paused"]:
+            logger.warning("tick skipped: schedulers PAUSED by admin %s since %s", pause["by"], pause["since"])
+            await scheduler_state.record_run("recurring", "skipped_paused",
+                                             detail=f"paused by {pause['by']} since {pause['since']}")
+            return 0
         # Hold the advisory lock on a dedicated connection for the whole tick so
         # two replicas can never process the same due purchases.
         async with engine.connect() as lock_conn:
@@ -100,11 +113,17 @@ class RecurringScheduler:
                 logger.info("tick skipped: another instance holds the lock")
                 return 0
             try:
-                return await self._process_due()
+                processed = await self._process_due()
+            except Exception as exc:
+                await scheduler_state.record_run("recurring", "error", detail=repr(exc))
+                raise
             finally:
                 await lock_conn.execute(
                     text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
                 await lock_conn.commit()
+        await scheduler_state.record_run("recurring", "ok", counts={"processed": processed})
+        await scheduler_state.set_failures("recurring", self.consecutive_failures)
+        return processed
 
     async def _next_due(self, purchase, now: datetime) -> datetime:
         """Frequency advancement, halved in high volatility for adaptive DCA
