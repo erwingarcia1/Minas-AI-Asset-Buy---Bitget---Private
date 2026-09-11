@@ -88,7 +88,7 @@ export interface Transaction {
   purchase_id: string;
   crypto: string;
   purchase_type: PurchaseType;
-  tx_type: "withdrawal" | "accumulation";
+  tx_type: "buy" | "withdrawal" | "accumulation";
   amount_crypto: number;
   cost_usdt: number;
   exchange_rate: number | null;
@@ -191,7 +191,7 @@ export interface ApiErrorBody {
 
 // ---- Auto-Buy purchases delivered to a wallet (/api/v2/purchases, /api/wallets)
 export type AutoBuyFrequency = "one_time" | "daily" | "weekly" | "monthly";
-export type AutoBuyStatus = "active" | "paused" | "completed" | "failed" | "cancelled";
+export type AutoBuyStatus = "active" | "paused" | "completed" | "failed" | "cancelled" | "needs_review" | "withdrawal_failed" | "needs_info";
 export type PurchaseType = "autobuy" | "dca";   // autobuy: buy + withdraw to wallet; dca: buy + accumulate on exchange
 export type BlockchainNetwork = "mainnet" | "testnet";
 
@@ -199,8 +199,8 @@ export interface AutoBuyTransaction {
   id: string;
   purchase_id: string;
   exchange_tx_id: string | null;
-  tx_type?: "withdrawal" | "accumulation";
-  status: "pending" | "success" | "failed";
+  tx_type?: "buy" | "withdrawal" | "accumulation";
+  status: "pending" | "success" | "failed" | "needs_review" | "needs_info";
   amount_executed: number | null;
   fee: number | null;
   error_message: string | null;

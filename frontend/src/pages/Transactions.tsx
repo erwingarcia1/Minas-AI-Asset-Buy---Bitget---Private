@@ -47,7 +47,7 @@ export default function Transactions() {
                     <td className="px-4 py-2">{fmtUsdt(t.cost_usdt)}</td>
                     <td className="px-4 py-2">{t.exchange_rate ? fmtUsdt(t.exchange_rate) : "—"}</td>
                     <td className="px-4 py-2 text-xs">
-                      {t.tx_type === "withdrawal" ? <>Sent to <span className="font-mono" title={t.wallet_address ?? ""}>{(t.wallet_address ?? "").slice(0, 10)}…</span> ({t.blockchain_network})</> : "Held on exchange"}
+                      {t.tx_type === "withdrawal" ? <>Sent to <span className="font-mono" title={t.wallet_address ?? ""}>{(t.wallet_address ?? "").slice(0, 10)}…</span> ({t.blockchain_network})</> : t.tx_type === "buy" ? "Bought on exchange" : "Held on exchange"}
                       <div className="text-slate-400">{t.exchange ?? "—"}{t.order_id ? ` · order ${t.order_id}` : ""}{t.tx_hash ? ` · tx ${t.tx_hash.slice(0, 10)}…` : ""}</div>
                     </td>
                     <td className="px-4 py-2"><StatusBadge status={t.status} />{t.error_message && <p className="mt-1 text-xs text-red-600">{t.error_message}</p>}</td>

@@ -21,8 +21,9 @@ async def history(db, user, binance_key):
     eth = await make_autobuy_purchase(db, user, crypto="ETH", amount_usd=250.0, purchase_type="dca", key=binance_key)
     sol = await make_autobuy_purchase(db, user, crypto="SOL", amount_usd=990.0, key=binance_key)
     await make_history(db, user, purchase=btc, amount_crypto=0.002, cost_usd=100.0, fill_price=50000.0,
-                       created_at=when, order_id="ORD-BTC-1", withdrawal_id="WD-1", withdrawal_fee=0.00005,
-                       withdrawal_fee_currency="BTC", tx_hash="0xbtc1", fee=0.1, fee_currency="USDT")
+                       created_at=when, order_id="ORD-BTC-1", fee=0.1, fee_currency="USDT",
+                       with_withdrawal=True, withdrawal_id="WD-1", withdrawal_fee=0.00005,
+                       withdrawal_fee_currency="BTC", tx_hash="0xbtc1", withdrawal_chain="BTC")
     await make_history(db, user, purchase=btc, amount_crypto=0.001, cost_usd=60.0, fill_price=60000.0,
                        created_at=when + timedelta(days=1), order_id="ORD-BTC-2")
     await make_history(db, user, purchase=eth, amount_crypto=0.1, cost_usd=250.0, fill_price=2500.0,
@@ -69,10 +70,10 @@ async def test_tax_csv_export(db, history):
     assert cells[0].startswith(f"{year}-03-15 10:30:00") and cells[1] == "BTC" and cells[2] == "0.00200000"
     assert cells[3] == "50000.00" and cells[4] == "100.00" and cells[5] == "0.10000000" and cells[6] == "USDT"
     assert cells[7] == "binance" and cells[9] == "autobuy" and cells[10] == "withdrawal"
-    assert cells[11] == "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq" and cells[12] == "mainnet"
+    assert cells[11] == "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq" and cells[12] == "BTC"
     assert cells[13] == "0.00005000" and cells[14] == "BTC" and cells[15] == "0xbtc1" and cells[16] == "FIFO"
     eth = next(l for l in lines if "ORD-ETH-1" in l).split(",")
-    assert eth[10] == "accumulation" and eth[11] == "" and eth[12] == "", "held on exchange: no withdrawal columns"
+    assert eth[10] == "buy" and eth[11] == "" and eth[12] == "", "held on exchange: no withdrawal columns"
 
 
 async def test_pdf_export(db, history):

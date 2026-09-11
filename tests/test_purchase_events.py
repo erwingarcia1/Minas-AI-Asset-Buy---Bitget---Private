@@ -12,30 +12,7 @@ from tests.conftest_autobuy import binance_key, client, db, make_key, make_purch
 from tests.test_purchase_scheduler import NOW
 
 
-class RichGateway:
-    """What ExchangeClientGateway returns after a buy (+ withdrawal for autobuy)."""
-
-    def __init__(self, fail_withdrawal=False):
-        self.fail_withdrawal = fail_withdrawal
-        self.n = 0   # ids are ORD-1/WD-1 for the first fill, ORD-2/WD-2 for the next... (exchange_tx_id is unique)
-
-    def execute(self, account, purchase, dry_run):
-        self.n += 1
-        oid, wid = f"ORD-{self.n}", f"WD-{self.n}"
-        fill = {"order_id": oid, "amount_executed": purchase.amount_usd / 50_000, "fill_price": 50_000.0,
-                "cost_usd": purchase.amount_usd, "fee": None, "fee_currency": None}
-        if purchase.purchase_type == "dca":
-            return {**fill, "exchange_tx_id": oid, "tx_type": "accumulation", "withdrawal_id": None,
-                    "withdrawal_fee": None, "withdrawal_fee_currency": None, "tx_hash": None}
-        if self.fail_withdrawal:
-            raise ps.ExecutionError("WITHDRAW_UNSUPPORTED: exchange said no", stage="withdraw", fill=fill)
-        return {**fill, "exchange_tx_id": wid, "tx_type": "withdrawal", "withdrawal_id": wid,
-                "withdrawal_fee": 0.0001, "withdrawal_fee_currency": "BTC", "tx_hash": "0xhash"}
-
-
-class BuyFails:
-    def execute(self, account, purchase, dry_run):
-        raise ps.ExecutionError("MIN_NOTIONAL: too small")
+from tests.fake_gateway import BuyFails, FakeGateway, RichGateway  # noqa: F401
 
 
 @pytest.fixture
@@ -52,12 +29,15 @@ def captured(monkeypatch):
 async def test_autobuy_success_records_fill_and_emits_buy_then_withdrawal(db, user, binance_key, captured):
     p = await make_purchase(db, user, binance_key, amount_usd=100, next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=RichGateway(), dry_run=True)
-    tx = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id))).scalar_one()
-    assert tx.status == "success" and tx.order_id == "ORD-1" and tx.fill_price == 50_000.0 and tx.cost_usd == 100
-    assert tx.withdrawal_id == "WD-1" and tx.withdrawal_fee == 0.0001 and tx.withdrawal_fee_currency == "BTC"
-    assert tx.tx_hash == "0xhash" and tx.tx_type == "withdrawal"
+    rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id)
+                             .order_by(PurchaseTransaction.created_at))).scalars().all()
+    buy, wd = rows
+    assert buy.status == "success" and buy.order_id == "ORD-1" and buy.fill_price == 50_000.0 and buy.cost_usd == 100
+    assert wd.tx_type == "withdrawal" and wd.withdrawal_id == "WD-1" and wd.withdrawal_fee == 0.0001
+    assert wd.withdrawal_fee_currency == "BTC" and wd.parent_transaction_id == buy.id
     assert [e.type for e in captured] == ["buy_executed", "withdrawal_sent"]
-    assert captured[0].exchange == "binance" and captured[0].dry_run is True and captured[0].tx.id == tx.id
+    assert captured[0].tx.id == buy.id and captured[1].tx.id == wd.id
+    assert captured[0].exchange == "binance" and captured[0].dry_run is True
     payload = captured[1].payload()
     assert payload["wallet_address"] == p.wallet_address and payload["withdrawal_id"] == "WD-1"
 
@@ -66,19 +46,25 @@ async def test_dca_success_emits_buy_only(db, user, binance_key, captured):
     p = await make_purchase(db, user, binance_key, purchase_type="dca", next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=RichGateway(), dry_run=True)
     assert [e.type for e in captured] == ["buy_executed"]
-    assert captured[0].payload()["tx_type"] == "accumulation" and captured[0].payload()["wallet_address"] is None
+    assert captured[0].payload()["tx_type"] == "buy" and captured[0].payload()["wallet_address"] is None
 
 
-async def test_withdrawal_failure_keeps_fill_and_emits_withdrawal_failed(db, user, binance_key, captured):
+async def test_withdrawal_failure_keeps_fill_parks_purchase_and_never_rebuys(db, user, binance_key, captured):
     p = await make_purchase(db, user, binance_key, amount_usd=100, next_execution=NOW)
-    await ps.execute_due_purchases(db, now=NOW, gateway=RichGateway(fail_withdrawal=True), dry_run=True)
-    tx = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id))).scalar_one()
-    assert tx.status == "failed" and "exchange said no" in tx.error_message
-    assert tx.order_id == "ORD-1" and tx.amount_executed == pytest.approx(0.002), "the buy that filled is recorded"
+    gw = RichGateway(fail_withdrawal=True)
+    await ps.execute_due_purchases(db, now=NOW, gateway=gw, dry_run=True)
+    rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id)
+                             .order_by(PurchaseTransaction.created_at))).scalars().all()
+    buy, wd = rows
+    assert buy.status == "success" and buy.order_id == "ORD-1", "the buy that filled is recorded"
+    assert wd.status == "failed" and "exchange said no" in wd.error_message
     await db.refresh(p)
-    assert p.failure_count == 1
+    assert p.status == "withdrawal_failed" and p.failure_count == 0 and p.next_execution is None
     assert [e.type for e in captured] == ["buy_executed", "withdrawal_failed"]
-    assert captured[1].error and captured[1].attempt == 1 and captured[1].max_attempts == ps.MAX_ATTEMPTS
+    assert captured[1].error and captured[1].tx.id == wd.id
+    # a later run never buys again for this purchase
+    await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=10), gateway=gw, dry_run=True)
+    assert len(gw.placed) == 1
 
 
 async def test_buy_failure_emits_buy_failed(db, user, binance_key, captured):
@@ -86,6 +72,7 @@ async def test_buy_failure_emits_buy_failed(db, user, binance_key, captured):
     await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     assert [e.type for e in captured] == ["buy_failed"]
     assert "MIN_NOTIONAL" in captured[0].error and captured[0].tx.amount_executed is None
+    assert captured[0].tx.client_oid, "the attempt row carries the client id even when nothing was sent"
 
 
 async def test_subscriber_errors_never_break_execution(db, user, binance_key, monkeypatch, caplog):
@@ -144,6 +131,7 @@ async def test_real_subscribers_email_campaign_webhook_slack(db, user, binance_k
     assert any(m["template"] == "first_purchase" for m in capture.sent)
     assert [d["event"] for d in delivered] == ["purchase.buy_executed", "purchase.withdrawal_sent"]
     assert delivered[0]["data"]["order_id"] == "ORD-1" and delivered[1]["data"]["withdrawal_id"] == "WD-1"
+    assert delivered[0]["data"]["tx_type"] == "buy" and delivered[1]["data"]["tx_type"] == "withdrawal"
     assert slack_calls == [], "dry-run withdrawals do not page Slack"
 
     # a failing second purchase alerts Slack and emails the failure

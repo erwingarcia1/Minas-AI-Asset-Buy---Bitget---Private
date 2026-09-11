@@ -80,23 +80,26 @@ async def make_autobuy_purchase(db, user, crypto="BTC", amount_usd=50.0, purchas
 
 
 async def make_history(db, user, crypto="BTC", amount_crypto=0.001, cost_usd=50.0, status="completed",
-                       purchase=None, purchase_type="autobuy", key=None, created_at=None, **tx_fields) -> PurchaseTransaction:
-    """One execution attempt in purchase_transactions (the history source of truth).
-    `status` uses the API vocabulary (completed | failed | pending)."""
+                       purchase=None, purchase_type="autobuy", key=None, created_at=None, with_withdrawal=False,
+                       withdrawal_id=None, withdrawal_fee=None, withdrawal_fee_currency=None, tx_hash=None,
+                       withdrawal_chain=None, **tx_fields) -> PurchaseTransaction:
+    """One BUY attempt in purchase_transactions (the history source of truth).
+    `status` uses the API vocabulary (completed | failed | pending). With
+    `with_withdrawal=True` a successful buy also gets its child withdrawal row
+    (tx_type withdrawal, parent_transaction_id -> the buy), reachable as
+    `buy.withdrawal`."""
     from api.services.history import from_api_status
     if purchase is None:
         purchase = await make_autobuy_purchase(db, user, crypto=crypto, amount_usd=cost_usd,
                                                purchase_type=purchase_type, key=key)
     db_status = from_api_status(status)
-    fields = dict(purchase_id=purchase.id, status=db_status,
-                  tx_type="accumulation" if purchase.purchase_type == "dca" else "withdrawal",
+    fields = dict(purchase_id=purchase.id, status=db_status, tx_type="buy",
                   amount_executed=amount_crypto if db_status == "success" else 0.0,
-                  cost_usd=cost_usd, executed_at=created_at or utcnow())
+                  cost_usd=cost_usd, executed_at=created_at or utcnow(),
+                  client_oid=f"ab-test-{uuid.uuid4().hex[:16]}")
     if db_status == "success":
         fields.update(order_id=f"ord-{uuid.uuid4().hex[:8]}",
                       fill_price=(cost_usd / amount_crypto) if (amount_crypto and cost_usd is not None) else None)
-        if fields["tx_type"] == "withdrawal":
-            fields["withdrawal_id"] = f"wd-{uuid.uuid4().hex[:8]}"
     fields.update(tx_fields)
     tx = PurchaseTransaction(**fields)
     db.add(tx)
@@ -104,4 +107,19 @@ async def make_history(db, user, crypto="BTC", amount_crypto=0.001, cost_usd=50.
     if created_at is not None:
         tx.created_at = created_at
         await db.commit()
+    tx.withdrawal = None
+    if with_withdrawal and db_status == "success":
+        wd = PurchaseTransaction(purchase_id=purchase.id, status="success", tx_type="withdrawal",
+                                 parent_transaction_id=tx.id, amount_executed=amount_crypto,
+                                 withdrawal_id=withdrawal_id or f"wd-{uuid.uuid4().hex[:8]}",
+                                 exchange_tx_id=withdrawal_id or f"wd-{uuid.uuid4().hex[:8]}",
+                                 withdrawal_fee=withdrawal_fee, withdrawal_fee_currency=withdrawal_fee_currency,
+                                 tx_hash=tx_hash, withdrawal_chain=withdrawal_chain or purchase.blockchain_network,
+                                 executed_at=created_at or utcnow(), client_oid=f"abw-test-{uuid.uuid4().hex[:16]}")
+        db.add(wd)
+        await db.commit()
+        if created_at is not None:
+            wd.created_at = created_at
+            await db.commit()
+        tx.withdrawal = wd
     return tx

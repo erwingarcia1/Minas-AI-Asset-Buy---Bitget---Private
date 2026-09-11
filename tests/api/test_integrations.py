@@ -33,6 +33,17 @@ class VenueRecorder:
         return {"order_id": "1", "amount_crypto": usdt_amount / 100.0,
                 "exchange_rate": 100.0, "cost_usdt": usdt_amount, "dry_run": dry_run}
 
+    def place_buy(self, symbol, usdt_amount, client_oid, dry_run=True):
+        VenueRecorder.calls.append((self.exchange, symbol, self.passphrase))
+        return {"order_id": "1", "dry_run": dry_run}
+
+    def fetch_fill(self, symbol, usdt_amount, order_id, client_oid, dry_run=True):
+        return {"order_id": order_id, "filled": True, "raw_status": "filled", "amount_crypto": usdt_amount / 100.0,
+                "exchange_rate": 100.0, "cost_usdt": usdt_amount, "fee": None, "fee_currency": None}
+
+    def lookup_order(self, symbol, client_oid):
+        return {"state": "not_found", "fill": None}
+
 
 async def test_executor_routes_by_purchase_exchange(db, user, monkeypatch):
     """The Auto-Buy gateway builds the client for the purchase's exchange account:
@@ -147,8 +158,9 @@ async def test_purchase_flow_fires_webhooks(db, user, binance_key, capture_deliv
     assert counts["executed"] == 1
     events = [json.loads(r.content)["event"] for r in delivered]
     assert events == ["purchase.buy_executed", "purchase.withdrawal_sent"]
-    body = json.loads(delivered[-1].content)["data"]
-    assert body["order_id"] == "ORD-1" and body["withdrawal_id"] == "WD-1" and body["dry_run"] is True
+    buy, wd = (json.loads(r.content)["data"] for r in delivered)
+    assert buy["order_id"] == "ORD-1" and buy["tx_type"] == "buy" and buy["dry_run"] is True
+    assert wd["withdrawal_id"] == "WD-1" and wd["tx_type"] == "withdrawal" and wd["wallet_address"]
 
 
 async def test_integrations_listing(db, user, binance_key):

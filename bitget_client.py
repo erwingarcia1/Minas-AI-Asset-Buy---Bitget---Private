@@ -166,18 +166,106 @@ class BitgetClient:
             body["clientOid"] = client_oid
         return self._request("POST", "/api/v2/spot/trade/place-order", body=body)
 
-    def get_order_info(self, symbol, order_id):
-        """Normalized order lookup: {"status", "baseVolume", "quoteVolume"} or None.
+    def get_order_info(self, symbol, order_id=None, client_oid=None):
+        """Normalized order lookup by Bitget order id or by our clientOid:
+        {"status", "orderId", "clientOid", "baseVolume", "quoteVolume", "priceAvg",
+         "fee", "feeCoin", "feeDetail"} or None when Bitget has no such order.
 
+        Bitget statuses: live | partially_filled | filled | cancelled. Fees come
+        from feeDetail (a JSON string keyed by fee coin; totals are negative).
         `symbol` is unused (Bitget resolves orders by id alone) but kept for
         interface parity with the other exchange clients.
         """
-        data = self._request("GET", "/api/v2/spot/trade/orderInfo", params={"orderId": order_id})
+        params = {"orderId": str(order_id)} if order_id else {"clientOid": str(client_oid)}
+        try:
+            data = self._request("GET", "/api/v2/spot/trade/orderInfo", params=params)
+        except BitgetAPIError as exc:
+            # 43001 "order does not exist" family: an honest "not found" is not a transport error
+            if str(exc.code) in ("43001", "43025", "40109") or "not exist" in str(exc.message).lower():
+                return None
+            raise
         if not data:
             return None
         order = data[0]
+        fee, fee_coin = self._parse_fee_detail(order.get("feeDetail"))
         return {
             "status": str(order.get("status", "")).lower(),
+            "orderId": str(order.get("orderId", "")),
+            "clientOid": order.get("clientOid"),
             "baseVolume": order.get("baseVolume"),
             "quoteVolume": order.get("quoteVolume"),
+            "priceAvg": order.get("priceAvg"),
+            "fee": fee,
+            "feeCoin": fee_coin,
+            "feeDetail": order.get("feeDetail"),
         }
+
+    @staticmethod
+    def _parse_fee_detail(raw):
+        """(total fee as a positive float, fee coin) from Bitget's feeDetail JSON string,
+        e.g. '{"BTC":{"deduction":false,"feeCoinCode":"BTC","totalDeductionFee":0,"totalFee":-0.000001}}'.
+        Returns (None, None) when absent or unparsable."""
+        if not raw:
+            return None, None
+        try:
+            detail = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except (ValueError, TypeError):
+            return None, None
+        best = None
+        for coin, entry in detail.items():
+            if not isinstance(entry, dict):
+                continue
+            total = entry.get("totalFee")
+            try:
+                amount = abs(float(total)) if total not in (None, "") else None
+            except (TypeError, ValueError):
+                amount = None
+            if amount is None:
+                continue
+            coin_code = entry.get("feeCoinCode") or coin
+            if best is None or amount > best[0]:
+                best = (amount, str(coin_code))
+        return best if best else (None, None)
+
+    def get_fills(self, symbol, order_id):
+        """Trade fills for an order: list of {"tradeId", "priceAvg", "size", "amount", "feeDetail"}."""
+        data = self._request("GET", "/api/v2/spot/trade/fills", params={"symbol": symbol, "orderId": str(order_id)})
+        return data or []
+
+    # -------------------------------------------------------------- wallet
+
+    def get_coin_info(self, coin):
+        """Chains for a coin from /api/v2/spot/public/coins (no auth): list of
+        {"chain", "withdrawable", "withdrawFee", "extraWithdrawFee", "minWithdrawAmount",
+         "withdrawMinScale", "needTag", "contractAddress", "browserUrl", "withdrawConfirm"}."""
+        data = self._request("GET", "/api/v2/spot/public/coins", params={"coin": coin}, auth=False)
+        if not data:
+            raise BitgetAPIError("SYMBOL", f"unknown coin {coin!r}")
+        return data[0].get("chains") or []
+
+    def withdraw(self, coin, address, amount, network=None, client_oid=None, tag=None, remark=None):
+        """On-chain withdrawal (POST /api/v2/spot/wallet/withdrawal). Needs the
+        Withdraw permission, a whitelisted IP and the address in the account's
+        address book. Returns Bitget's withdrawal orderId."""
+        body = {"coin": coin, "transferType": "on_chain", "address": address, "chain": network,
+                "size": str(amount)}
+        if tag:
+            body["tag"] = tag
+        if remark:
+            body["remark"] = remark
+        if client_oid:
+            body["clientOid"] = client_oid
+        data = self._request("POST", "/api/v2/spot/wallet/withdrawal", body=body) or {}
+        return str(data.get("orderId") or "")
+
+    def get_withdrawal_records(self, coin, start_ms, end_ms, client_oid=None, order_id=None, limit=100):
+        """Withdrawal records (GET /api/v2/spot/wallet/withdrawal-records): list of
+        {"orderId", "tradeId" (on-chain tx hash), "coin", "chain", "size", "fee",
+         "status" (wallet_processing | success | wallet_fail | cancel | reject ...),
+         "toAddress", "confirm", "cTime", "uTime"}."""
+        params = {"coin": coin, "startTime": str(start_ms), "endTime": str(end_ms), "limit": str(limit)}
+        if client_oid:
+            params["clientOid"] = client_oid
+        if order_id:
+            params["orderId"] = str(order_id)
+        return self._request("GET", "/api/v2/spot/wallet/withdrawal-records", params=params) or []

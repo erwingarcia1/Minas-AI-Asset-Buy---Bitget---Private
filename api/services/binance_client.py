@@ -215,7 +215,7 @@ class BinanceClient:
             raise BinanceClientError("withdrawal amount must be positive", "AMOUNT")
         if dry_run:
             return {"withdrawal_id": f"DRY-WD-{uuid.uuid4().hex[:12]}", "amount": amount, "dry_run": True}
-        if self.exchange != "binance":
+        if not hasattr(self._client, "withdraw"):
             raise BinanceClientError(
                 f"withdrawals are not implemented for {self.exchange}", "WITHDRAW_UNSUPPORTED")
         try:
@@ -226,6 +226,112 @@ class BinanceClient:
         if not wid:
             raise BinanceClientError("exchange returned no withdrawal id", "NO_WITHDRAWAL_ID")
         return {"withdrawal_id": wid, "amount": amount, "dry_run": False}
+
+
+    # ------------------------------------------------------------- idempotent buy flow
+
+    def place_buy(self, symbol: str, usdt_amount: float, client_oid: str, dry_run: bool = True) -> dict:
+        """Send a market buy tagged with our ``client_oid`` and return ``{"order_id"}``
+        without reading the fill (that is :meth:`fetch_fill`). Dry runs send nothing."""
+        if dry_run:
+            return {"order_id": f"DRY-{client_oid}", "dry_run": True}
+        try:
+            info = self._client.get_symbol_info(symbol)
+            if str(info.get("status", "online")).lower() not in ("online", "trading", "1"):
+                raise BinanceClientError(f"{symbol} is not trading (status={info.get('status')})", "SYMBOL")
+            min_usdt = info.get("minTradeUSDT")
+            if min_usdt not in (None, "") and usdt_amount < float(min_usdt):
+                raise BinanceClientError(
+                    f"{usdt_amount} USDT is below the {min_usdt} USDT minimum for {symbol}", "MIN_NOTIONAL")
+            with time_binance("place_order"):
+                order = self._client.place_market_buy(symbol, usdt_amount, client_oid=client_oid)
+        except BinanceClientError:
+            raise
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(exc.message, str(getattr(exc, "code", "EXCHANGE"))) from exc
+        order_id = str((order or {}).get("orderId") or (order or {}).get("order_id") or "")
+        if not order_id:
+            raise BinanceClientError("exchange returned no order id", "NO_ORDER_ID")
+        return {"order_id": order_id, "dry_run": False}
+
+    def fetch_fill(self, symbol: str, usdt_amount: float, order_id: str, client_oid: str,
+                   dry_run: bool = True) -> dict:
+        """Read the fill of an order: {order_id, filled, raw_status, amount_crypto,
+        exchange_rate, cost_usdt, fee, fee_currency}. Dry runs are priced at the
+        live best ask (see execute_order) with the venue's taker fee simulated in
+        the base coin."""
+        if dry_run:
+            sim = self.execute_order(symbol, usdt_amount, dry_run=True, client_oid=client_oid)
+            fee = fee_currency = None
+            try:
+                rate = self._client.get_symbol_info(symbol).get("takerFeeRate")
+                if rate not in (None, ""):
+                    fee, fee_currency = sim["amount_crypto"] * float(rate), symbol[: -len("USDT")] if symbol.endswith("USDT") else None
+            except Exception:  # fee simulation is best effort; the fill is not
+                pass
+            return {"order_id": order_id, "filled": True, "raw_status": "filled (dry run)",
+                    "amount_crypto": sim["amount_crypto"], "exchange_rate": sim["exchange_rate"],
+                    "cost_usdt": sim["cost_usdt"], "fee": fee, "fee_currency": fee_currency,
+                    "price_source": sim.get("price_source")}
+        try:
+            with time_binance("order_info"):
+                order = self._client.get_order_info(symbol, order_id=order_id) if order_id else \
+                    self._client.get_order_info(symbol, client_oid=client_oid)
+        except TypeError:  # legacy clients take (symbol, order_id) only
+            order = self._client.get_order_info(symbol, order_id)
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(exc.message, str(getattr(exc, "code", "EXCHANGE"))) from exc
+        if order is None:
+            raise BinanceClientError(f"order {order_id or client_oid} not found on {self.exchange}", "ORDER_NOT_FOUND")
+        return self._normalize_order(order, order_id)
+
+    def lookup_order(self, symbol: str, client_oid: str) -> dict:
+        """State of an order we may or may not have sent, by our client id:
+        {"state": filled | open | cancelled | not_found, "fill": {...} | None}."""
+        try:
+            order = self._client.get_order_info(symbol, client_oid=client_oid)
+        except TypeError:
+            raise BinanceClientError(f"{self.exchange} client cannot look orders up by client id", "LOOKUP_UNSUPPORTED")
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(exc.message, str(getattr(exc, "code", "EXCHANGE"))) from exc
+        if order is None:
+            return {"state": "not_found", "fill": None}
+        fill = self._normalize_order(order, order.get("orderId") or "")
+        status = fill["raw_status"]
+        if fill["filled"]:
+            return {"state": "filled", "fill": fill}
+        if status in ("cancelled", "canceled", "rejected", "expired"):
+            return {"state": "cancelled", "fill": fill}
+        return {"state": "open", "fill": fill}
+
+    @staticmethod
+    def _normalize_order(order: dict, order_id: str) -> dict:
+        status = str(order.get("status", "")).lower()
+        base = float(order.get("baseVolume") or 0)
+        quote = float(order.get("quoteVolume") or 0)
+        avg = order.get("priceAvg")
+        avg = float(avg) if avg not in (None, "") else (quote / base if base else None)
+        filled = status in ("filled", "full_fill", "closed") or (status == "" and base > 0)
+        return {"order_id": str(order.get("orderId") or order_id), "filled": filled, "raw_status": status or "unknown",
+                "amount_crypto": base, "exchange_rate": avg, "cost_usdt": quote,
+                "fee": order.get("fee"), "fee_currency": order.get("feeCoin")}
+
+    # ------------------------------------------------------------- withdrawal data
+
+    def get_coin_chains(self, coin: str) -> list:
+        """Withdrawal chains for a coin (Bitget: /api/v2/spot/public/coins)."""
+        if not hasattr(self._client, "get_coin_info"):
+            raise BinanceClientError(f"{self.exchange} client has no coin/chain data", "UNSUPPORTED")
+        try:
+            return self._client.get_coin_info(coin)
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(exc.message, str(getattr(exc, "code", "EXCHANGE"))) from exc
+
+    def get_symbol(self, symbol: str) -> dict:
+        try:
+            return self._client.get_symbol_info(symbol)
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(exc.message, str(getattr(exc, "code", "EXCHANGE"))) from exc
 
 
 ExchangeClient = BinanceClient  # preferred name going forward

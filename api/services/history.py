@@ -76,9 +76,15 @@ class HistoryRow:
         return None
 
 
+BUY_TYPES = ("buy", "accumulation")   # rows that are purchases (lots); "withdrawal" rows move coins
+
+
 def _row(tx: PurchaseTransaction, p: Purchase, exchange: Optional[str]) -> HistoryRow:
     amount = float(tx.amount_executed or 0.0)
-    cost = tx.cost_usd if tx.cost_usd is not None else float(p.amount_usd)
+    if tx.cost_usd is not None:
+        cost = tx.cost_usd
+    else:
+        cost = float(p.amount_usd) if tx.tx_type in BUY_TYPES else 0.0
     return HistoryRow(
         id=tx.id, purchase_id=p.id, user_id=p.user_id, crypto=p.crypto_symbol,
         purchase_type=p.purchase_type, tx_type=tx.tx_type, status=to_api_status(tx.status),
@@ -87,7 +93,7 @@ def _row(tx: PurchaseTransaction, p: Purchase, exchange: Optional[str]) -> Histo
         order_id=tx.order_id or (tx.exchange_tx_id if tx.tx_type == "accumulation" else None),
         withdrawal_id=tx.withdrawal_id or (tx.exchange_tx_id if tx.tx_type == "withdrawal" else None),
         wallet_address=p.wallet_address if tx.tx_type == "withdrawal" else None,
-        blockchain_network=p.blockchain_network if tx.tx_type == "withdrawal" else None,
+        blockchain_network=(tx.withdrawal_chain or p.blockchain_network) if tx.tx_type == "withdrawal" else None,
         withdrawal_fee=tx.withdrawal_fee, withdrawal_fee_currency=tx.withdrawal_fee_currency,
         tx_hash=tx.tx_hash, error_message=tx.error_message,
         executed_at=tx.executed_at, created_at=tx.created_at,
@@ -142,15 +148,16 @@ async def get_row(db: AsyncSession, user_id, tx_id: UUID) -> Optional[HistoryRow
 
 async def completed_rows(db: AsyncSession, user_id, *, since: Optional[datetime] = None,
                          until: Optional[datetime] = None) -> List[HistoryRow]:
-    """Successful buys, oldest first — the input for holdings, lots and ROI."""
-    where = _filters(user_id, API_COMPLETED, None, since, until)
+    """Successful buys, oldest first — the input for holdings, lots and ROI.
+    Withdrawal rows are not purchases and are excluded."""
+    where = _filters(user_id, API_COMPLETED, None, since, until) + [PurchaseTransaction.tx_type.in_(BUY_TYPES)]
     return await _rows(db, _base().where(*where).order_by(PurchaseTransaction.created_at))
 
 
 # ------------------------------------------------------------------ aggregates
 
 async def stats(db: AsyncSession, user_id) -> dict:
-    ok = PurchaseTransaction.status == DB_SUCCESS
+    ok = (PurchaseTransaction.status == DB_SUCCESS) & PurchaseTransaction.tx_type.in_(BUY_TYPES)
     cost = func.coalesce(PurchaseTransaction.cost_usd, Purchase.amount_usd)
     row = (await db.execute(
         select(func.count(PurchaseTransaction.id),
@@ -174,7 +181,8 @@ async def holdings(db: AsyncSession, user_id) -> List[Tuple[str, float, float]]:
                func.coalesce(func.sum(PurchaseTransaction.amount_executed), 0.0),
                func.coalesce(func.sum(cost), 0.0))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
-        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS)
+        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
+               PurchaseTransaction.tx_type.in_(BUY_TYPES))
         .group_by(Purchase.crypto_symbol)
         .order_by(func.sum(cost).desc()))).all()
     return [(r[0], float(r[1]), float(r[2])) for r in rows if float(r[1]) > 0]
@@ -187,7 +195,8 @@ async def monthly_average(db: AsyncSession, user_id) -> float:
     rows = (await db.execute(
         select(month, func.sum(cost))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
-        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS)
+        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
+               PurchaseTransaction.tx_type.in_(BUY_TYPES))
         .group_by(month))).all()
     if not rows:
         return 0.0
@@ -204,7 +213,7 @@ async def timeline(db: AsyncSession, user_id, days: int, now: Optional[datetime]
         select(day, func.count(PurchaseTransaction.id), func.sum(cost))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
         .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
-               PurchaseTransaction.created_at >= start)
+               PurchaseTransaction.tx_type.in_(BUY_TYPES), PurchaseTransaction.created_at >= start)
         .group_by(day))).all()
     by_day = {r[0].date(): (r[1], float(r[2])) for r in rows}
     out = []
@@ -229,7 +238,8 @@ async def completed_count_and_total(db: AsyncSession, user_id) -> Tuple[int, flo
     row = (await db.execute(
         select(func.count(PurchaseTransaction.id), func.coalesce(func.sum(cost), 0.0))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
-        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS))).one()
+        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
+               PurchaseTransaction.tx_type.in_(BUY_TYPES)))).one()
     return int(row[0]), float(row[1])
 
 
@@ -253,7 +263,7 @@ def group_by_crypto(rows: Iterable[HistoryRow]) -> List[Tuple[str, float, float]
 # ------------------------------------------------------------------ platform-wide (admin)
 
 async def platform_totals(db: AsyncSession, day_ago: datetime, week_ago: datetime) -> dict:
-    ok = PurchaseTransaction.status == DB_SUCCESS
+    ok = (PurchaseTransaction.status == DB_SUCCESS) & PurchaseTransaction.tx_type.in_(BUY_TYPES)
     cost = func.coalesce(PurchaseTransaction.cost_usd, Purchase.amount_usd)
     row = (await db.execute(
         select(func.coalesce(func.sum(cost).filter(ok), 0.0),
@@ -272,6 +282,25 @@ async def invested_per_user(db: AsyncSession) -> dict:
     rows = (await db.execute(
         select(Purchase.user_id, func.coalesce(func.sum(cost), 0.0))
         .join(PurchaseTransaction, PurchaseTransaction.purchase_id == Purchase.id)
-        .where(PurchaseTransaction.status == DB_SUCCESS)
+        .where(PurchaseTransaction.status == DB_SUCCESS, PurchaseTransaction.tx_type.in_(BUY_TYPES))
         .group_by(Purchase.user_id))).all()
     return {r[0]: round(float(r[1]), 2) for r in rows}
+
+
+async def withdrawals_by_parent(db: AsyncSession, user_id, parent_ids) -> dict:
+    """{buy row id: withdrawal HistoryRow} for the buys that have a withdrawal row (any status)."""
+    ids = [i for i in parent_ids]
+    if not ids:
+        return {}
+    rows = await _rows(db, _base().where(Purchase.user_id == user_id, PurchaseTransaction.tx_type == "withdrawal",
+                                          PurchaseTransaction.parent_transaction_id.in_(ids))
+                       .order_by(PurchaseTransaction.created_at))
+    out = {}
+    parents = {tx.id: tx.parent_transaction_id for tx, _, _ in (await db.execute(
+        select(PurchaseTransaction, Purchase, APIKey.exchange)
+        .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
+        .outerjoin(APIKey, Purchase.exchange_account_id == APIKey.id)
+        .where(PurchaseTransaction.parent_transaction_id.in_(ids)))).all()}
+    for r in rows:
+        out[parents.get(r.id)] = r   # the latest withdrawal attempt wins
+    return out

@@ -14,7 +14,8 @@ from api.services import scheduler_state
 from api.tasks import purchase_scheduler as ps
 from tests.api.conftest import auth_headers
 from tests.conftest_autobuy import binance_key, db, make_key, make_purchase, other_user, user  # noqa: F401
-from tests.test_purchase_scheduler import FailingGateway, FakeGateway, NOW
+from tests.fake_gateway import BuyFails, FakeGateway
+from tests.test_purchase_scheduler import NOW
 
 
 def api():
@@ -109,10 +110,10 @@ async def test_redis_unreadable_fails_closed(db, user, binance_key, monkeypatch,
 
 async def test_failed_runs_are_counted_and_reset(db, user, binance_key):
     await make_purchase(db, user, binance_key, next_execution=NOW - timedelta(minutes=1))
-    await ps.execute_due_purchases(db, now=NOW, gateway=FailingGateway(), dry_run=True)
+    await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     assert (await scheduler_state.last_run("autobuy"))["result"] == "failed"
     assert await scheduler_state.consecutive_failures("autobuy") == 1
-    await ps.execute_due_purchases(db, now=NOW, gateway=FailingGateway(), dry_run=True)
+    await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     assert await scheduler_state.consecutive_failures("autobuy") == 2
     await ps.execute_due_purchases(db, now=NOW, gateway=FakeGateway(), dry_run=True)
     assert await scheduler_state.consecutive_failures("autobuy") == 0
@@ -158,7 +159,7 @@ async def test_health_reports_the_autobuy_job(db, user, binance_key):
 async def test_alerts_cover_the_autobuy_job(db, user, binance_key, admin):
     H = auth_headers(admin)
     await make_purchase(db, user, binance_key, next_execution=NOW - timedelta(minutes=1))
-    await ps.execute_due_purchases(db, now=NOW, gateway=FailingGateway(), dry_run=True)
+    await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     async with api() as c:
         by = {a["name"]: a for a in (await c.get("/api/admin/alerts", headers=H)).json()}
     assert by["schedulers_paused"]["severity"] == "ok" and by["schedulers_paused"]["value"] == "running"

@@ -52,15 +52,23 @@ def purchase_body(key_id: str, **over) -> dict:
 
 class FakeGateway:
     """Stands in for the exchange gateway so the executor never touches an exchange."""
-    def execute(self, account, purchase, dry_run):
-        oid = "DRY-e2e" if dry_run else "LIVE-e2e"
-        fill = {"order_id": oid, "amount_executed": purchase.amount_usd / 50000.0, "fill_price": 50000.0,
-                "cost_usd": purchase.amount_usd, "fee": None, "fee_currency": None}
-        if purchase.purchase_type == "dca":
-            return {**fill, "exchange_tx_id": oid, "tx_type": "accumulation", "withdrawal_id": None,
-                    "withdrawal_fee": None, "withdrawal_fee_currency": None, "tx_hash": None}
-        return {**fill, "exchange_tx_id": "DRY-WD-e2e", "tx_type": "withdrawal", "withdrawal_id": "DRY-WD-e2e",
-                "withdrawal_fee": None, "withdrawal_fee_currency": None, "tx_hash": None}
+    def __init__(self):
+        self.n = 0
+
+    def place_buy(self, account, purchase, client_oid, dry_run):
+        self.n += 1
+        return {"order_id": "DRY-e2e" if dry_run else "LIVE-e2e", "dry_run": dry_run}
+
+    def fetch_fill(self, account, purchase, order_id, client_oid, dry_run):
+        return {"order_id": order_id, "filled": True, "raw_status": "filled", "amount_crypto": purchase.amount_usd / 50000.0,
+                "exchange_rate": 50000.0, "cost_usdt": purchase.amount_usd, "fee": None, "fee_currency": None}
+
+    def lookup_order(self, account, purchase, client_oid):
+        return {"state": "not_found", "fill": None}
+
+    def withdraw(self, account, purchase, amount, client_oid, dry_run):
+        return {"withdrawal_id": "DRY-WD-e2e", "chain": purchase.blockchain_network, "withdrawal_fee": None,
+                "withdrawal_fee_currency": None, "tx_hash": None, "raw_status": "simulated"}
 
 
 def random_ip() -> str:
@@ -162,11 +170,15 @@ async def run_executor_for(db, purchase_id: uuid.UUID) -> dict:
         await db.commit()
         await ps.execute_due_purchases(db, gateway=FakeGateway(), dry_run=True)
         db.expire_all()
-        tx = (await db.execute(select(PurchaseTransaction).where(
-            PurchaseTransaction.purchase_id == purchase_id, PurchaseTransaction.status == "success"))).scalars().first()
-        if tx is not None:
-            return {"id": str(tx.id), "status": "completed", "order_id": tx.order_id,
-                    "cost_usd": tx.cost_usd, "fill_price": tx.fill_price, "withdrawal_id": tx.withdrawal_id}
+        rows = (await db.execute(select(PurchaseTransaction).where(
+            PurchaseTransaction.purchase_id == purchase_id, PurchaseTransaction.status == "success")
+            .order_by(PurchaseTransaction.created_at))).scalars().all()
+        buy = next((t for t in rows if t.tx_type == "buy"), None)
+        if buy is not None:
+            wd = next((t for t in rows if t.tx_type == "withdrawal"), None)
+            return {"id": str(buy.id), "status": "completed", "order_id": buy.order_id,
+                    "cost_usd": buy.cost_usd, "fill_price": buy.fill_price,
+                    "withdrawal_id": wd.withdrawal_id if wd else None, "withdrawal_row_id": str(wd.id) if wd else None}
     pytest.fail("the executor never produced a successful dry-run attempt")
 
 
@@ -242,7 +254,7 @@ async def test_purchase_creation_and_executor_dry_run(client, db, cleanup):
     r = await client.get(f"/api/v2/purchases/{purchase_id}", headers=auth)
     assert r.status_code == 200
     assert r.json()["next_execution"] > first_due
-    assert r.json()["transactions"][0]["status"] == "success"
+    assert {t["status"] for t in r.json()["transactions"]} == {"success"} and len(r.json()["transactions"]) == 2
 
     # pause + list round-trip
     r = await client.put(f"/api/v2/purchases/{purchase_id}", json={"status": "paused"}, headers=auth)
@@ -274,30 +286,32 @@ async def test_transactions_and_dashboard_stats(client, db, cleanup):
     r = await client.get("/api/transactions/", params={"limit": 10, "offset": 0}, headers=auth)
     assert r.status_code == 200
     page = r.json()
-    assert page["total"] == 1 and page["limit"] == 10 and len(page["items"]) == 1
-    item = page["items"][0]
+    assert page["total"] == 2 and page["limit"] == 10 and len(page["items"]) == 2, "buy row + withdrawal row"
+    by_type = {t["tx_type"]: t for t in page["items"]}
+    item = by_type["buy"]
     assert item["id"] == tx["id"] and item["status"] == "completed" and item["cost_usdt"] == 25.0
-    assert item["purchase_id"] == str(purchase_id) and item["tx_type"] == "withdrawal"
-    assert item["wallet_address"] == BTC_WALLET and item["blockchain_network"] == "mainnet"
-    assert item["exchange"] == "binance" and item["order_id"] == "DRY-e2e"
+    assert item["purchase_id"] == str(purchase_id) and item["exchange"] == "binance" and item["order_id"] == "DRY-e2e"
+    wd = by_type["withdrawal"]
+    assert wd["wallet_address"] == BTC_WALLET and wd["blockchain_network"] == "mainnet" and wd["withdrawal_id"] == "DRY-WD-e2e"
+    assert wd["cost_usdt"] == 0.0, "a withdrawal is not a purchase"
     assert (await client.get("/api/transactions/", params={"limit": 10, "offset": 5}, headers=auth)).json()["items"] == []
 
     # single, by crypto, by status, summary
     r = await client.get(f"/api/transactions/{tx['id']}", headers=auth)
     assert r.status_code == 200 and r.json()["binance_order_id"] == "DRY-e2e"
-    assert [t["id"] for t in (await client.get("/api/transactions/crypto/BTC", headers=auth)).json()] == [tx["id"]]
-    assert [t["id"] for t in (await client.get("/api/transactions/status/completed", headers=auth)).json()] == [tx["id"]]
+    assert tx["id"] in [t["id"] for t in (await client.get("/api/transactions/crypto/BTC", headers=auth)).json()]
+    assert tx["id"] in [t["id"] for t in (await client.get("/api/transactions/status/completed", headers=auth)).json()]
     assert (await client.get("/api/transactions/status/failed", headers=auth)).json() == []
     r = await client.get("/api/transactions/stats/summary", headers=auth)
     assert r.status_code == 200
     summary = r.json()
-    assert summary["total_transactions"] == 1 and summary["total_invested_usdt"] == 25.0
+    assert summary["total_transactions"] == 2 and summary["total_invested_usdt"] == 25.0
     assert summary["average_purchase_usdt"] == 25.0
 
     # dashboard reflects the executed purchase
     r = await client.get("/api/dashboard/stats", headers=auth)
     assert r.status_code == 200
-    assert r.json() == {"total_invested_usdt": 25.0, "transaction_count": 1, "active_purchases": 1, "kyc_status": "verified"}
+    assert r.json() == {"total_invested_usdt": 25.0, "transaction_count": 2, "active_purchases": 1, "kyc_status": "verified"}
     r = await client.get("/api/dashboard/", headers=auth)
     assert r.status_code == 200
     dash = r.json()

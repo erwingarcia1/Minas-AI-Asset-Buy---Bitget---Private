@@ -13,20 +13,7 @@ from tests.conftest_autobuy import (BTC_MAIN, binance_key, client, db, make_key,
 NOW = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
 
 
-class FakeGateway:
-    def __init__(self):
-        self.calls = []
-
-    def execute(self, account, purchase, dry_run):
-        self.calls.append((account.id, purchase.id, dry_run))
-        return {"exchange_tx_id": f"wd-{purchase.id.hex[:8]}-{len(self.calls)}",
-                "amount_executed": purchase.amount_usd / 50_000, "fee": 0.00005}
-
-
-class FailingGateway(FakeGateway):
-    def execute(self, account, purchase, dry_run):
-        self.calls.append((account.id, purchase.id, dry_run))
-        raise ps.ExecutionError("WITHDRAW_UNSUPPORTED: exchange said no")
+from tests.fake_gateway import BuyFails, FailingGateway, FakeGateway, RichGateway  # noqa: F401
 
 
 async def tx_for(db, purchase):
@@ -71,15 +58,21 @@ async def test_one_time_purchase_completes(db, user, binance_key):
     assert p.status == "completed" and p.next_execution is None
 
 
-async def test_creates_transaction_record(db, user, binance_key):
+async def test_creates_buy_and_withdrawal_rows(db, user, binance_key):
     p = await make_purchase(db, user, binance_key, amount_usd=100, next_execution=NOW)
-    await ps.execute_due_purchases(db, now=NOW, gateway=FakeGateway(), dry_run=True)
+    gw = FakeGateway()
+    await ps.execute_due_purchases(db, now=NOW, gateway=gw, dry_run=True)
     txs = await tx_for(db, p)
-    assert len(txs) == 1
-    tx = txs[0]
-    assert tx.status == "success" and tx.exchange_tx_id.startswith("wd-")
-    assert tx.amount_executed == pytest.approx(100 / 50_000) and tx.fee == 0.00005
-    assert tx.executed_at == NOW and tx.error_message is None
+    assert [t.tx_type for t in txs] == ["buy", "withdrawal"]
+    buy, wd = txs
+    assert buy.status == "success" and buy.order_id == "ORD-1" and buy.exchange_tx_id == "ORD-1"
+    assert buy.client_oid.startswith("ab-") and gw.placed[0][0] == buy.client_oid, "client id stored before sending"
+    assert buy.amount_executed == pytest.approx(100 / 50_000) and buy.fill_price == 50_000.0 and buy.cost_usd == 100
+    assert buy.fee == pytest.approx(100 / 50_000 * 0.001) and buy.fee_currency == "BTC"
+    assert buy.executed_at == NOW and buy.error_message is None
+    assert wd.status == "success" and wd.parent_transaction_id == buy.id and wd.withdrawal_id == "WD-1"
+    assert wd.amount_executed == pytest.approx(100 / 50_000 * 0.999), "buy fee in the base coin is deducted"
+    assert wd.withdrawal_fee == 0.0001 and wd.withdrawal_fee_currency == "BTC" and wd.client_oid.startswith("abw-")
 
 
 async def test_month_end_clamping():
@@ -115,7 +108,7 @@ async def test_skips_unverified_or_suspended_users(db, user, other_user, binance
 
 async def test_failure_records_attempts_and_marks_failed_after_three(db, user, binance_key):
     p = await make_purchase(db, user, binance_key, next_execution=NOW)
-    gw = FailingGateway()
+    gw = BuyFails()
     for attempt in (1, 2):
         counts = await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=5 * attempt), gateway=gw, dry_run=True)
         assert counts["failed"] >= 1
@@ -125,9 +118,10 @@ async def test_failure_records_attempts_and_marks_failed_after_three(db, user, b
     await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=15), gateway=gw, dry_run=True)
     await db.refresh(p)
     assert p.status == "failed" and p.failure_count == 3 and p.next_execution is None
-    assert "WITHDRAW_UNSUPPORTED" in p.last_error
+    assert "MIN_NOTIONAL" in p.last_error
     txs = await tx_for(db, p)
     assert [t.status for t in txs] == ["failed"] * 3 and all(t.error_message for t in txs)
+    assert all(t.tx_type == "buy" and t.client_oid for t in txs)
     # a failed purchase is never picked up again
     assert p.id not in {x.id for x in await ps.find_due_purchases(db, NOW + timedelta(days=1))}
 
@@ -162,9 +156,9 @@ async def test_gateway_dry_run_via_real_client_is_simulated(db, user, binance_ke
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
     p = await make_purchase(db, user, binance_key, amount_usd=100, next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
-    tx = (await tx_for(db, p))[0]
-    assert tx.status == "success" and tx.exchange_tx_id.startswith("DRY-WD-")
-    assert tx.amount_executed == pytest.approx(0.002)
+    buy, wd = await tx_for(db, p)
+    assert buy.status == "success" and buy.order_id.startswith("DRY-ab-") and buy.amount_executed == pytest.approx(0.002)
+    assert wd.status == "success" and wd.exchange_tx_id.startswith("DRY-WD-") and wd.parent_transaction_id == buy.id
 
 
 class FakeLegacy:
@@ -184,41 +178,34 @@ async def test_autobuy_mode_withdraws_and_records_withdrawal_tx(db, user, binanc
     FakeLegacy.withdrawals.clear()
     p = await make_purchase(db, user, binance_key, purchase_type="autobuy", amount_usd=100, next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
-    tx = (await tx_for(db, p))[0]
-    assert tx.status == "success" and tx.tx_type == "withdrawal"
-    assert tx.exchange_tx_id.startswith("DRY-WD-"), "dry run: withdrawal simulated, not sent"
-    assert tx.amount_executed == pytest.approx(0.002) and FakeLegacy.withdrawals == []
+    buy, wd = await tx_for(db, p)
+    assert buy.status == "success" and buy.tx_type == "buy" and buy.order_id.startswith("DRY-ab-")
+    assert buy.amount_executed == pytest.approx(0.002)
+    assert wd.status == "success" and wd.tx_type == "withdrawal" and wd.parent_transaction_id == buy.id
+    assert wd.withdrawal_id.startswith("DRY-WD-"), "dry run: withdrawal simulated, not sent"
+    assert FakeLegacy.withdrawals == []
 
 
-async def test_dca_mode_skips_withdrawal_and_records_accumulation_tx(db, user, binance_key, monkeypatch):
+async def test_dca_mode_skips_withdrawal_and_records_a_buy_row(db, user, binance_key, monkeypatch):
     from api.services import binance_client as bc
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
     FakeLegacy.withdrawals.clear()
-    p = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
-                            purchase_type="dca", amount_usd=100, next_execution=NOW)
-    await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=False)  # live path, still no withdrawal
-    tx = (await tx_for(db, p))[0]
-    assert tx.status in ("success", "failed")
-    if tx.status == "success":  # FakeLegacy has no order book, so the live buy path may fail before recording
-        assert tx.tx_type == "accumulation"
-    assert FakeLegacy.withdrawals == [], "dca never withdraws"
-    # dry-run path records the accumulation cleanly
     p2 = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
                              purchase_type="dca", amount_usd=100, next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
-    tx2 = (await tx_for(db, p2))[0]
-    assert tx2.status == "success" and tx2.tx_type == "accumulation"
-    assert tx2.exchange_tx_id.startswith("DRY-") and not tx2.exchange_tx_id.startswith("DRY-WD-")
-    assert tx2.amount_executed == pytest.approx(0.05)
+    txs = await tx_for(db, p2)
+    assert [t.tx_type for t in txs] == ["buy"], "dca never withdraws"
+    assert txs[0].status == "success" and txs[0].order_id.startswith("DRY-") and txs[0].amount_executed == pytest.approx(0.05)
+    assert FakeLegacy.withdrawals == []
     await db.refresh(p2)
     assert p2.next_execution == NOW + timedelta(days=1)
 
 
-async def test_failed_attempt_keeps_mode_tx_type(db, user, binance_key):
+async def test_failed_buy_attempt_is_a_buy_row(db, user, binance_key):
     p = await make_purchase(db, user, binance_key, purchase_type="dca", next_execution=NOW)
-    await ps.execute_due_purchases(db, now=NOW, gateway=FailingGateway(), dry_run=True)
+    await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     tx = (await tx_for(db, p))[0]
-    assert tx.status == "failed" and tx.tx_type == "accumulation"
+    assert tx.status == "failed" and tx.tx_type == "buy" and tx.client_oid
 
 
 async def test_sync_entry_point_runs(db, user, binance_key):
@@ -269,10 +256,10 @@ def test_job_event_listener_logs_missed_skipped_and_errors(caplog):
 
 class SlowGateway(FakeGateway):
     """Holds each execution long enough for a concurrent run to collide."""
-    def execute(self, account, purchase, dry_run):
+    def place_buy(self, account, purchase, client_oid, dry_run):
         import time as _t
         _t.sleep(0.6)
-        return super().execute(account, purchase, dry_run)
+        return super().place_buy(account, purchase, client_oid, dry_run)
 
 
 async def test_concurrent_runs_execute_each_purchase_exactly_once(db, user, binance_key, caplog):
@@ -288,8 +275,8 @@ async def test_concurrent_runs_execute_each_purchase_exactly_once(db, user, bina
         r1, r2 = await asyncio.gather(ps.execute_due_purchases(s1, now=NOW, gateway=gw, dry_run=True),
                                       ps.execute_due_purchases(s2, now=NOW, gateway=gw, dry_run=True))
     assert sorted([r1["executed"], r2["executed"]]) == [0, 2], (r1, r2)
-    assert len(gw.calls) == 2, "each purchase executed exactly once"
-    assert len(await tx_for(db, p1)) == 1 and len(await tx_for(db, p2)) == 1
+    assert len(gw.placed) == 2, "each purchase bought exactly once"
+    assert len(await tx_for(db, p1)) == 2 and len(await tx_for(db, p2)) == 2   # buy + withdrawal rows
     assert any("another worker holds the run lock" in r.getMessage() for r in caplog.records)
 
 

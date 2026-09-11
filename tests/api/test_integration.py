@@ -74,8 +74,9 @@ async def test_full_journey_to_executed_purchase(db, monkeypatch):
             assert counts["executed"] == 1
 
             txs = (await c.get("/api/transactions/", headers=H)).json()
-            assert txs["total"] == 1 and txs["items"][0]["status"] == "completed"
-            assert txs["items"][0]["order_id"] == "ORD-1" and txs["items"][0]["withdrawal_id"] == "WD-1"
+            assert txs["total"] == 2 and {t["status"] for t in txs["items"]} == {"completed"}
+            by_type = {t["tx_type"]: t for t in txs["items"]}
+            assert by_type["buy"]["order_id"] == "ORD-1" and by_type["withdrawal"]["withdrawal_id"] == "WD-1"
             d = (await c.get("/api/dashboard/", headers=H)).json()
             assert d["holdings"][0]["crypto"] == "BTC" and d["holdings"][0]["total_cost_usdt"] == 100.0
             async with AsyncSessionLocal() as s:

@@ -10,7 +10,7 @@ async def seeded(db, user, binance_key):
     btc = await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100.0, key=binance_key)
     eth = await make_autobuy_purchase(db, user, crypto="ETH", amount_usd=150.0, purchase_type="dca", key=binance_key)
     txs = [
-        await make_history(db, user, purchase=btc, amount_crypto=0.001, cost_usd=100.0, tx_hash="0xdeadbeef"),
+        await make_history(db, user, purchase=btc, amount_crypto=0.001, cost_usd=100.0),
         await make_history(db, user, purchase=btc, amount_crypto=0.002, cost_usd=200.0),
         await make_history(db, user, purchase=eth, amount_crypto=0.05, cost_usd=150.0, status="failed",
                            error_message="boom"),
@@ -30,19 +30,31 @@ async def test_list_pagination(client, user, seeded):
         assert bad.status_code == 422
 
 
-async def test_rows_carry_fill_and_withdrawal_details(client, user, seeded):
+async def test_rows_carry_fill_details(client, user, seeded):
     async with client as c:
         items = (await c.get("/api/transactions/", headers=auth_headers(user))).json()["items"]
     btc = next(t for t in items if t["id"] == str(seeded[0].id))
-    assert btc["crypto"] == "BTC" and btc["purchase_type"] == "autobuy" and btc["tx_type"] == "withdrawal"
+    assert btc["crypto"] == "BTC" and btc["purchase_type"] == "autobuy" and btc["tx_type"] == "buy"
     assert btc["status"] == "completed" and btc["cost_usdt"] == 100.0 and btc["amount_crypto"] == 0.001
     assert btc["exchange"] == "binance" and btc["order_id"].startswith("ord-") and btc["binance_order_id"] == btc["order_id"]
     assert btc["exchange_rate"] == pytest.approx(100_000.0)
-    assert btc["withdrawal_id"].startswith("wd-") and btc["wallet_address"] and btc["blockchain_network"] == "mainnet"
-    assert btc["tx_hash"] == "0xdeadbeef"
+    assert btc["withdrawal_id"] is None and btc["wallet_address"] is None
     eth = next(t for t in items if t["id"] == str(seeded[2].id))
-    assert eth["status"] == "failed" and eth["error_message"] == "boom" and eth["tx_type"] == "accumulation"
+    assert eth["status"] == "failed" and eth["error_message"] == "boom" and eth["tx_type"] == "buy"
     assert eth["wallet_address"] is None and eth["amount_crypto"] == 0.0
+
+
+async def test_withdrawal_rows_are_listed_with_delivery_details(client, db, user, binance_key):
+    btc = await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100.0, key=binance_key)
+    buy = await make_history(db, user, purchase=btc, amount_crypto=0.001, cost_usd=100.0, with_withdrawal=True,
+                             withdrawal_id="WD-9", tx_hash="0xdeadbeef", withdrawal_chain="BTC")
+    async with client as c:
+        r = (await c.get("/api/transactions/", headers=auth_headers(user))).json()
+    assert r["total"] == 2
+    wd = next(t for t in r["items"] if t["tx_type"] == "withdrawal")
+    assert wd["purchase_id"] == str(btc.id) and wd["withdrawal_id"] == "WD-9" and wd["tx_hash"] == "0xdeadbeef"
+    assert wd["wallet_address"] == btc.wallet_address and wd["blockchain_network"] == "BTC" and wd["cost_usdt"] == 0.0
+    assert next(t for t in r["items"] if t["tx_type"] == "buy")["id"] == str(buy.id)
 
 
 async def test_status_filter(client, user, seeded):

@@ -18,8 +18,15 @@ CSV_COLUMNS = [
 ]
 
 
-def _lot(r: history.HistoryRow) -> dict:
+def _lot(r: history.HistoryRow, wd: history.HistoryRow | None = None) -> dict:
+    """One buy lot; when the buy was withdrawn (separate row), the withdrawal's
+    address, chain, fee and tx hash are reported on the lot."""
     when = r.happened_at.astimezone(timezone.utc)
+    if wd is not None and wd.status == "completed":
+        r = history.HistoryRow(**{**r.__dict__, "withdrawal_id": wd.withdrawal_id, "wallet_address": wd.wallet_address,
+                                  "blockchain_network": wd.blockchain_network, "withdrawal_fee": wd.withdrawal_fee,
+                                  "withdrawal_fee_currency": wd.withdrawal_fee_currency, "tx_hash": wd.tx_hash,
+                                  "tx_type": "withdrawal"})
     return {
         "datetime_utc": when.strftime("%Y-%m-%d %H:%M:%S"),
         "date": when.date().isoformat(),
@@ -40,10 +47,11 @@ async def tax_summary(db, user_id, year: int) -> dict:
     start = datetime(year, 1, 1, tzinfo=timezone.utc)
     end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
     rows = await history.completed_rows(db, user_id, since=start, until=end)
+    withdrawals = await history.withdrawals_by_parent(db, user_id, [r.id for r in rows])
 
     lots: dict[str, list] = {}
     for r in rows:
-        lots.setdefault(r.crypto, []).append(_lot(r))
+        lots.setdefault(r.crypto, []).append(_lot(r, withdrawals.get(r.id)))
     holdings = []
     for crypto, lot_list in sorted(lots.items()):
         amount = sum(l["amount"] for l in lot_list)

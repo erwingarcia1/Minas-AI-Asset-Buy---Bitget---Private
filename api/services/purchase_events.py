@@ -6,6 +6,8 @@ The executor calls :func:`emit` once per outcome of an attempt:
 * ``buy_failed``       – the buy did not fill
 * ``withdrawal_sent``  – autobuy only: the exchange accepted the withdrawal
 * ``withdrawal_failed``– autobuy only: the buy filled but the withdrawal failed
+* ``buy_needs_review`` – the buy's outcome could not be confirmed; ops alert, no retry
+* ``withdrawal_needs_info`` – the venue wants travel-rule / identity data first
 
 Subscribers (all best effort, each isolated by try/except so a broken email
 or webhook can never affect execution or another subscriber):
@@ -27,8 +29,10 @@ from api.models import Purchase, PurchaseTransaction, User
 
 logger = logging.getLogger("autobuy.events")
 
-EVENTS = ("buy_executed", "buy_failed", "withdrawal_sent", "withdrawal_failed")
-FAILURE_EVENTS = ("buy_failed", "withdrawal_failed")
+EVENTS = ("buy_executed", "buy_failed", "buy_needs_review", "withdrawal_sent", "withdrawal_failed",
+          "withdrawal_needs_info")
+FAILURE_EVENTS = ("buy_failed", "withdrawal_failed", "withdrawal_needs_info")
+OPS_EVENTS = ("buy_needs_review",)   # a human must look; the user is not emailed
 
 
 @dataclass
@@ -88,7 +92,9 @@ async def emit(db, event: PurchaseEvent) -> None:
 async def _notification_email(db, event: PurchaseEvent) -> None:
     from api.services.email_service import email_service
     # autobuy: the buy email would be followed by the withdrawal email seconds later;
-    # send one email per attempt, on the withdrawal outcome.
+    # send one email per attempt, on the withdrawal outcome. Review cases go to ops only.
+    if event.type in OPS_EVENTS:
+        return
     if event.type == "buy_executed" and event.purchase.purchase_type == "autobuy":
         return
     await email_service.send_purchase_event_email(event.user.email, event)
@@ -108,6 +114,8 @@ async def _dispatcher(db, event: PurchaseEvent) -> None:
     p, tx = event.purchase, event.tx
     if event.type == "buy_executed" and p.purchase_type == "autobuy":
         return  # the withdrawal outcome carries the notification
+    if event.type in OPS_EVENTS:
+        return
     if event.type in ("buy_executed", "withdrawal_sent"):
         await dispatcher.notify(
             db, event.user, template="purchase_executed",
@@ -126,6 +134,13 @@ async def _dispatcher(db, event: PurchaseEvent) -> None:
 async def _slack(db, event: PurchaseEvent) -> None:
     from api.services.slack_service import send_slack
     p = event.purchase
+    if event.type in OPS_EVENTS:
+        await send_slack(f":rotating_light: AutoBuy NEEDS REVIEW: purchase {p.id} ({p.crypto_symbol} {p.amount_usd:.2f} USD "
+                         f"via {event.exchange or '?'}, user {event.user.id}) — buy attempt {event.tx.id} "
+                         f"client_oid={event.tx.client_oid} order_id={event.tx.order_id or '-'}: "
+                         f"{str(event.error or '')[:200]}. Check the exchange before doing anything; "
+                         "the purchase will not be retried automatically.")
+        return
     if event.type in FAILURE_EVENTS:
         await send_slack(f":x: AutoBuy {event.type.replace('_', ' ')}: {p.crypto_symbol} "
                          f"{p.amount_usd:.2f} USD via {event.exchange or '?'} for user {event.user.id} "
@@ -146,6 +161,6 @@ async def _webhooks(db, event: PurchaseEvent) -> None:
 @subscribe
 async def _metrics(db, event: PurchaseEvent) -> None:
     from api.services.metrics import transactions_total
-    if event.type in ("buy_executed", "buy_failed"):
-        transactions_total.labels("completed" if event.type == "buy_executed" else "failed",
-                                  event.purchase.crypto_symbol).inc()
+    if event.type in ("buy_executed", "buy_failed", "buy_needs_review"):
+        label = {"buy_executed": "completed", "buy_failed": "failed", "buy_needs_review": "needs_review"}[event.type]
+        transactions_total.labels(label, event.purchase.crypto_symbol).inc()

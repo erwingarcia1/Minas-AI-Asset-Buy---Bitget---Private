@@ -188,3 +188,22 @@ priced from the venue's live ticker at the moment of the run: the best ask
 no ask. The price is stored unrounded as `fill_price`, the ticker snapshot is
 logged on `autobuy.exchange_client`, and if no positive live price is
 available the attempt fails with `PRICE_UNAVAILABLE` — there is no fallback price.
+
+## Buy idempotency and transaction rows
+
+Every attempt is a `purchase_transactions` row. The buy row (`tx_type: buy`)
+is written with a unique `client_oid` and committed BEFORE the order is sent;
+the fill (quantity, average price, quote spent, fee + currency) is read from
+the exchange's order detail, never from the place-order response. If sending
+raises, the executor looks the `client_oid` up on the exchange first: a fill is
+recorded and never re-bought, "not found" is an ordinary failure (retried up to
+3 times), and anything else parks the purchase as `needs_review` with a Slack
+alert and no automatic retry. Before any retry, earlier attempts with an
+unknown outcome are reconciled the same way.
+
+For withdraw-immediately purchases the withdrawal is its own row
+(`tx_type: withdrawal`, `parent_transaction_id` -> the buy) carrying the
+address, chain, withdrawal id, fee and tx hash; the tax CSV reports them on
+the buy lot. A failed withdrawal parks the purchase as `withdrawal_failed`
+(coins stay on the exchange, the buy is never repeated); a rejection for
+missing travel-rule / identity data parks it as `needs_info` and emails the user.

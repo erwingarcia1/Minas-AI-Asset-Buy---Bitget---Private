@@ -15,10 +15,16 @@ from api.database import Base
 from . import utcnow
 
 PURCHASE_TYPES = ("autobuy", "dca")           # autobuy: buy + withdraw to wallet; dca: buy + accumulate on exchange
-TRANSACTION_TYPES = ("withdrawal", "accumulation")
+# buy: the market buy (its own row since migration 017); withdrawal: the on-chain send
+# (parent_transaction_id -> the buy); accumulation: legacy single-row dca record.
+TRANSACTION_TYPES = ("withdrawal", "accumulation", "buy")
 PURCHASE_FREQUENCIES = ("one_time", "daily", "weekly", "monthly")
-PURCHASE_STATUSES = ("active", "paused", "completed", "failed", "cancelled")
-TRANSACTION_STATUSES = ("pending", "success", "failed")
+# needs_review: a buy attempt whose outcome could not be confirmed on the exchange — never
+# retried automatically; withdrawal_failed: the buy filled but the withdrawal did not —
+# never re-bought, only the withdrawal may be retried; needs_info: withdrawal rejected for
+# missing travel-rule / identity data.
+PURCHASE_STATUSES = ("active", "paused", "completed", "failed", "cancelled", "needs_review", "withdrawal_failed", "needs_info")
+TRANSACTION_STATUSES = ("pending", "success", "failed", "needs_review", "needs_info")
 BLOCKCHAIN_NETWORKS = ("mainnet", "testnet")
 
 
@@ -102,5 +108,11 @@ class PurchaseTransaction(Base):
     withdrawal_fee = Column(Float, nullable=True)
     withdrawal_fee_currency = Column(String(10), nullable=True)
     tx_hash = Column(String(128), nullable=True)             # on-chain hash once the exchange reports it
+    # Idempotency + row lineage (migration 017)
+    client_oid = Column(String(64), nullable=True, unique=True)   # written before the order is sent
+    parent_transaction_id = Column(UUID(as_uuid=True), ForeignKey("purchase_transactions.id", ondelete="SET NULL"),
+                                   nullable=True)                 # withdrawal row -> its buy row
+    raw_status = Column(String(40), nullable=True)                # the exchange's own status string
+    withdrawal_chain = Column(String(40), nullable=True)          # exchange chain name used for a withdrawal
 
     purchase = relationship("Purchase", back_populates="transactions")
