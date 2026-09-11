@@ -1,9 +1,10 @@
 import { api } from "./client";
 import type {
-  ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate, AutoBuyPurchaseCreated, AutoBuyTransaction, CreateApplicantRequest, CreateApplicantResponse,
-  DashboardData, EmailSentResponse, KycInitiateResponse, KycStatusResponse, Purchase,
-  PurchaseCreate, PurchaseUpdate, QuickStats, TokenResponse, Transaction, TransactionList,
-  TransactionStats, UserProfile,
+  AdminAlert, AdminStats, AdminTxRow, AdminUserRow, ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate,
+  AutoBuyPurchaseCreated, AutoBuyTransaction, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
+  EmailSentResponse, IntegrationInfo, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
+  PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
+  TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
 } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
@@ -68,6 +69,7 @@ export const transactionAPI = {
 export const dashboardAPI = {
   overview: () => data<DashboardData>(api.get("/dashboard/")),
   quickStats: () => data<QuickStats>(api.get("/dashboard/stats")),
+  timeline: (days = 30) => data<Timeline>(api.get("/dashboard/analytics/timeline", { params: { days } })),
 };
 
 /** Auto-Buy purchases: buy on an exchange account, withdraw to a validated wallet. */
@@ -80,4 +82,41 @@ export const autoBuyAPI = {
   remove: (id: string) => api.delete(`/v2/purchases/${id}`),
   transactions: (id: string, status_filter?: string) =>
     data<AutoBuyTransaction[]>(api.get(`/v2/purchases/${id}/transactions`, { params: { status_filter } })),
+};
+
+export const analyticsAPI = {
+  performance: () => data<Performance>(api.get("/analytics/performance")),
+  recurring: () => data<RecurringProjection>(api.get("/analytics/recurring")),
+  volatility: () => data<{ entries: VolatilityEntry[] }>(api.get("/analytics/volatility")),
+  comparison: () => data<Comparison>(api.get("/analytics/comparison")),
+};
+
+export const reportsAPI = {
+  performance: () => data<ReportPerformance>(api.get("/reports/performance")),
+  /** Spreadsheet-ready FIFO lot list for a calendar year. */
+  taxCsv: (year: number) => data<Blob>(api.get("/reports/tax-summary", { params: { year, format: "csv" }, responseType: "blob" })),
+  /** 404 when the year has no completed purchases. */
+  exportPdf: (year: number) => data<Blob>(api.get("/reports/export", { params: { year }, responseType: "blob" })),
+};
+
+export const integrationsAPI = {
+  available: () => data<IntegrationInfo[]>(api.get("/integrations/available")),
+  webhooks: () => data<Webhook[]>(api.get("/integrations/webhooks")),
+  addWebhook: (url: string) => data<WebhookCreated>(api.post("/integrations/webhooks", { url })),
+  pingWebhook: (id: string) => data<Webhook>(api.post(`/integrations/webhooks/${id}/ping`)),
+  removeWebhook: (id: string) => api.delete(`/integrations/webhooks/${id}`),
+};
+
+/** Admin surface. The server enforces role=admin on every route (403 otherwise); the UI role check is cosmetic. */
+export const adminAPI = {
+  stats: () => data<AdminStats>(api.get("/admin/stats")),
+  users: (q = "", limit = 50, offset = 0) =>
+    data<{ items: AdminUserRow[]; total: number }>(api.get("/admin/users", { params: { q: q || undefined, limit, offset } })),
+  suspend: (id: string) => api.post(`/admin/users/${id}/suspend`),
+  unsuspend: (id: string) => api.post(`/admin/users/${id}/unsuspend`),
+  /** `confirm` must equal the user's email; the server rejects anything else. */
+  removeUser: (id: string, confirm: string) => api.delete(`/admin/users/${id}`, { params: { confirm } }),
+  transactions: (params: { status_filter?: string; user_id?: string; limit?: number; offset?: number } = {}) =>
+    data<{ items: AdminTxRow[]; total: number }>(api.get("/admin/transactions", { params })),
+  alerts: () => data<AdminAlert[]>(api.get("/admin/alerts")),
 };

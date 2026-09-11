@@ -2,6 +2,8 @@ import { useState, type FormEvent } from "react";
 import { authAPI, userAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
+import Integrations from "@/components/Settings/Integrations";
+import Reports from "@/components/Settings/Reports";
 import { useAsync } from "@/hooks/useAsync";
 import { useAuth } from "@/hooks/useAuth";
 import { passwordProblem } from "@/utils/validation";
@@ -106,6 +108,9 @@ export default function Settings() {
           <div className="sm:col-span-2"><button className="btn-primary" type="submit" disabled={!current || !next}>Update password</button></div>
         </form>
       </section>
+
+      <Reports />
+      <Integrations />
     </div>
   );
 }

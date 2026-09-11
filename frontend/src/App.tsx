@@ -12,6 +12,7 @@ const KYC = lazy(() => import("@/pages/KYC"));
 const Purchases = lazy(() => import("@/pages/Purchases"));
 const Transactions = lazy(() => import("@/pages/Transactions"));
 const Settings = lazy(() => import("@/pages/Settings"));
+const Admin = lazy(() => import("@/pages/Admin"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
                 <Route path="/purchases" element={<Purchases />} />
                 <Route path="/transactions" element={<Transactions />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/admin" element={<Admin />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Route>

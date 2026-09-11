@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { dashboardAPI } from "@/api/endpoints";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
+import Analytics from "@/components/Dashboard/Analytics";
+import InvestmentTimeline from "@/components/Dashboard/InvestmentTimeline";
 import { useAsync } from "@/hooks/useAsync";
 import { capitalize, fmtCrypto, fmtDay, fmtUsdt } from "@/utils/format";
 
@@ -16,12 +18,13 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
 
 export default function Dashboard() {
   const { data, loading, error, reload } = useAsync(
-    () => Promise.all([dashboardAPI.quickStats(), dashboardAPI.overview()]).then(([stats, overview]) => ({ stats, overview })),
+    () => Promise.all([dashboardAPI.quickStats(), dashboardAPI.overview(), dashboardAPI.timeline(30)])
+      .then(([stats, overview, timeline]) => ({ stats, overview, timeline })),
   );
 
   if (loading) return <Loading />;
   if (error || !data) return <Alert kind="error">{error} <button className="ml-2 underline" onClick={() => void reload()}>Retry</button></Alert>;
-  const { stats, overview } = data;
+  const { stats, overview, timeline } = data;
 
   return (
     <div className="space-y-6">
@@ -39,7 +42,7 @@ export default function Dashboard() {
         <Stat label="Verification" value={<StatusBadge status={stats.kyc_status} />} hint={`Monthly average ${fmtUsdt(overview.monthly_average_usdt)}`} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="card">
+        <section className="card" aria-label="Holdings">
           <h2 className="font-semibold">Holdings</h2>
           {overview.holdings.length === 0 ? <p className="mt-3 text-sm text-slate-500">No completed purchases yet.</p> : (
             <table className="mt-3 w-full text-sm">
@@ -50,18 +53,20 @@ export default function Dashboard() {
             </table>
           )}
         </section>
-        <section className="card">
-          <h2 className="font-semibold">Upcoming purchases</h2>
-          {overview.upcoming_purchases.length === 0 ? <p className="mt-3 text-sm text-slate-500">Nothing scheduled. <Link to="/purchases" className="text-brand-600 underline">Create a schedule</Link>.</p> : (
-            <ul className="mt-3 divide-y divide-slate-100 text-sm">{overview.upcoming_purchases.map((p) => (
-              <li key={p.id} className="flex items-center justify-between py-2">
-                <span><span className="font-medium">{p.crypto}</span> · {fmtUsdt(p.amount_usdt)} · {capitalize(p.frequency)}</span>
-                <span className="text-slate-500">{fmtDay(p.next_purchase_date)}</span>
-              </li>
-            ))}</ul>
-          )}
-        </section>
+        <InvestmentTimeline timeline={timeline} />
       </div>
+      <section className="card" aria-label="Upcoming purchases">
+        <h2 className="font-semibold">Upcoming purchases</h2>
+        {overview.upcoming_purchases.length === 0 ? <p className="mt-3 text-sm text-slate-500">Nothing scheduled. <Link to="/purchases" className="text-brand-600 underline">Create a schedule</Link>.</p> : (
+          <ul className="mt-3 divide-y divide-slate-100 text-sm">{overview.upcoming_purchases.map((p) => (
+            <li key={p.id} className="flex items-center justify-between py-2">
+              <span><span className="font-medium">{p.crypto}</span> · {fmtUsdt(p.amount_usdt)} · {capitalize(p.frequency)}</span>
+              <span className="text-slate-500">{fmtDay(p.next_purchase_date)}</span>
+            </li>
+          ))}</ul>
+        )}
+      </section>
+      <Analytics />
     </div>
   );
 }

@@ -220,3 +220,46 @@ export function purchaseMode(p: { purchase_type?: PurchaseType; withdraw_immedia
   if (typeof p.withdraw_immediately === "boolean") return p.withdraw_immediately ? "autobuy" : "dca";
   return null;
 }
+
+// ---- analytics (GET /api/analytics/*) ------------------------------------------
+export interface PerformanceHolding {
+  crypto: string; total_amount: number; invested_usdt: number; average_buy_price: number;
+  current_price?: number | null; market_value?: number | null;
+  unrealized_pnl_usdt?: number | null; unrealized_pnl_pct?: number | null;
+}
+export interface Performance {
+  price_available: boolean; holdings: PerformanceHolding[]; total_invested_usdt: number;
+  total_market_value?: number | null; total_pnl_usdt?: number | null; total_pnl_pct?: number | null;
+  best_performer?: string | null; worst_performer?: string | null;
+}
+export interface RecurringProjection {
+  schedules: { crypto: string; frequency: string; amount_usdt: number; monthly_usdt: number }[];
+  expected_monthly_usdt: number; projected_annual_usdt: number;
+}
+export interface VolatilityEntry { crypto: string; volatility_30d_pct?: number | null; level: string; recommendation: string }
+export interface ComparisonEntry { crypto: string; average_buy_price: number; current_price?: number | null; buy_price_vs_market_pct?: number | null }
+export interface Comparison { entries: ComparisonEntry[]; diversification_score: number }
+
+// ---- dashboard timeline (GET /api/dashboard/analytics/timeline) ------------------
+export interface TimelinePoint { date: string; transaction_count: number; total_usdt: number }
+export interface Timeline { days: number; timeline: TimelinePoint[] }
+
+// ---- reports (GET /api/reports/*) ------------------------------------------------
+export interface ReportPerformance {
+  has_data: boolean; price_available?: boolean; total_invested_usdt?: number; current_value_usdt?: number;
+  roi_pct?: number | null; annualized_roi_pct?: number | null; purchase_count?: number; first_purchase?: string | null;
+}
+
+// ---- integrations (GET/POST /api/integrations/*) ---------------------------------
+export interface IntegrationInfo { name: string; kind: string; status: string; detail: string }
+export interface Webhook { id: string; url: string; enabled: boolean; last_status?: string | null; created_at: string }
+export interface WebhookCreated extends Webhook { secret: string }
+
+// ---- admin (/api/admin/*, role=admin enforced server-side) -----------------------
+export interface AdminStats {
+  total_users: number; verified_users: number; suspended_users: number; total_invested_usdt: number;
+  total_transactions: number; failed_transactions_24h: number; active_purchases: number; signups_7d: number; volume_7d_usdt: number;
+}
+export interface AdminUserRow { id: string; email: string; role: string; kyc_status: string; suspended: boolean; created_at: string; invested_usdt: number }
+export interface AdminTxRow { id: string; user_id: string; crypto: string; cost_usdt: number; status: string; error_message?: string | null; created_at: string }
+export interface AdminAlert { name: string; severity: "ok" | "warning" | "critical"; value: string; detail: string }

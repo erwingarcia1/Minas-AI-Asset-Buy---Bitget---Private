@@ -28,14 +28,54 @@ async def admin(db):
         await db.commit()
 
 
-async def test_non_admin_gets_403_everywhere(db, user):
+ADMIN_ROUTES = [
+    # every route registered on api/routes/admin.py — each depends on require_admin
+    ("get", "/api/admin/stats"),
+    ("get", "/api/admin/users"),
+    ("post", "/api/admin/users/{uid}/suspend"),
+    ("post", "/api/admin/users/{uid}/unsuspend"),
+    ("delete", "/api/admin/users/{uid}?confirm=x@example.com"),
+    ("post", "/api/admin/users/{uid}/kyc-override"),
+    ("get", "/api/admin/transactions"),
+    ("post", "/api/admin/purchases/{uid}/force-retry"),
+    ("get", "/api/admin/alerts"),
+    ("post", "/api/admin/scheduler/pause"),
+    ("post", "/api/admin/scheduler/resume"),
+]
+
+
+def test_every_admin_route_is_guarded_by_require_admin():
+    """Static check: the guard is a dependency on every route in the admin router,
+    so a new route cannot be added without it showing up here."""
+    from api.routes import admin as admin_routes
+    from fastapi.routing import APIRoute
+
+    routes = [r for r in admin_routes.router.routes if isinstance(r, APIRoute)]
+    assert len(routes) == len(ADMIN_ROUTES)
+    for r in routes:
+        guards = [d.call for d in r.dependant.dependencies]
+        assert admin_routes.require_admin in guards, f"{r.path} lacks require_admin"
+
+
+async def test_non_admin_gets_403_on_every_admin_route(db, user):
     H = auth_headers(user)
+    uid = uuid.uuid4()
     async with client() as c:
-        for method, path in [("get", "/api/admin/stats"), ("get", "/api/admin/users"),
-                             ("get", "/api/admin/transactions"), ("get", "/api/admin/alerts"),
-                             ("post", f"/api/admin/users/{uuid.uuid4()}/suspend")]:
-            r = await getattr(c, method)(path, headers=H)
-            assert r.status_code == 403, (path, r.status_code)
+        for method, path in ADMIN_ROUTES:
+            kwargs = {"headers": H}
+            if "kyc-override" in path:
+                kwargs["json"] = {"status": "verified", "note": "manual review done"}
+            r = await getattr(c, method)(path.format(uid=uid), **kwargs)
+            assert r.status_code == 403, (method, path, r.status_code, r.text)
+            assert r.json()["detail"] == "Admin access required"
+
+
+async def test_unauthenticated_gets_401_on_every_admin_route():
+    uid = uuid.uuid4()
+    async with client() as c:
+        for method, path in ADMIN_ROUTES:
+            r = await getattr(c, method)(path.format(uid=uid))
+            assert r.status_code == 401, (method, path, r.status_code)
 
 
 async def test_stats_and_user_listing(db, admin, user, purchase):

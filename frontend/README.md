@@ -47,15 +47,22 @@ src/
   hooks/        useAuth (login/signup/logout), useAsync (loader state)
   components/   Common (ProtectedRoute, Loading, ErrorBoundary, Alert, StatusBadge)
                 Layout (MainContainer, Navbar, Sidebar) · Auth · KYC (Sumsub WebSDK) · Purchases
+                Dashboard (Analytics, InvestmentTimeline) · Settings (Reports, Integrations)
+                Admin (UserManagement, TransactionLog, AlertMonitor, ConfirmEmailDialog)
   pages/        Login, Signup, ForgotPassword, ResetPassword, Dashboard, KYC, Purchases,
-                Transactions, Settings, NotFound
+                Transactions, Settings, Admin, NotFound
   types/        response/request shapes mirrored from the API's OpenAPI spec
   utils/        formatting, validation, wallet-address and exchange-network helpers
   __tests__/    vitest + Testing Library
 ```
 
 Routes: `/login`, `/signup`, `/forgot-password`, `/reset-password` (public) ·
-`/dashboard`, `/kyc`, `/purchases`, `/transactions`, `/settings` (protected).
+`/dashboard`, `/kyc`, `/purchases`, `/transactions`, `/settings` (protected) ·
+`/admin` (protected; the link and page render only for `role = admin`, and every
+`/api/admin/*` route enforces that role on the server regardless).
+
+Analytics, projections and reports carry an "estimates only, not financial
+advice; past performance doesn't guarantee future results" note.
 
 ## Content-Security-Policy
 
