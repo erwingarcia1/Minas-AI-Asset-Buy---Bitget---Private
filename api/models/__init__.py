@@ -44,7 +44,14 @@ class APIKey(Base):
     encrypted_api_key = Column(String(500), nullable=False)
     encrypted_api_secret = Column(String(500), nullable=False)
     encrypted_passphrase = Column(String(500), nullable=True)  # OKX requires one
-    verified = Column(Boolean, default=False)
+    verified = Column(Boolean, nullable=False, default=False)   # executor gate; mirrors verification_status
+    # Outcome of the last verification (migration 015). The error text is
+    # what the exchange said, never credentials.
+    verification_status = Column(String(20), nullable=False, default="pending")  # pending | verified | failed
+    verification_error = Column(String(500), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    withdrawal_enabled = Column(Boolean, nullable=True)   # None = the exchange does not report permissions
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     

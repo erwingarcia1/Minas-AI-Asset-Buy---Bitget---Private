@@ -86,6 +86,11 @@ class APIKeyResponse(UTCModel):
     exchange: str
     api_key_masked: str
     verified: bool
+    verification_status: str = "pending"          # pending | verified | failed
+    verification_error: Optional[str] = None      # readable reason when failed (never credentials)
+    verified_at: Optional[datetime] = None
+    last_checked_at: Optional[datetime] = None
+    withdrawal_enabled: Optional[bool] = None     # None = not reported by the exchange
     created_at: datetime
     updated_at: datetime
 
@@ -99,7 +104,12 @@ def _to_response(key: APIKey) -> APIKeyResponse:
         id=key.id,
         exchange=key.exchange,
         api_key_masked=mask_api_key(decrypt_value(key.encrypted_api_key)),
-        verified=key.verified,
+        verified=bool(key.verified),
+        verification_status=key.verification_status or "pending",
+        verification_error=key.verification_error,
+        verified_at=key.verified_at,
+        last_checked_at=key.last_checked_at,
+        withdrawal_enabled=key.withdrawal_enabled,
         created_at=key.created_at,
         updated_at=key.updated_at,
     )
@@ -138,7 +148,12 @@ async def add_or_update_key(
         key.encrypted_api_secret = encrypt_value(payload.api_secret)
         key.encrypted_passphrase = (encrypt_value(payload.passphrase)
                                     if payload.passphrase else None)
-        key.verified = False  # re-verify after any credential change
+        # re-verify after any credential change
+        key.verified = False
+        key.verification_status = "pending"
+        key.verification_error = None
+        key.verified_at = None
+        key.withdrawal_enabled = None
         key.updated_at = to_db_datetime(utc_now())
 
     await db.commit()
@@ -164,9 +179,15 @@ async def list_keys(
 
 class KeyVerifyResponse(BaseModel):
     verified: bool
-    result: str  # ok | invalid_key | no_trade_permission | error
+    result: str  # ok | invalid_key | ip_not_allowed | no_trade_permission | unreachable | error
     detail: str
     withdrawal_permission_warning: bool = False
+    verification_status: str = "pending"
+    verification_error: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    last_checked_at: Optional[datetime] = None
+    withdrawal_enabled: Optional[bool] = None
+    key: Optional[APIKeyResponse] = None
 
 
 @router.post("/keys/{key_id}/verify", response_model=KeyVerifyResponse)
@@ -177,9 +198,12 @@ async def verify_key(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Check the stored key against Binance and mark it verified if usable."""
-    import asyncio
-    from api.services.binance_client import BinanceClient, BinanceClientError
+    """Check the stored key against its exchange with one harmless authenticated
+    call (account info on Binance/Bitget, a balance read elsewhere) and record
+    the outcome on the key: verified | failed with a readable reason,
+    verified_at / last_checked_at, and whether the key can withdraw. Always
+    200; ``verified`` and ``result`` carry the outcome."""
+    from api.services.key_verification import verify_api_key
 
     result = await db.execute(
         select(APIKey).where(APIKey.id == key_id, APIKey.user_id == current_user.id)
@@ -188,44 +212,14 @@ async def verify_key(
     if key is None:
         raise HTTPException(status_code=404, detail="API key not found")
 
-    client = BinanceClient(
-        decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
-        passphrase=(decrypt_value(key.encrypted_passphrase)
-                    if key.encrypted_passphrase else ""),
-        exchange=key.exchange)
-    try:
-        if key.exchange == "binance":
-            info = await asyncio.to_thread(client.get_account_info)
-        else:
-            # other venues: an authenticated balance call proves the key works
-            # (per-permission introspection is Binance-specific)
-            await asyncio.to_thread(client.get_account_balance, "USDT")
-            info = {"can_trade": True, "can_withdraw": False, "permissions": ["SPOT"]}
-    except BinanceClientError as exc:
-        key.verified = False
-        await db.commit()
-        invalid = str(exc.code) in ("-2014", "-2015", "-1022")
-        return KeyVerifyResponse(
-            verified=False,
-            result="invalid_key" if invalid else "error",
-            detail=("Key rejected by Binance — wrong key/secret, or this server's IP "
-                    "is not on the key's allowlist") if invalid else str(exc),
-        )
-
-    if not info["can_trade"] or "SPOT" not in info["permissions"]:
-        key.verified = False
-        await db.commit()
-        return KeyVerifyResponse(
-            verified=False, result="no_trade_permission",
-            detail="Key authenticates but lacks spot trading permission")
-
-    key.verified = True
-    key.updated_at = to_db_datetime(utc_now())
-    await db.commit()
+    outcome = await verify_api_key(db, key)
+    await db.refresh(key)
     return KeyVerifyResponse(
-        verified=True, result="ok",
-        detail="Key verified: spot trading enabled",
-        withdrawal_permission_warning=info["can_withdraw"],
+        verified=outcome.verified, result=outcome.result, detail=outcome.detail,
+        withdrawal_permission_warning=bool(outcome.withdrawal_enabled),
+        verification_status=key.verification_status, verification_error=key.verification_error,
+        verified_at=key.verified_at, last_checked_at=key.last_checked_at,
+        withdrawal_enabled=key.withdrawal_enabled, key=_to_response(key),
     )
 
 

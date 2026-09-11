@@ -62,17 +62,39 @@ class BinanceClient:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
 
     def get_account_info(self) -> dict:
-        """Account trade/withdraw permissions (authenticated). Used to verify keys."""
+        """Account trade/withdraw permissions (authenticated). Used to verify keys.
+
+        Returns {can_trade, can_withdraw, permissions, permissions_known}.
+        Binance and Bitget report the key's permissions; Bybit/OKX only prove
+        the key works (a balance read), so ``permissions_known`` is False and
+        can_trade/can_withdraw are None.
+        """
         try:
-            data = self._client._request(
-                "GET", "/api/v3/account", params={"omitZeroBalances": "true"}, auth=True)
-            return {
-                "can_trade": bool(data.get("canTrade")),
-                "can_withdraw": bool(data.get("canWithdraw")),
-                "permissions": data.get("permissions") or [],
-            }
+            if self.exchange == "binance":
+                data = self._client._request(
+                    "GET", "/api/v3/account", params={"omitZeroBalances": "true"}, auth=True)
+                return {
+                    "can_trade": bool(data.get("canTrade")),
+                    "can_withdraw": bool(data.get("canWithdraw")),
+                    "permissions": data.get("permissions") or [],
+                    "permissions_known": True,
+                }
+            if self.exchange == "bitget":
+                info = self._client.get_account_info()
+                auths = [a.lower() for a in info.get("authorities") or []]
+                known = bool(auths)
+                return {
+                    "can_trade": any("trade" in a or "spot" in a for a in auths) if known else None,
+                    "can_withdraw": any("withdraw" in a or "transfer" in a for a in auths) if known else None,
+                    "permissions": auths,
+                    "permissions_known": known,
+                }
+            # other venues: an authenticated balance read proves the key works
+            self._client.get_spot_available("USDT")
+            return {"can_trade": None, "can_withdraw": None, "permissions": [], "permissions_known": False}
         except ExchangeAPIError as exc:
-            raise BinanceClientError(str(exc), str(getattr(exc, "code", "BINANCE"))) from exc
+            raise BinanceClientError(exc.message if hasattr(exc, "message") else str(exc),
+                                     str(getattr(exc, "code", "BINANCE"))) from exc
 
     def get_account_balance(self, coin: str) -> float:
         """Available (free) spot balance of `coin` (authenticated)."""

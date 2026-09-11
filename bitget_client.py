@@ -114,6 +114,21 @@ class BitgetClient:
 
     # -------------------------------------------------------------- private
 
+    def get_account_info(self):
+        """Account info for the key owner: ``{"user_id", "ips", "authorities"}``.
+
+        A harmless authenticated call (no balances, no orders) that proves the
+        key, secret, passphrase and IP allowlist are all accepted. ``authorities``
+        is Bitget's list of the key's permissions (e.g. "readonly", "trade",
+        "withdraw"); empty when the venue does not report it.
+        """
+        data = self._request("GET", "/api/v2/spot/account/info") or {}
+        auths = data.get("authorities") or []
+        if isinstance(auths, str):
+            auths = [a for a in auths.replace(";", ",").split(",") if a]
+        return {"user_id": str(data.get("userId", "")), "ips": data.get("ips"),
+                "authorities": [str(a) for a in auths]}
+
     def get_spot_available(self, coin):
         """Available (free) spot balance of `coin` for the account owning this API key."""
         data = self._request("GET", "/api/v2/spot/account/assets", params={"coin": coin})

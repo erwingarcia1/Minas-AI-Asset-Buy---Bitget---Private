@@ -2,7 +2,7 @@ import { api } from "./client";
 import type {
   AdminAlert, AdminStats, AdminTxRow, AdminUserRow, ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate,
   AutoBuyPurchaseCreated, AutoBuyTransaction, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
-  EmailSentResponse, IntegrationInfo, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
+  EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
   PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
 } from "@/types";
@@ -35,7 +35,7 @@ export const userAPI = {
   exchangeKeys: () => data<ApiKey[]>(api.get("/exchange/keys")),
   addExchangeKey: (body: { exchange: string; api_key: string; api_secret: string; passphrase?: string }) =>
     data<ApiKey>(api.post("/exchange/keys", body)),
-  verifyExchangeKey: (id: string) => data<unknown>(api.post(`/exchange/keys/${id}/verify`)),
+  verifyExchangeKey: (id: string) => data<KeyVerifyResponse>(api.post(`/exchange/keys/${id}/verify`)),
   deleteExchangeKey: (id: string) => api.delete(`/exchange/keys/${id}`),
 };
 

@@ -1,0 +1,149 @@
+"""Exchange API key verification: one harmless authenticated call, then the
+outcome is ALWAYS written to the row and logged.
+
+Outcome vocabulary (``result``):
+
+* ``ok``                  – authenticated; spot trading allowed (or not reported)
+* ``invalid_key``         – the venue rejected the key/secret/passphrase/signature
+* ``ip_not_allowed``      – the venue rejected this server's IP (allowlist)
+* ``no_trade_permission`` – authenticated, but the key cannot trade spot
+* ``unreachable``         – transport failure / non-JSON answer from the venue
+* ``error``               – any other venue error (code + message recorded)
+
+Every outcome updates ``verification_status`` (verified | failed),
+``verification_error`` (readable, never credentials), ``last_checked_at``,
+``verified_at`` on success, ``withdrawal_enabled`` when the venue reports
+permissions, and the ``verified`` boolean the executor gates on.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Optional
+
+from api.models import APIKey
+from api.services.binance_client import BinanceClient, BinanceClientError
+
+logger = logging.getLogger("autobuy.exchange")
+
+# Venue error codes that mean "these credentials are wrong" / "your IP is not allowed".
+INVALID_CODES = {
+    "binance": {"-2014", "-2015", "-1022", "-1002"},
+    # 40006 invalid ACCESS_KEY · 40009 signature error · 40011/40012 wrong passphrase
+    # · 40037 apikey does not exist · 40014 incorrect permissions (treated below)
+    "bitget": {"40006", "40009", "40011", "40012", "40037", "40013"},
+    "bybit": {"10003", "10004", "33004"},
+    "okx": {"50111", "50113", "50101"},
+}
+IP_CODES = {
+    "bitget": {"40018"},          # Invalid IP
+    "bybit": {"10010"},           # request IP not in the whitelist
+    "okx": {"50110"},             # IP not on the allowlist
+    "binance": set(),             # Binance folds it into -2015 ("Invalid API-key, IP, or permissions")
+}
+TRANSPORT_CODES = {"NETWORK", "HTTP"}
+
+VENUE_NAMES = {"binance": "Binance", "bitget": "Bitget", "bybit": "Bybit", "okx": "OKX"}
+
+
+@dataclass
+class Verification:
+    verified: bool
+    result: str
+    detail: str
+    withdrawal_enabled: Optional[bool] = None
+    error_code: Optional[str] = None
+
+
+def classify(exchange: str, exc: BinanceClientError) -> tuple[str, str]:
+    """(result, readable detail) for a venue error. Never includes credentials:
+    the venue's own message is about codes, IPs and signatures."""
+    code = str(exc.code)
+    msg = str(exc).strip()
+    lowered = msg.lower()
+    venue = VENUE_NAMES.get(exchange, exchange)
+    if code in TRANSPORT_CODES:
+        return "unreachable", f"{venue} unreachable ({code}): {msg[:200]}"
+    if code in IP_CODES.get(exchange, set()) or ("ip" in lowered and ("whitelist" in lowered or "allow" in lowered or "invalid ip" in lowered)):
+        return "ip_not_allowed", (f"{venue} rejected this server's IP address (error {code}): {msg[:160]}. "
+                                  "Add the server's IP to the key's allowlist, or create the key without an IP restriction.")
+    if code in INVALID_CODES.get(exchange, set()) or exchange == "binance" and code == "-2015":
+        return "invalid_key", (f"{venue} rejected the credentials (error {code}): {msg[:160]}. "
+                               "Check the key, secret" + (", passphrase" if exchange in ("bitget", "okx") else "")
+                               + " and, on Binance, the IP allowlist.")
+    return "error", f"{venue} error {code}: {msg[:200]}"
+
+
+def _check(client: BinanceClient) -> dict:
+    return client.get_account_info()
+
+
+async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verification:
+    """Run the check and persist the outcome on ``key``. Never raises for venue
+    problems; only unexpected programming errors propagate."""
+    from api.routes.exchange import decrypt_value
+    factory = client_factory or BinanceClient
+    client = factory(decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
+                     passphrase=decrypt_value(key.encrypted_passphrase) if key.encrypted_passphrase else "",
+                     exchange=key.exchange)
+    now = datetime.now(timezone.utc)
+    venue = VENUE_NAMES.get(key.exchange, key.exchange)
+    log_ctx = {"user_id": str(key.user_id), "key_id": str(key.id), "exchange": key.exchange}
+
+    try:
+        info = await asyncio.to_thread(_check, client)
+    except BinanceClientError as exc:
+        result, detail = classify(key.exchange, exc)
+        outcome = Verification(verified=False, result=result, detail=detail, error_code=str(exc.code))
+        _record(key, outcome, now)
+        await db.commit()
+        logger.warning("api_key_verification_failed",
+                       extra={**log_ctx, "result": result, "exchange_code": str(exc.code),
+                              "exchange_message": str(exc)[:200]})
+        return outcome
+    except Exception as exc:  # decrypt failure, bug in a client: still record it
+        outcome = Verification(verified=False, result="error",
+                               detail=f"verification failed: {type(exc).__name__}", error_code=type(exc).__name__)
+        _record(key, outcome, now)
+        await db.commit()
+        logger.exception("api_key_verification_crashed", extra=log_ctx)
+        return outcome
+
+    can_trade = info.get("can_trade")
+    can_withdraw = info.get("can_withdraw")
+    if can_trade is False:
+        outcome = Verification(verified=False, result="no_trade_permission",
+                               detail=f"{venue} accepted the key but it has no spot trading permission "
+                                      f"(permissions: {', '.join(info.get('permissions') or []) or 'none'}). "
+                                      "Enable spot trading on the key.",
+                               withdrawal_enabled=can_withdraw)
+        _record(key, outcome, now)
+        await db.commit()
+        logger.warning("api_key_verification_failed",
+                       extra={**log_ctx, "result": outcome.result, "permissions": info.get("permissions")})
+        return outcome
+
+    if info.get("permissions_known"):
+        detail = f"Key verified on {venue}: spot trading enabled"
+        if can_withdraw:
+            detail += ". WARNING: this key can also withdraw — restrict it to spot trading only."
+    else:
+        detail = f"Key verified on {venue} (permissions are not reported by this exchange)"
+    outcome = Verification(verified=True, result="ok", detail=detail, withdrawal_enabled=can_withdraw)
+    _record(key, outcome, now)
+    await db.commit()
+    logger.info("api_key_verified", extra={**log_ctx, "withdrawal_enabled": can_withdraw,
+                                           "permissions": info.get("permissions")})
+    return outcome
+
+
+def _record(key: APIKey, outcome: Verification, now: datetime) -> None:
+    key.verified = outcome.verified
+    key.verification_status = "verified" if outcome.verified else "failed"
+    key.verification_error = None if outcome.verified else outcome.detail[:500]
+    key.last_checked_at = now
+    key.verified_at = now if outcome.verified else key.verified_at
+    key.withdrawal_enabled = outcome.withdrawal_enabled
+    key.updated_at = now

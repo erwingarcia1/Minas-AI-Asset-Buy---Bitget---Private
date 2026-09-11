@@ -7,7 +7,7 @@ import Reports from "@/components/Settings/Reports";
 import { useAsync } from "@/hooks/useAsync";
 import { useAuth } from "@/hooks/useAuth";
 import { passwordProblem } from "@/utils/validation";
-import { fmtDate } from "@/utils/format";
+import { capitalize, fmtDate } from "@/utils/format";
 
 type Msg = { kind: "error" | "success"; text: string } | null;
 
@@ -46,15 +46,25 @@ export default function Settings() {
     } catch (err) { setMailMsg({ kind: "error", text: errorMessage(err) }); }
   }
 
+  const [verifying, setVerifying] = useState<string | null>(null);
+
+  async function verifyKey(id: string) {
+    setKeyMsg(null); setVerifying(id);
+    try {
+      const v = await userAPI.verifyExchangeKey(id);
+      setKeyMsg({ kind: v.verified ? "success" : "error", text: v.detail });
+    } catch (err) { setKeyMsg({ kind: "error", text: errorMessage(err, "Verification request failed") }); }
+    finally { setVerifying(null); await keys.reload(); }
+  }
+
   async function addKey(e: FormEvent) {
     e.preventDefault();
     setKeyMsg(null);
     try {
       const k = await userAPI.addExchangeKey({ exchange, api_key: apiKey, api_secret: apiSecret, passphrase: passphrase || undefined });
       setApiKey(""); setApiSecret(""); setPassphrase("");
-      await userAPI.verifyExchangeKey(k.id).catch(() => undefined);
-      setKeyMsg({ kind: "success", text: "Key saved and verification requested." });
       await keys.reload();
+      await verifyKey(k.id);   // the outcome (verified / failed + reason) is shown, never swallowed
     } catch (err) { setKeyMsg({ kind: "error", text: errorMessage(err) }); }
   }
 
@@ -81,20 +91,38 @@ export default function Settings() {
           <ul className="divide-y divide-slate-100 text-sm">
             {keys.data?.length === 0 && <li className="py-2 text-slate-500">No keys on file.</li>}
             {keys.data?.map((k) => (
-              <li key={k.id} className="flex items-center justify-between py-2">
-                <span><span className="font-medium capitalize">{k.exchange}</span> <span className="text-slate-500">{String(k.api_key_masked ?? "")}</span> <StatusBadge status={k.verified ? "verified" : "pending"} /></span>
-                <button className="btn-danger !py-1" onClick={() => void userAPI.deleteExchangeKey(k.id).then(() => keys.reload())}>Remove</button>
+              <li key={k.id} className="py-2" data-testid="exchange-key">
+                <div className="flex items-center justify-between gap-3">
+                  <span><span className="font-medium capitalize">{k.exchange}</span> <span className="text-slate-500">{String(k.api_key_masked ?? "")}</span> <StatusBadge status={k.verification_status ?? (k.verified ? "verified" : "pending")} /></span>
+                  <span className="space-x-2 whitespace-nowrap">
+                    {k.verification_status !== "verified" && (
+                      <button className="btn-secondary !py-1" disabled={verifying === k.id} onClick={() => void verifyKey(k.id)}>
+                        {verifying === k.id ? "Verifying…" : k.verification_status === "failed" ? "Retry verification" : "Verify now"}
+                      </button>
+                    )}
+                    <button className="btn-danger !py-1" onClick={() => void userAPI.deleteExchangeKey(k.id).then(() => keys.reload())}>Remove</button>
+                  </span>
+                </div>
+                {k.verification_status === "failed" && k.verification_error && (
+                  <p className="mt-1 text-xs text-red-600" role="alert">{k.verification_error}{k.last_checked_at ? ` (checked ${fmtDate(k.last_checked_at)})` : ""}</p>
+                )}
+                {k.verification_status === "verified" && k.withdrawal_enabled && (
+                  <p className="mt-1 text-xs text-amber-700" role="status">This key can withdraw funds. Restrict it to spot trading only on {capitalize(k.exchange)}.</p>
+                )}
+                {k.verification_status === "verified" && k.verified_at && (
+                  <p className="mt-1 text-xs text-slate-400">Verified {fmtDate(k.verified_at)}</p>
+                )}
               </li>
             ))}
           </ul>
         )}
         {keyMsg && <Alert kind={keyMsg.kind}>{keyMsg.text}</Alert>}
         <form onSubmit={addKey} className="grid gap-3 sm:grid-cols-2">
-          <div><label className="label">Exchange</label>
-            <select className="input" value={exchange} onChange={(e) => setExchange(e.target.value)}><option value="binance">Binance</option><option value="bitget">Bitget</option><option value="bybit">Bybit</option><option value="okx">OKX</option></select></div>
-          <div><label className="label">Passphrase (Bitget/OKX)</label><input className="input" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} /></div>
-          <div><label className="label">API key</label><input className="input" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" /></div>
-          <div><label className="label">API secret</label><input className="input" type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} autoComplete="off" /></div>
+          <div><label className="label" htmlFor="key-exchange">Exchange</label>
+            <select id="key-exchange" className="input" value={exchange} onChange={(e) => setExchange(e.target.value)}><option value="binance">Binance</option><option value="bitget">Bitget</option><option value="bybit">Bybit</option><option value="okx">OKX</option></select></div>
+          <div><label className="label" htmlFor="key-passphrase">Passphrase (Bitget/OKX)</label><input id="key-passphrase" className="input" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} /></div>
+          <div><label className="label" htmlFor="key-api-key">API key</label><input id="key-api-key" className="input" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" /></div>
+          <div><label className="label" htmlFor="key-api-secret">API secret</label><input id="key-api-secret" className="input" type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} autoComplete="off" /></div>
           <div className="sm:col-span-2"><button className="btn-primary" type="submit" disabled={!apiKey || !apiSecret}>Save key</button></div>
         </form>
       </section>

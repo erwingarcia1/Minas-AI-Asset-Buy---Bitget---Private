@@ -221,8 +221,7 @@ def test_binance_account_info_and_balance(monkeypatch):
         def get_spot_available(self, coin): return 3.14
     monkeypatch.setattr(bc_mod, "_LegacyClient", lambda **kw: FakeLegacy())
     c = bc_mod.BinanceClient("k", "s")
-    assert c.get_account_info() == {"can_trade": True, "can_withdraw": False,
-                                    "permissions": ["SPOT"]}
+    assert c.get_account_info() == {"can_trade": True, "can_withdraw": False, "permissions": ["SPOT"], "permissions_known": True}
     assert c.get_account_balance("BTC") == 3.14
 
 

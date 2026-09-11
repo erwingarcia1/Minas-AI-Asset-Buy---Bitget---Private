@@ -156,13 +156,31 @@ export interface EmailSentResponse {
   email_id: string | null;
 }
 
+export type VerificationStatus = "pending" | "verified" | "failed";
+
 export interface ApiKey {
   id: string;
   exchange: string;
   api_key_masked?: string;
   verified: boolean;
+  verification_status: VerificationStatus;
+  verification_error?: string | null;     // readable reason when failed (never credentials)
+  verified_at?: string | null;
+  last_checked_at?: string | null;
+  withdrawal_enabled?: boolean | null;    // null = the exchange does not report permissions
   created_at: string;
   [key: string]: unknown;
+}
+
+export interface KeyVerifyResponse {
+  verified: boolean;
+  result: "ok" | "invalid_key" | "ip_not_allowed" | "no_trade_permission" | "unreachable" | "error";
+  detail: string;
+  withdrawal_permission_warning: boolean;
+  verification_status: VerificationStatus;
+  verification_error?: string | null;
+  withdrawal_enabled?: boolean | null;
+  key?: ApiKey | null;
 }
 
 /** FastAPI error body: `detail` is a string or a list of validation errors. */

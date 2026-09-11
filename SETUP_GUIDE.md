@@ -75,6 +75,7 @@ alembic upgrade head # apply the real fixes (002+)
 | `002` | `transactions.recurring_purchase_id` FK → `ON DELETE SET NULL` (deleting a schedule no longer destroys its transaction history) · all datetime columns → `timestamptz` (existing values interpreted as UTC) · index on `transactions (user_id, created_at)` |
 | `010`–`013` | Auto-Buy: `wallets`, `purchases`, `purchase_transactions` (+ purchase_type / tx_type enums, fill details). `purchase_transactions` is the only execution history |
 | `014` | Drops the retired legacy tables `transactions` and `recurring_purchases` (take a `pg_dump` first; the downgrade recreates them empty) |
+| `015` | `api_keys.verification_status` / `verification_error` / `verified_at` / `last_checked_at` / `withdrawal_enabled`, backfilled from the old boolean |
 
 ## Running tests
 
