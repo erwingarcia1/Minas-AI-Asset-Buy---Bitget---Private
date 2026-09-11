@@ -66,7 +66,7 @@ os.environ["RATE_LIMIT_ENABLED"] = "0"       # tests that need limits enable the
 os.environ["AUTOBUY_DB_POOL"] = "null"       # pooled asyncpg conns pin to one event loop
 os.environ["SECRET_KEY"] = "test-only-secret-key-" + "0" * 40
 os.environ["ENCRYPTION_KEY"] = ""
-os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000,http://localhost:8000"
+os.environ["ALLOWED_ORIGINS"] = "http://localhost:5173,http://localhost:8000"
 for var in ("RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_REPLY_TO", "SUPPORT_EMAIL", "APP_BASE_URL",
             "APP_NAME", "LOG_RESET_LINKS", "SUMSUB_APP_TOKEN", "SUMSUB_SECRET_KEY", "SUMSUB_WEBHOOK_SECRET",
             "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "FCM_SERVER_KEY", "SLACK_WEBHOOK_URL"):

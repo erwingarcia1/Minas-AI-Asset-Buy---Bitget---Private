@@ -1,49 +1,45 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
-import Header from "./components/common/Header";
-import Sidebar from "./components/common/Sidebar";
-import DashboardPage from "./pages/DashboardPage";
-import LoginPage from "./pages/LoginPage";
-import RegisterPage from "./pages/RegisterPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-import NotFoundPage from "./pages/NotFoundPage";
-import AdminPage from "./pages/AdminPage";
-import PurchasesPage from "./pages/PurchasesPage";
-import AutoBuyPage from "./pages/Purchases";
-import SettingsPage from "./pages/SettingsPage";
-import { isLoggedIn } from "./services/auth";
+import { lazy, Suspense } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { ErrorBoundary, Loading, ProtectedRoute, PublicOnlyRoute } from "@/components/Common";
+import { MainContainer } from "@/components/Layout";
 
-function ProtectedLayout() {
-  if (!isLoggedIn()) return <Navigate to="/login" replace />;
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
-      <div className="flex">
-        <Sidebar />
-        <main className="flex-1"><Outlet /></main>
-      </div>
-    </div>
-  );
-}
+const Login = lazy(() => import("@/pages/Login"));
+const Signup = lazy(() => import("@/pages/Signup"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const KYC = lazy(() => import("@/pages/KYC"));
+const Purchases = lazy(() => import("@/pages/Purchases"));
+const Transactions = lazy(() => import("@/pages/Transactions"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const NotFound = lazy(() => import("@/pages/NotFound"));
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route element={<ProtectedLayout />}>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/purchases" element={<PurchasesPage />} />
-          <Route path="/auto-buy" element={<AutoBuyPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-        </Route>
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Suspense fallback={<Loading full />}>
+          <Routes>
+            <Route element={<PublicOnlyRoute />}>
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+            </Route>
+            <Route element={<ProtectedRoute />}>
+              <Route element={<MainContainer />}>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/kyc" element={<KYC />} />
+                <Route path="/purchases" element={<Purchases />} />
+                <Route path="/transactions" element={<Transactions />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<NotFound />} />
+              </Route>
+            </Route>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

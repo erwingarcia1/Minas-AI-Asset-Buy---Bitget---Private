@@ -1,50 +1,81 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import PurchaseForm, { validateAmount } from "../components/Purchases/PurchaseForm";
+import PurchaseForm, { validateAmountUsd } from "@/components/Purchases/PurchaseForm";
 
-vi.mock("../services/api", () => ({
-  purchases: { create: vi.fn(), update: vi.fn() },
+vi.mock("@/api/endpoints", () => ({
+  autoBuyAPI: { create: vi.fn() },
+  userAPI: { exchangeKeys: vi.fn() },
 }));
-import { purchases } from "../services/api";
+import { autoBuyAPI, userAPI } from "@/api/endpoints";
 
-describe("validateAmount", () => {
-  it("enforces the 10..1,000,000 USDT bounds", () => {
-    expect(validateAmount(9.99)).toMatch(/Minimum/);
-    expect(validateAmount(10)).toBeNull();
-    expect(validateAmount(1_000_000)).toBeNull();
-    expect(validateAmount(1_000_001)).toMatch(/Maximum/);
-    expect(validateAmount(NaN)).toMatch(/Enter/);
-  });
-});
+const KEY = { id: "k1", exchange: "binance", api_key_masked: "abcd…wxyz", verified: true, created_at: "", updated_at: "" };
+const ETH = "0x52908400098527886E0F7030069857D2E4169EE7";
+const BTC = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+const CREATED = { purchase_id: "p1", status: "active", next_execution: null };
 
-describe("PurchaseForm", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
-
-  it("submits a valid schedule", async () => {
-    vi.mocked(purchases.create).mockResolvedValue({ id: "p1" } as never);
-    const onSaved = vi.fn();
-    render(<PurchaseForm onSaved={onSaved} onCancel={() => undefined} />);
-    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "250" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create schedule" }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(purchases.create).toHaveBeenCalledWith(
-      expect.objectContaining({ crypto: "BTC", amount_usdt: 250, frequency: "weekly" }));
+describe("unified purchase form (Auto-Buy / DCA)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
+    vi.mocked(autoBuyAPI.create).mockResolvedValue(CREATED as never);
   });
 
-  it("blocks submission below the minimum and shows the reason", () => {
-    render(<PurchaseForm onSaved={() => undefined} onCancel={() => undefined} />);
-    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "5" } });
-    expect(screen.getByText(/Minimum is 10 USDT/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create schedule" })).toBeDisabled();
-    expect(purchases.create).not.toHaveBeenCalled();
+  it("validates amount bounds", () => {
+    expect(validateAmountUsd(9)).toMatch(/Minimum/);
+    expect(validateAmountUsd(10)).toBeNull();
+    expect(validateAmountUsd(1_000_001)).toMatch(/Maximum/);
+    expect(validateAmountUsd(Number.NaN)).toMatch(/Enter an amount/);
+  });
+
+  it("shows a red X for a mismatched address and a green check for a valid one, then submits as autobuy", async () => {
+    const onCreated = vi.fn();
+    render(<PurchaseForm onCreated={onCreated} />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    const addr = screen.getByLabelText(/Wallet address/);
+    fireEvent.change(addr, { target: { value: ETH } });
+    expect(screen.getByTestId("address-indicator")).toHaveTextContent("✗");
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
+    fireEvent.change(addr, { target: { value: BTC } });
+    expect(screen.getByTestId("address-indicator")).toHaveTextContent("✓");
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED));
+    expect(autoBuyAPI.create).toHaveBeenCalledWith(expect.objectContaining({
+      crypto_symbol: "BTC", blockchain_network: "mainnet", exchange_account_id: "k1", frequency: "weekly",
+      amount_usd: 50, wallet_address: BTC, purchase_type: "autobuy", withdraw_immediately: true,
+    }));
+    expect(screen.getByRole("status")).toHaveTextContent(/Purchase created \(autobuy\)/);
+  });
+
+  it("unticking 'Withdraw immediately' submits DCA mode and still requires the wallet address", async () => {
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));
+    expect(screen.getByText(/Accumulate on exchange \(DCA\)/)).toBeInTheDocument();
+    // No address yet: submit is blocked and the required hint appears after blur.
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
+    fireEvent.blur(screen.getByLabelText(/Wallet address/));
+    expect(screen.getByText(/A wallet address is required/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
+    expect(autoBuyAPI.create).toHaveBeenCalledWith(expect.objectContaining({ purchase_type: "dca", withdraw_immediately: false, wallet_address: BTC }));
+  });
+
+  it("warns and blocks when the exchange cannot withdraw to the network", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([{ ...KEY, exchange: "kraken" }] as never);
+    render(<PurchaseForm />);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/does not support withdrawals to mainnet/));
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
+    expect(autoBuyAPI.create).not.toHaveBeenCalled();
   });
 
   it("surfaces API validation errors", async () => {
-    vi.mocked(purchases.create).mockRejectedValue(
-      { response: { data: { detail: "An active BTC schedule already exists" } } });
-    render(<PurchaseForm onSaved={() => undefined} onCancel={() => undefined} />);
-    fireEvent.click(screen.getByRole("button", { name: "Create schedule" }));
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("already exists"));
+    vi.mocked(autoBuyAPI.create).mockRejectedValue({ response: { status: 422, data: { detail: "amount_usd must be at least 10" } } });
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Could not create the purchase|amount_usd/));
   });
 });

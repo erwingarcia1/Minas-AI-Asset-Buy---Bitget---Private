@@ -9,6 +9,9 @@ config.json
 .env.bak
 .env.production
 .env.*.local
+# Vite mode files hold only VITE_API_BASE_URL (no secrets); keep them tracked.
+!frontend/.env.development
+!frontend/.env.production
 data/
 
 __pycache__/

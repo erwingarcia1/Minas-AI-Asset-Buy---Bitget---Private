@@ -116,7 +116,7 @@ def test_build_app_link_uses_app_base_url_and_each_fallback_level(monkeypatch):
     monkeypatch.setattr(settings, "allowed_origins_csv", "https://dash.example.test/,https://other.example.test")
     assert build_app_link("verify-email", token="t") == "https://dash.example.test/verify-email?token=t"
     monkeypatch.setattr(settings, "allowed_origins_csv", "")
-    assert build_app_link("/x") == "http://localhost:3000/x"
+    assert build_app_link("/x") == "http://localhost:5173/x"
     monkeypatch.setattr(settings, "api_env", "production")
     with pytest.raises(RuntimeError, match="APP_BASE_URL"):
         build_app_link("/x")

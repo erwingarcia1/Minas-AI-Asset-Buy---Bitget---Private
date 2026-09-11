@@ -52,6 +52,27 @@ default Postgres password). Warnings cover disabled features, plain-http
 origins, and `AUTOBUY_DRY_RUN=0`. Values are never printed. `scripts/deploy.sh
 platform` performs its own, narrower check afterwards.
 
+## Web frontend
+
+The SPA in `frontend/` is static files; it is not part of the API image.
+Build it on the server (or in CI) and let nginx serve it:
+
+```bash
+cd frontend && npm ci && npm run build          # -> frontend/dist
+sudo rsync -a --delete frontend/dist/ /var/www/autobuy/frontend/dist/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+`deployment/nginx.conf` has two vhosts: `api.example.com` (API only) and
+`app.example.com`, which serves `frontend/dist` with an SPA fallback, forwards
+`/api/` and `/health` to the API upstream, and sets a Content-Security-Policy
+that allows only Sumsub's origins (`api.sumsub.com`, `in.sumsub.com`,
+`static.sumsub.com`) for the KYC widget. Replace the hostnames and certificate
+paths. Because the app calls `/api` on its own origin (`VITE_API_BASE_URL=/api`),
+no CORS entry is needed for it; set `APP_BASE_URL=https://app.example.com` so
+emailed links open the app. GitHub Actions (`frontend-tests.yml`) installs,
+builds and tests the app on every change under `frontend/`.
+
 ## Environment variables
 
 | Variable | Required in prod | Notes |

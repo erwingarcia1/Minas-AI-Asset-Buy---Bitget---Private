@@ -24,7 +24,7 @@
 - [x] Prometheus /metrics + alert thresholds + runbook (docs/ALERTING.md); CRITICAL alert on 5 consecutive execution failures (tested)
 - [x] Dockerfile.api: migrations-on-boot → gunicorn ×4 uvicorn workers; compose prod/monitoring profiles; nginx config
 - [x] OpenAPI polish with documentation enforced by tests; docs/API.md, DEPLOYMENT.md, EXAMPLES.md
-- [x] React frontend scaffold (typed client, JWT lifecycle, auth-guarded routing)
+- [x] React web app in `frontend/` (typed client, JWT lifecycle, auth-guarded routing, Sumsub WebSDK KYC)
 
 ### Phase 4: Full-Stack Release ✅ COMPLETE (Sprint 4)
 - [x] Web dashboard: stats, holdings + allocation pie, investment timeline, upcoming buys, recent transactions
@@ -47,7 +47,7 @@
 |---|---|
 | API tests | **190 passed** (+2 perf tests run per-process) |
 | E2E tests | 7 flows in `tests/e2e_tests.py`: register→login→profile, purchase→scheduler dry-run, transactions + dashboard, token refresh/revocation, rate limiting (per-IP + per-user), Python SDK against the live app |
-| Frontend tests | 9 web + 7 mobile logic · TypeScript strict, clean |
+| Frontend tests | vitest suite in `frontend/` (KYC/Sumsub, password reset, purchase form, address validation) + 7 mobile logic · TypeScript strict, clean; CI job `frontend-tests.yml` builds and tests on every change |
 | Coverage | **93%** on `api/` (CI gate at 85%, GitHub Actions with Postgres+Redis services) |
 | Security | bandit clean at high severity; secrets provably absent from logs |
 | Load (4 workers) | p50 18ms / **p95 245ms** @ 10 concurrent; 1,000-purchase scheduler backlog in 32s, zero duplicates |

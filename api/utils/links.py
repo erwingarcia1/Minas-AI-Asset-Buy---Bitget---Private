@@ -8,7 +8,7 @@ or verification link. Base URL resolution:
    the production boot guard refuses to start without it, so the fallbacks
    below can only run in development.
 2. the first ``ALLOWED_ORIGINS`` entry
-3. ``http://localhost:3000``
+3. ``http://localhost:5173`` (the Vite dev server in ``frontend/``)
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def app_base_url() -> str:
     if settings.api_env == "production":
         raise RuntimeError("APP_BASE_URL is not configured; refusing to build an email link in production")
     origins = settings.allowed_origins
-    return (origins[0] if origins else "http://localhost:3000").rstrip("/")
+    return (origins[0] if origins else "http://localhost:5173").rstrip("/")
 
 
 def build_app_link(path: str, **query) -> str:

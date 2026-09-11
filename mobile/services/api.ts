@@ -1,4 +1,4 @@
-// Mobile API client: same surface as the web client (frontend/src/services/api.ts)
+// Mobile API client: same surface as the web client (frontend/src/api/client.ts + endpoints.ts)
 // with mobile concerns added — AsyncStorage token persistence, response caching
 // for offline viewing, and simple network retry. Push notification registration
 // is a Phase 4/5 follow-up.

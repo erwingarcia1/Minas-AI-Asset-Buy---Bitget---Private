@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addressVerdict, detectChain, getAddressNetwork, validateAddressForNetwork, validateBitcoinAddress, validateEthereumAddress, validateSolanaAddress } from "../utils/addressValidation";
-import { canExchangeWithdrawToNetwork } from "../utils/exchangeNetworks";
+import { addressVerdict, detectChain, getAddressNetwork, validateAddressForNetwork, validateBitcoinAddress, validateEthereumAddress, validateSolanaAddress } from "@/utils/addressValidation";
+import { canExchangeWithdrawToNetwork } from "@/utils/exchangeNetworks";
 
 const BTC = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", P2SH = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy";
 const SEGWIT = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", TESTNET = "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn", TB1 = "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx";

@@ -73,7 +73,7 @@ class Settings(BaseSettings):
 
     # CORS — CSV in the ALLOWED_ORIGINS env var
     allowed_origins_csv: str = os.getenv(
-        "ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000")
+        "ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8000")
 
     @property
     def allowed_origins(self) -> List[str]:

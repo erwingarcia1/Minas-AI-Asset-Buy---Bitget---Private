@@ -77,7 +77,8 @@ alembic upgrade head # apply the real fixes (002+)
 ## Running tests
 
 ```bash
-python3 -m pytest tests/ -q          # full suite; frontend: cd frontend && npx vitest run
+python3 -m pytest tests/ -q          # backend suite
+cd frontend && npm ci && npm test    # web app (vitest, jsdom)
 ```
 
 The suite is isolated from your dev data: `tests/conftest.py` sets
@@ -87,6 +88,26 @@ ending in `_test` or any other Redis db, and sets `AUTOBUY_SKIP_DOTENV=1` so
 `.env` is never read. The running API's `autobuy_db` / Redis db 0 are never
 touched. Use `TEST_DATABASE_URL` / `TEST_REDIS_URL` to point at another
 Postgres/Redis (the guards still apply).
+
+## Web frontend
+
+The customer web app lives in `frontend/` (React 18 + TypeScript + Vite +
+Tailwind; details in [`frontend/README.md`](frontend/README.md)).
+
+```bash
+cd frontend
+npm ci
+npm run dev      # http://localhost:5173 — proxies /api to http://localhost:8000
+npm test         # vitest
+npm run build    # dist/ for nginx
+```
+
+`VITE_API_BASE_URL=/api` in both `.env.development` and `.env.production`, so
+the app always talks to the origin it was served from: the Vite proxy in
+development, nginx in production (web vhost in `deployment/nginx.conf`). The
+API's `ALLOWED_ORIGINS` default already includes `http://localhost:5173`; set
+`APP_BASE_URL` to the same origin so emailed links open the app. The Sumsub
+KYC page embeds the official WebSDK (`@sumsub/websdk-react`, pinned).
 
 ## Email locally (Resend)
 

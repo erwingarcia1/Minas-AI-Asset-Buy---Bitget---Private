@@ -1,93 +1,106 @@
-import { useCallback, useEffect, useState } from "react";
-import { purchases } from "../../services/api";
-import type { RecurringPurchase } from "../../types";
-import ErrorRetry from "../common/ErrorRetry";
-import Loading from "../common/Loading";
-import PurchaseForm from "./PurchaseForm";
+import { useEffect, useState } from "react";
+import { autoBuyAPI } from "@/api/endpoints";
+import { errorMessage } from "@/api/client";
+import { Alert, Loading, StatusBadge } from "@/components/Common";
+import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/types";
+import { capitalize, fmtDate } from "@/utils/format";
 
-export default function PurchaseList() {
-  const [items, setItems] = useState<RecurringPurchase[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<RecurringPurchase | "new" | null>(null);
+const FREQ: Record<string, string> = { one_time: "One-time", daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+const fmtUsd = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const load = useCallback(() => {
-    setError(null);
-    purchases.list().then(setItems).catch(() => setError("Couldn't load your schedules."));
-  }, []);
-  useEffect(load, [load]);
+interface Props {
+  purchases: AutoBuyPurchase[];
+  onChanged: () => void;
+  onError: (msg: string) => void;
+}
 
-  async function remove(p: RecurringPurchase) {
-    if (!window.confirm(`Delete the ${p.crypto} schedule? Its transaction history is kept.`)) return;
-    await purchases.remove(p.id);
-    load();
+export default function PurchaseList({ purchases, onChanged, onError }: Props) {
+  const [open, setOpen] = useState<AutoBuyPurchase | null>(null);
+  const apiLacksModes = purchases.length > 0 && purchases.every((p) => purchaseMode(p) === null);
+
+  async function act(fn: () => Promise<unknown>) {
+    try { await fn(); onChanged(); } catch (e) { onError(errorMessage(e)); }
   }
-
-  async function toggle(p: RecurringPurchase) {
-    const updated = await purchases.toggle(p.id);
-    setItems((prev) => prev?.map((x) => (x.id === updated.id ? updated : x)) ?? null);
-  }
-
-  if (error) return <ErrorRetry message={error} onRetry={load} />;
-  if (!items) return <Loading label="Loading schedules…" />;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Recurring purchases</h1>
-        <button onClick={() => setEditing("new")}
-                className="rounded bg-blue-600 px-4 py-2 text-sm text-white">
-          Add schedule
-        </button>
-      </div>
-
-      {editing && (
-        <PurchaseForm
-          existing={editing === "new" ? undefined : editing}
-          onSaved={() => { setEditing(null); load(); }}
-          onCancel={() => setEditing(null)}
-        />
+      {apiLacksModes && (
+        <Alert kind="warning">
+          The API this app is talking to predates purchase modes: it ignores the "Withdraw immediately" choice and
+          reports no mode, so every purchase runs as autobuy. Rebuild the API container from the latest <code>main</code>
+          (migrations 011 and 012) to enable accumulate mode.
+        </Alert>
       )}
-
-      <div className="overflow-x-auto rounded-lg bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase text-gray-500">
-            <tr>
-              <th className="p-3">Crypto</th><th>Amount</th><th>Frequency</th>
-              <th>Next buy</th><th>Status</th><th className="text-right">Actions</th>
-            </tr>
-          </thead>
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full text-sm" data-testid="purchase-table">
+          <thead className="bg-slate-50 text-left text-slate-500"><tr>
+            <th className="px-4 py-2">Crypto</th><th className="px-4 py-2">Amount</th><th className="px-4 py-2">Frequency</th>
+            <th className="px-4 py-2">Mode</th><th className="px-4 py-2">Status</th><th className="whitespace-nowrap px-4 py-2">Next execution</th><th className="px-4 py-2 text-right">Actions</th>
+          </tr></thead>
           <tbody>
-            {items.map((p) => (
-              <tr key={p.id} className="border-t">
-                <td className="p-3 font-medium">{p.crypto}</td>
-                <td>{p.amount_usdt.toLocaleString()} USDT</td>
-                <td>{p.frequency}</td>
-                <td>{new Date(p.next_purchase_date).toLocaleDateString()}</td>
-                <td>
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${
-                    p.enabled ? "bg-teal-50 text-teal-700" : "bg-gray-100 text-gray-500"}`}>
-                    {p.enabled ? "enabled" : "paused"}
-                  </span>
+            {purchases.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-500">No purchases yet.</td></tr>}
+            {purchases.map((p) => (
+              <tr key={p.id} className="border-t border-slate-100" data-testid="purchase-row">
+                <td className="whitespace-nowrap px-4 py-2 font-medium">{p.crypto_symbol}<div className="text-xs font-normal text-slate-400">{p.exchange ?? "—"} · {p.blockchain_network}</div></td>
+                <td className="px-4 py-2">{fmtUsd(p.amount_usd)}</td>
+                <td className="px-4 py-2">{FREQ[p.frequency] ?? capitalize(p.frequency)}</td>
+                <td className="px-4 py-2">
+                  <StatusBadge status={purchaseMode(p) === "autobuy" ? "autobuy" : purchaseMode(p) === "dca" ? "accumulate" : "unknown mode"} />
+                  <div className="mt-1 font-mono text-xs text-slate-400" title={p.wallet_address}>{p.wallet_address.slice(0, 12)}…</div>
                 </td>
-                <td className="p-3 text-right">
-                  <div className="flex justify-end gap-2 text-xs">
-                    <button onClick={() => setEditing(p)} className="text-blue-600">Edit</button>
-                    <button onClick={() => toggle(p)} className="text-amber-600">
-                      {p.enabled ? "Pause" : "Resume"}
-                    </button>
-                    <button onClick={() => remove(p)} className="text-red-600">Delete</button>
-                  </div>
+                <td className="px-4 py-2"><StatusBadge status={p.status} />{p.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.last_error}>{p.last_error}</div>}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-xs">{fmtDate(p.next_execution)}</td>
+                <td className="space-x-2 whitespace-nowrap px-4 py-2 text-right">
+                  <button className="btn-secondary !py-1" onClick={() => setOpen(open?.id === p.id ? null : p)}>{open?.id === p.id ? "Hide" : "Transactions"}</button>
+                  {p.status === "active" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "paused" }))}>Pause</button>}
+                  {p.status === "paused" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
+                  {!["cancelled", "completed"].includes(p.status) && (
+                    <button className="btn-danger !py-1" onClick={() => { if (confirm(`Cancel the ${p.crypto_symbol} purchase? Its history is kept.`)) void act(() => autoBuyAPI.remove(p.id)); }}>Delete</button>
+                  )}
                 </td>
               </tr>
             ))}
-            {items.length === 0 && !editing && (
-              <tr><td colSpan={6} className="p-4 text-gray-500">
-                No schedules yet — add your first one.
-              </td></tr>
-            )}
           </tbody>
         </table>
       </div>
+      {open && <TransactionHistory purchase={open} />}
     </div>
   );
 }
+
+function TransactionHistory({ purchase }: { purchase: AutoBuyPurchase }) {
+  const [status, setStatus] = useState("");
+  const [rows, setRows] = useState<AutoBuyTransaction[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setRows(null); setError(null);
+    autoBuyAPI.transactions(purchase.id, status || undefined).then(setRows).catch((e) => setError(errorMessage(e)));
+  }, [purchase.id, status]);
+
+  return (
+    <section className="card" aria-label="Transaction history">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-semibold">Transactions · {purchase.crypto_symbol} {fmtUsd(purchase.amount_usd)} · {purchaseMode(purchase) === "autobuy" ? "autobuy: sent to wallet" : purchaseMode(purchase) === "dca" ? "accumulate on exchange" : "mode unknown (outdated API)"}</h3>
+        <select className="input w-auto" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">
+          <option value="">All statuses</option><option value="pending">Pending</option><option value="success">Success</option><option value="failed">Failed</option>
+        </select>
+      </div>
+      {error && <Alert kind="error">{error}</Alert>}
+      {rows === null && !error ? <Loading /> : rows && rows.length === 0 ? <p className="text-sm text-slate-500">No transactions{status ? ` with status "${status}"` : ""} yet.</p> : (
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500"><tr><th className="py-1">Date</th><th>Amount</th><th>Status</th><th>Exchange TX ID</th><th className="text-right">Fee</th></tr></thead>
+          <tbody>{rows?.map((t) => (
+            <tr key={t.id} className="border-t border-slate-100">
+              <td className="py-2">{fmtDate(t.executed_at ?? t.created_at)}</td>
+              <td>{t.amount_executed != null ? `${t.amount_executed.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${purchase.crypto_symbol}` : "—"}</td>
+              <td><StatusBadge status={t.status} /> {t.tx_type && <span className="text-xs text-slate-400">{t.tx_type}</span>}{t.error_message && <div className="text-xs text-red-600">{t.error_message}</div>}</td>
+              <td className="font-mono text-xs">{t.exchange_tx_id ?? "—"}</td>
+              <td className="text-right">{t.fee != null ? t.fee : "—"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
