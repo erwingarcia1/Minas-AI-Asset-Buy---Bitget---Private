@@ -240,12 +240,17 @@ async def force_retry(
 ):
     """Make an Auto-Buy purchase due immediately (the next execute_purchases
     run picks it up). A failed purchase is re-armed: status back to active and
-    the attempt counter reset."""
+    the attempt counter reset. Refused for withdrawal_failed / needs_info:
+    those buys already filled and re-arming would buy again — the owner (or
+    an admin acting as them) must use retry-withdrawal instead."""
     p = (await db.execute(select(Purchase).where(Purchase.id == purchase_id))).scalar_one_or_none()
     if p is None:
         raise HTTPException(status_code=404, detail="Purchase not found")
     if p.status in ("cancelled", "completed"):
         raise HTTPException(status_code=409, detail=f"purchase is {p.status}")
+    if p.status in ("withdrawal_failed", "needs_info"):
+        raise HTTPException(status_code=409, detail=f"purchase is {p.status}: its buy filled and the coins are on the "
+                                                    "exchange; retry the withdrawal (POST /api/v2/purchases/{id}/retry-withdrawal), never the buy")
     p.status = "active"
     p.failure_count = 0
     p.next_execution = datetime.now(timezone.utc)

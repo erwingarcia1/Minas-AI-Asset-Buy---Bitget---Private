@@ -58,7 +58,7 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 | auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password/validate` (`{token}` → 200 `{valid: true}` / 400 `{valid: false}`, does not consume the token) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
-| auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; `blockchain_network` is the exchange's chain name (`BTC`, `ERC20`, `TRC20`, `SOL`, `ArbitrumOne`, …; defaults to the coin's native chain); any wallet is validated against that chain's address format and rejected if it is a known burn/unspendable address; on Bitget the pair, minimum order, chain and (for autobuy) the minimum withdrawal are checked live, see "Bitget market data") · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `DELETE /{id}` (cancel, history kept) |
+| auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; `blockchain_network` is the exchange's chain name (`BTC`, `ERC20`, `TRC20`, `SOL`, `ArbitrumOne`, …; defaults to the coin's native chain); any wallet is validated against that chain's address format and rejected if it is a known burn/unspendable address; on Bitget the pair, minimum order, chain and (for autobuy) the minimum withdrawal are checked live, see "Bitget market data") · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, `travel_rule_info`, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `POST /{id}/retry-withdrawal` (withdrawal_failed / needs_info only: re-sends the last filled buy's coins, never buys again) · `DELETE /{id}` (cancel, history kept) |
 | wallets (`/api/wallets`) | `POST /` (`blockchain_network` = exchange chain name; the address format must match the chain family: bitcoin mainnet only, EVM `0x…`, Solana base58, Tron `T…`) · `GET /?blockchain_network=` · `DELETE /{id}` |
 | email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
 | webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
@@ -235,3 +235,29 @@ address, chain, withdrawal id, fee and tx hash; the tax CSV reports them on
 the buy lot. A failed withdrawal parks the purchase as `withdrawal_failed`
 (coins stay on the exchange, the buy is never repeated); a rejection for
 missing travel-rule / identity data parks it as `needs_info` and emails the user.
+Neither is retried automatically. `POST /api/v2/purchases/{id}/retry-withdrawal`
+sends the stranded coins again (same checks as creation: wallet, chain,
+Bitget minimum) as a new withdrawal row under the same buy; on success the
+purchase is `active` again and its schedule resumes from now. The admin
+`force-retry` refuses these two statuses for the same reason.
+
+### Withdrawal confirmation (poller)
+
+Sending a withdrawal only returns Bitget's withdrawal id. A second scheduler
+job, `poll_withdrawals` (every 10 minutes, same Redis pause switch, own
+advisory lock, heartbeat under `/health` `schedulers.withdrawals`), reads
+`GET /api/v2/spot/wallet/withdrawal-records` for every sent withdrawal of the
+last 7 days whose `raw_status` is not final and stores the on-chain hash
+(`tradeId`), the final fee and Bitget's status. `success` settles the row;
+`wallet_fail` / `cancel` / `reject` mark it failed, park the purchase as
+`withdrawal_failed` and emit `withdrawal_failed` (email + Slack). A withdrawal
+still unresolved after 7 days is marked `unconfirmed` and flagged on Slack.
+Dry-run rows (`raw_status: simulated`) and non-Bitget venues are skipped.
+
+### Travel-rule / beneficiary details
+
+`travel_rule_info` (optional on create and update; `{}` clears it) stores
+`first_name`, `last_name`, `identity_type`, `company_name`, `area_code`,
+`member_code`. When present they are sent with Bitget withdrawals as
+`firstName`, `lastName`, `identityType`, `companyName`, `areaCode`,
+`memberCode`. Nothing is prefilled: the user model stores no KYC names.

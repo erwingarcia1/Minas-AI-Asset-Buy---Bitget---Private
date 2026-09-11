@@ -12,28 +12,33 @@ else:  # pragma: no cover
 
 class APIKeyCreate(TypedDict):
     """APIKeyCreate."""
-    exchange: NotRequired[str]
     api_key: str
     api_secret: str
+    exchange: NotRequired[str]
     passphrase: NotRequired[str]
 
 
 class APIKeyResponse(TypedDict):
     """APIKeyResponse."""
-    id: str
-    exchange: str
     api_key_masked: str
-    verified: bool
     created_at: str
+    exchange: str
+    id: str
+    last_checked_at: NotRequired[Optional[str]]
     updated_at: str
+    verification_error: NotRequired[Optional[str]]
+    verification_status: NotRequired[str]
+    verified: bool
+    verified_at: NotRequired[Optional[str]]
+    withdrawal_enabled: NotRequired[Optional[bool]]
 
 
 class ActivePurchase(TypedDict):
     """An active Auto-Buy purchase (either type). Field names are kept from the original schedule shape so existing clients keep working: ``crypto`` is the purchase's crypto_symbol, ``amount_usdt`` its amount_usd and ``next_purchase_date`` its next_execution."""
-    id: str
-    crypto: str
     amount_usdt: float
+    crypto: str
     frequency: str
+    id: str
     next_purchase_date: NotRequired[Optional[str]]
     purchase_type: NotRequired[str]
 
@@ -46,13 +51,13 @@ class AdminTransactionList(TypedDict):
 
 class AdminTransactionRow(TypedDict):
     """AdminTransactionRow."""
-    id: str
-    user_id: str
-    crypto: str
     cost_usdt: float
-    status: str
-    error_message: NotRequired[Optional[str]]
     created_at: str
+    crypto: str
+    error_message: NotRequired[Optional[str]]
+    id: str
+    status: str
+    user_id: str
 
 
 class AdminUserList(TypedDict):
@@ -63,30 +68,51 @@ class AdminUserList(TypedDict):
 
 class AdminUserRow(TypedDict):
     """AdminUserRow."""
-    id: str
-    email: str
-    role: str
-    kyc_status: str
-    suspended: bool
     created_at: str
+    email: str
+    id: str
     invested_usdt: NotRequired[float]
+    kyc_status: str
+    role: str
+    suspended: bool
 
 
 class AlertItem(TypedDict):
     """AlertItem."""
+    detail: str
     name: str
     severity: str
     value: str
-    detail: str
 
 
 class ApplicantStatusResponse(TypedDict):
     """ApplicantStatusResponse."""
     applicant_id: str
     kyc_status: str
-    review_status: str
-    review_answer: NotRequired[Optional[str]]
     reject_labels: NotRequired[List[str]]
+    review_answer: NotRequired[Optional[str]]
+    review_status: str
+
+
+class ChainOut(TypedDict):
+    """ChainOut."""
+    browser_url: NotRequired[Optional[str]]
+    chain: str
+    estimated_received: NotRequired[Optional[float]]
+    extra_withdraw_fee_pct: float
+    family: NotRequired[Optional[str]]
+    family_label: NotRequired[Optional[str]]
+    fee_usd: NotRequired[Optional[float]]
+    is_default: NotRequired[bool]
+    meets_minimum: NotRequired[Optional[bool]]
+    min_purchase_usd: NotRequired[Optional[float]]
+    min_withdraw_amount: float
+    need_tag: bool
+    supported: bool
+    withdraw_confirm: int
+    withdraw_fee: float
+    withdraw_min_scale: int
+    withdrawable: bool
 
 
 class ChangePasswordRequest(TypedDict):
@@ -95,18 +121,31 @@ class ChangePasswordRequest(TypedDict):
     new_password: str
 
 
+class CoinMarketOut(TypedDict):
+    """CoinMarketOut."""
+    chains: List[ChainOut]
+    coin: str
+    min_trade_usdt: float
+    note: NotRequired[str]
+    online: bool
+    pair: str
+    price_ask: NotRequired[Optional[float]]
+    quantity_precision: int
+    taker_fee_rate: NotRequired[Optional[float]]
+
+
 class ComparisonEntry(TypedDict):
     """ComparisonEntry."""
-    crypto: str
     average_buy_price: float
-    current_price: NotRequired[Optional[float]]
     buy_price_vs_market_pct: NotRequired[Optional[float]]
+    crypto: str
+    current_price: NotRequired[Optional[float]]
 
 
 class ComparisonResponse(TypedDict):
     """ComparisonResponse."""
-    entries: List[ComparisonEntry]
     diversification_score: float
+    entries: List[ComparisonEntry]
 
 
 class CreateApplicantRequest(TypedDict):
@@ -119,8 +158,8 @@ class CreateApplicantRequest(TypedDict):
 class CreateApplicantResponse(TypedDict):
     """CreateApplicantResponse."""
     applicant_id: str
-    kyc_status: str
     created: bool
+    kyc_status: str
 
 
 class CryptoHolding(TypedDict):
@@ -132,16 +171,16 @@ class CryptoHolding(TypedDict):
 
 class DashboardResponse(TypedDict):
     """DashboardResponse."""
-    holdings: List[CryptoHolding]
     active_purchases: List[ActivePurchase]
-    upcoming_purchases: List[UpcomingPurchase]
+    holdings: List[CryptoHolding]
     monthly_average_usdt: float
+    upcoming_purchases: List[UpcomingPurchase]
 
 
 class EmailSentResponse(TypedDict):
     """EmailSentResponse."""
-    sent: bool
     email_id: NotRequired[Optional[str]]
+    sent: bool
 
 
 class ForgotPasswordRequest(TypedDict):
@@ -167,14 +206,14 @@ class HistoryResponse(TypedDict):
 
 class HoldingPerformance(TypedDict):
     """HoldingPerformance."""
-    crypto: str
-    total_amount: float
-    invested_usdt: float
     average_buy_price: float
+    crypto: str
     current_price: NotRequired[Optional[float]]
+    invested_usdt: float
     market_value: NotRequired[Optional[float]]
-    unrealized_pnl_usdt: NotRequired[Optional[float]]
+    total_amount: float
     unrealized_pnl_pct: NotRequired[Optional[float]]
+    unrealized_pnl_usdt: NotRequired[Optional[float]]
 
 
 class InitiateResponse(TypedDict):
@@ -185,24 +224,30 @@ class InitiateResponse(TypedDict):
 
 class IntegrationInfo(TypedDict):
     """IntegrationInfo."""
-    name: str
-    kind: str
-    status: str
     detail: str
+    kind: str
+    name: str
+    status: str
 
 
 class KeyVerifyResponse(TypedDict):
     """KeyVerifyResponse."""
-    verified: bool
-    result: str
     detail: str
+    key: NotRequired[Optional[APIKeyResponse]]
+    last_checked_at: NotRequired[Optional[str]]
+    result: str
+    verification_error: NotRequired[Optional[str]]
+    verification_status: NotRequired[str]
+    verified: bool
+    verified_at: NotRequired[Optional[str]]
+    withdrawal_enabled: NotRequired[Optional[bool]]
     withdrawal_permission_warning: NotRequired[bool]
 
 
 class KycOverride(TypedDict):
     """KycOverride."""
-    status: str
     note: str
+    status: str
 
 
 class LoginRequest(TypedDict):
@@ -218,59 +263,59 @@ class LogoutRequest(TypedDict):
 
 class NotificationRow(TypedDict):
     """NotificationRow."""
-    id: str
     channel: str
-    template: str
-    subject: str
-    status: str
     created_at: str
+    id: str
+    status: str
+    subject: str
+    template: str
 
 
 class PerformanceResponse(TypedDict):
     """PerformanceResponse."""
-    price_available: bool
+    best_performer: NotRequired[Optional[str]]
     holdings: List[HoldingPerformance]
+    price_available: bool
     total_invested_usdt: float
     total_market_value: NotRequired[Optional[float]]
-    total_pnl_usdt: NotRequired[Optional[float]]
     total_pnl_pct: NotRequired[Optional[float]]
-    best_performer: NotRequired[Optional[str]]
+    total_pnl_usdt: NotRequired[Optional[float]]
     worst_performer: NotRequired[Optional[str]]
 
 
 class PlatformStats(TypedDict):
     """PlatformStats."""
-    total_users: int
-    verified_users: int
+    active_purchases: int
+    failed_transactions_24h: int
+    signups_7d: int
     suspended_users: int
     total_invested_usdt: float
     total_transactions: int
-    failed_transactions_24h: int
-    active_purchases: int
-    signups_7d: int
+    total_users: int
+    verified_users: int
     volume_7d_usdt: float
 
 
 class PreferencesPayload(TypedDict):
     """PreferencesPayload."""
-    email_enabled: NotRequired[Optional[bool]]
-    sms_enabled: NotRequired[Optional[bool]]
-    push_enabled: NotRequired[Optional[bool]]
-    quiet_hours_start: NotRequired[Optional[int]]
-    quiet_hours_end: NotRequired[Optional[int]]
-    phone_number: NotRequired[Optional[str]]
     device_token: NotRequired[Optional[str]]
+    email_enabled: NotRequired[Optional[bool]]
+    phone_number: NotRequired[Optional[str]]
+    push_enabled: NotRequired[Optional[bool]]
+    quiet_hours_end: NotRequired[Optional[int]]
+    quiet_hours_start: NotRequired[Optional[int]]
+    sms_enabled: NotRequired[Optional[bool]]
 
 
 class PreferencesResponse(TypedDict):
     """PreferencesResponse."""
     email_enabled: bool
-    sms_enabled: bool
-    push_enabled: bool
-    quiet_hours_start: int
-    quiet_hours_end: int
-    phone_number: NotRequired[Optional[str]]
     has_device_token: bool
+    phone_number: NotRequired[Optional[str]]
+    push_enabled: bool
+    quiet_hours_end: int
+    quiet_hours_start: int
+    sms_enabled: bool
 
 
 class ProfileUpdateRequest(TypedDict):
@@ -280,96 +325,104 @@ class ProfileUpdateRequest(TypedDict):
 
 class PurchaseCreateRequest(TypedDict):
     """PurchaseCreateRequest."""
-    crypto_symbol: str
     amount_usd: float
-    wallet_address: str
-    blockchain_network: str
-    frequency: str
+    blockchain_network: NotRequired[Optional[str]]
+    crypto_symbol: str
     exchange_account_id: str
+    frequency: str
     purchase_type: NotRequired[str]
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
+    wallet_address: NotRequired[Optional[str]]
     withdraw_immediately: NotRequired[Optional[bool]]
 
 
 class PurchaseCreatedOut(TypedDict):
     """PurchaseCreatedOut."""
+    next_execution: NotRequired[Optional[str]]
     purchase_id: str
     status: str
-    next_execution: NotRequired[Optional[str]]
 
 
 class PurchaseDetailOut(TypedDict):
     """PurchaseDetailOut."""
-    id: str
-    crypto_symbol: str
     amount_usd: float
-    frequency: str
-    wallet_address: str
     blockchain_network: str
-    purchase_type: str
-    withdraw_immediately: bool
-    exchange_account_id: NotRequired[Optional[str]]
-    exchange: NotRequired[Optional[str]]
-    status: str
-    failure_count: int
-    last_error: NotRequired[Optional[str]]
-    next_execution: NotRequired[Optional[str]]
     created_at: str
-    updated_at: str
+    crypto_symbol: str
+    exchange: NotRequired[Optional[str]]
+    exchange_account_id: NotRequired[Optional[str]]
+    failure_count: int
+    frequency: str
+    id: str
+    last_error: NotRequired[Optional[str]]
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    next_execution: NotRequired[Optional[str]]
+    purchase_type: str
+    status: str
     transactions: NotRequired[List[TransactionOut]]
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
+    updated_at: str
+    wallet_address: NotRequired[Optional[str]]
+    withdraw_immediately: bool
 
 
 class PurchaseOut(TypedDict):
     """PurchaseOut."""
-    id: str
-    crypto_symbol: str
     amount_usd: float
-    frequency: str
-    wallet_address: str
     blockchain_network: str
-    purchase_type: str
-    withdraw_immediately: bool
-    exchange_account_id: NotRequired[Optional[str]]
-    exchange: NotRequired[Optional[str]]
-    status: str
-    failure_count: int
-    last_error: NotRequired[Optional[str]]
-    next_execution: NotRequired[Optional[str]]
     created_at: str
-    updated_at: str
+    crypto_symbol: str
+    exchange: NotRequired[Optional[str]]
+    exchange_account_id: NotRequired[Optional[str]]
+    failure_count: int
+    frequency: str
+    id: str
+    last_error: NotRequired[Optional[str]]
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    next_execution: NotRequired[Optional[str]]
+    purchase_type: str
+    status: str
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
+    updated_at: str
+    wallet_address: NotRequired[Optional[str]]
+    withdraw_immediately: bool
 
 
 class PurchaseUpdateRequest(TypedDict):
     """PurchaseUpdateRequest."""
-    status: NotRequired[Optional[str]]
     amount_usd: NotRequired[Optional[float]]
+    blockchain_network: NotRequired[Optional[str]]
+    confirm_wallet_address: NotRequired[Optional[str]]
     frequency: NotRequired[Optional[str]]
+    purchase_type: NotRequired[Optional[str]]
+    status: NotRequired[Optional[str]]
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
+    wallet_address: NotRequired[Optional[str]]
 
 
 class QuickStats(TypedDict):
     """QuickStats."""
-    total_invested_usdt: float
-    transaction_count: int
     active_purchases: int
     kyc_status: str
+    total_invested_usdt: float
+    transaction_count: int
 
 
 class RecurringProjection(TypedDict):
     """RecurringProjection."""
+    amount_usdt: float
     crypto: str
     frequency: str
-    amount_usdt: float
     monthly_usdt: float
     purchase_type: NotRequired[str]
 
 
 class RecurringResponse(TypedDict):
     """RecurringResponse."""
-    schedules: List[RecurringProjection]
     expected_monthly_usdt: float
-    projected_annual_usdt: float
     note: NotRequired[str]
+    projected_annual_usdt: float
+    schedules: List[RecurringProjection]
 
 
 class RefreshRequest(TypedDict):
@@ -385,8 +438,8 @@ class RegisterRequest(TypedDict):
 
 class ResetPasswordRequest(TypedDict):
     """ResetPasswordRequest."""
-    token: str
     new_password: str
+    token: str
 
 
 class ResetTokenRequest(TypedDict):
@@ -399,11 +452,19 @@ class ResetTokenValidity(TypedDict):
     valid: bool
 
 
+class RetryWithdrawalOut(TypedDict):
+    """RetryWithdrawalOut."""
+    next_execution: NotRequired[Optional[str]]
+    purchase_id: str
+    status: str
+    withdrawal: TransactionOut
+
+
 class SendNotificationRequest(TypedDict):
     """SendNotificationRequest."""
     email: str
-    subject: str
     message: str
+    subject: str
 
 
 class SendVerificationRequest(TypedDict):
@@ -413,20 +474,20 @@ class SendVerificationRequest(TypedDict):
 
 class StatusResponse(TypedDict):
     """StatusResponse."""
-    kyc_status: str
     applicant_id: NotRequired[Optional[str]]
-    review_status: NotRequired[Optional[str]]
+    kyc_status: str
     reject_labels: NotRequired[List[str]]
     rejection_reason: NotRequired[Optional[str]]
     retryable: NotRequired[bool]
+    review_status: NotRequired[Optional[str]]
     synced: NotRequired[bool]
 
 
 class TimelinePoint(TypedDict):
     """TimelinePoint."""
     date: str
-    transaction_count: int
     total_usdt: float
+    transaction_count: int
 
 
 class TimelineResponse(TypedDict):
@@ -438,105 +499,126 @@ class TimelineResponse(TypedDict):
 class TokenResponse(TypedDict):
     """TokenResponse."""
     access_token: str
+    expires_in: int
     refresh_token: str
     token_type: NotRequired[str]
-    expires_in: int
 
 
 class TransactionListResponse(TypedDict):
     """TransactionListResponse."""
     items: List[TransactionResponse]
-    total: int
     limit: int
     offset: int
+    total: int
 
 
 class TransactionOut(TypedDict):
     """TransactionOut."""
-    id: str
-    purchase_id: str
-    exchange_tx_id: NotRequired[Optional[str]]
-    tx_type: NotRequired[str]
-    status: str
     amount_executed: NotRequired[Optional[float]]
-    fee: NotRequired[Optional[float]]
-    error_message: NotRequired[Optional[str]]
-    executed_at: NotRequired[Optional[str]]
+    cost_usd: NotRequired[Optional[float]]
     created_at: str
+    error_message: NotRequired[Optional[str]]
+    exchange_tx_id: NotRequired[Optional[str]]
+    executed_at: NotRequired[Optional[str]]
+    fee: NotRequired[Optional[float]]
+    fee_currency: NotRequired[Optional[str]]
+    fill_price: NotRequired[Optional[float]]
+    id: str
+    order_id: NotRequired[Optional[str]]
+    parent_transaction_id: NotRequired[Optional[str]]
+    purchase_id: str
+    raw_status: NotRequired[Optional[str]]
+    status: str
+    tx_hash: NotRequired[Optional[str]]
+    tx_type: NotRequired[str]
+    withdrawal_chain: NotRequired[Optional[str]]
+    withdrawal_fee: NotRequired[Optional[float]]
+    withdrawal_fee_currency: NotRequired[Optional[str]]
+    withdrawal_id: NotRequired[Optional[str]]
 
 
 class TransactionResponse(TypedDict):
     """One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id`` keep their historical names for existing clients; ``order_id`` and the withdrawal fields are the new, explicit ones."""
-    id: str
-    purchase_id: str
-    crypto: str
-    purchase_type: str
-    tx_type: str
     amount_crypto: float
-    cost_usdt: float
-    exchange_rate: NotRequired[Optional[float]]
-    exchange: NotRequired[Optional[str]]
-    order_id: NotRequired[Optional[str]]
     binance_order_id: NotRequired[Optional[str]]
+    blockchain_network: NotRequired[Optional[str]]
+    cost_usdt: float
+    created_at: str
+    crypto: str
+    error_message: NotRequired[Optional[str]]
+    exchange: NotRequired[Optional[str]]
+    exchange_rate: NotRequired[Optional[float]]
+    executed_at: NotRequired[Optional[str]]
     fee: NotRequired[Optional[float]]
     fee_currency: NotRequired[Optional[str]]
-    withdrawal_id: NotRequired[Optional[str]]
+    id: str
+    order_id: NotRequired[Optional[str]]
+    purchase_id: str
+    purchase_type: str
+    status: str
+    tx_hash: NotRequired[Optional[str]]
+    tx_type: str
     wallet_address: NotRequired[Optional[str]]
-    blockchain_network: NotRequired[Optional[str]]
     withdrawal_fee: NotRequired[Optional[float]]
     withdrawal_fee_currency: NotRequired[Optional[str]]
-    tx_hash: NotRequired[Optional[str]]
-    executed_at: NotRequired[Optional[str]]
-    status: str
-    error_message: NotRequired[Optional[str]]
-    created_at: str
+    withdrawal_id: NotRequired[Optional[str]]
 
 
 class TransactionStats(TypedDict):
     """TransactionStats."""
-    total_transactions: int
-    total_invested_usdt: float
     average_purchase_usdt: float
     completed_count: int
     failed_count: int
     pending_count: int
+    total_invested_usdt: float
+    total_transactions: int
+
+
+class TravelRuleInfo(TypedDict):
+    """Optional beneficiary / travel-rule details some venues require before an API withdrawal (Bitget: firstName, lastName, identityType, companyName, areaCode, memberCode). Stored on the purchase and sent with withdrawals. Nothing is prefilled: the KYC provider's data is not stored on the user."""
+    area_code: NotRequired[Optional[str]]
+    company_name: NotRequired[Optional[str]]
+    first_name: NotRequired[Optional[str]]
+    identity_type: NotRequired[Optional[str]]
+    last_name: NotRequired[Optional[str]]
+    member_code: NotRequired[Optional[str]]
 
 
 class UpcomingPurchase(TypedDict):
     """UpcomingPurchase."""
-    id: str
-    crypto: str
     amount_usdt: float
+    crypto: str
     frequency: str
+    id: str
     next_purchase_date: NotRequired[Optional[str]]
     purchase_type: NotRequired[str]
 
 
 class UserOut(TypedDict):
     """UserOut."""
-    id: str
-    email: str
-    kyc_status: str
     created_at: str
+    email: str
+    id: str
+    kyc_status: str
 
 
 class UserProfile(TypedDict):
     """UserProfile."""
-    id: str
+    created_at: str
     email: str
-    role: NotRequired[str]
+    id: str
     kyc_status: str
     kyc_sumsub_id: NotRequired[Optional[str]]
-    created_at: str
+    role: NotRequired[str]
     updated_at: str
 
 
 class UserPublicProfile(TypedDict):
     """UserPublicProfile."""
-    id: str
-    email: str
-    kyc_status: str
     created_at: str
+    email: str
+    id: str
+    kyc_status: str
 
 
 class ValidationError(TypedDict):
@@ -553,16 +635,16 @@ class VerifyRequest(TypedDict):
 
 class VerifyResponse(TypedDict):
     """VerifyResponse."""
-    valid: bool
     user_id: NotRequired[Optional[str]]
+    valid: bool
 
 
 class VolatilityEntry(TypedDict):
     """VolatilityEntry."""
     crypto: str
-    volatility_30d_pct: NotRequired[Optional[float]]
     level: str
     recommendation: str
+    volatility_30d_pct: NotRequired[Optional[float]]
 
 
 class VolatilityResponse(TypedDict):
@@ -579,13 +661,13 @@ class WalletCreateRequest(TypedDict):
 
 class WalletOut(TypedDict):
     """WalletOut."""
-    id: str
     address: str
     blockchain_network: str
     chain: NotRequired[Optional[str]]
+    created_at: str
+    id: str
     label: NotRequired[Optional[str]]
     verified_at: NotRequired[Optional[str]]
-    created_at: str
 
 
 class WebhookCreate(TypedDict):
@@ -595,18 +677,18 @@ class WebhookCreate(TypedDict):
 
 class WebhookCreated(TypedDict):
     """WebhookCreated."""
-    id: str
-    url: str
-    enabled: bool
-    last_status: NotRequired[Optional[str]]
     created_at: str
+    enabled: bool
+    id: str
+    last_status: NotRequired[Optional[str]]
     secret: str
+    url: str
 
 
 class WebhookRow(TypedDict):
     """WebhookRow."""
-    id: str
-    url: str
-    enabled: bool
-    last_status: NotRequired[Optional[str]]
     created_at: str
+    enabled: bool
+    id: str
+    last_status: NotRequired[Optional[str]]
+    url: str

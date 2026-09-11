@@ -112,12 +112,13 @@ async def health_check(request: Request):
     consecutive-failure count.
     """
     from api.services import scheduler_state
-    from api.tasks.purchase_scheduler import INTERVAL_MINUTES
+    from api.tasks.purchase_scheduler import INTERVAL_MINUTES, WITHDRAWAL_POLL_INTERVAL_MINUTES
     try:
         pause = await scheduler_state.pause_info()
     except scheduler_state.PauseStateUnavailable:
         pause = {"paused": None, "since": None, "by": None}
     autobuy = await scheduler_state.status("autobuy")
+    withdrawals = await scheduler_state.status("withdrawals")
     autobuy_sched = getattr(request.app.state, "autobuy_scheduler", None)
     return {
         "status": "healthy",
@@ -138,6 +139,15 @@ async def health_check(request: Request):
                 "last_detail": autobuy["last_detail"],
                 "last_counts": autobuy["last_counts"],
                 "consecutive_failures": autobuy["consecutive_failures"],
+            },
+            # confirms sent withdrawals with the exchange (tx hash / final status)
+            "withdrawals": {
+                "running": bool(autobuy_sched is not None and autobuy_sched.running),
+                "paused": pause["paused"],
+                "interval_minutes": WITHDRAWAL_POLL_INTERVAL_MINUTES,
+                "last_run_at": withdrawals["last_run_at"],
+                "last_result": withdrawals["last_result"],
+                "last_counts": withdrawals["last_counts"],
             },
         },
     }

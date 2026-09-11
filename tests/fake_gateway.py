@@ -9,6 +9,8 @@ in the base coin; autobuy withdrawals succeed with a fixed fee. Knobs:
 - ``fill_unavailable``: fetch_fill raises (order placed, fill unknown)
 - ``lookup_raises`` / ``lookup_state``: control reconciliation answers
 - ``fail_withdrawal`` / ``withdrawal_needs_info``: withdrawal outcomes
+- ``withdrawal_state``: what withdrawal_status reports (None = not found,
+  "pending", "success", "wallet_fail", ...); ``status_raises``: lookup fails
 """
 from __future__ import annotations
 
@@ -20,7 +22,8 @@ class FakeGateway:
     FEE_RATE = 0.001
 
     def __init__(self, *, fail_buy=False, place_raises_after_sending=False, fill_unavailable=False,
-                 lookup_raises=False, lookup_state=None, fail_withdrawal=False, withdrawal_needs_info=False):
+                 lookup_raises=False, lookup_state=None, fail_withdrawal=False, withdrawal_needs_info=False,
+                 withdrawal_state="pending", status_raises=False):
         self.fail_buy = fail_buy
         self.place_raises_after_sending = place_raises_after_sending
         self.fill_unavailable = fill_unavailable
@@ -28,6 +31,9 @@ class FakeGateway:
         self.lookup_state = lookup_state
         self.fail_withdrawal = fail_withdrawal
         self.withdrawal_needs_info = withdrawal_needs_info
+        self.withdrawal_state = withdrawal_state
+        self.status_raises = status_raises
+        self.status_calls: list = []
         self.placed: list = []       # (client_oid, purchase_id, dry_run) — orders that reached the "exchange"
         self.lookups: list = []
         self.withdrawals: list = []
@@ -85,6 +91,18 @@ class FakeGateway:
         return {"withdrawal_id": f"WD-{n}", "chain": purchase.blockchain_network, "withdrawal_fee": 0.0001,
                 "withdrawal_fee_currency": purchase.crypto_symbol, "tx_hash": "0xhash" if not dry_run else None,
                 "raw_status": "simulated" if dry_run else "submitted"}
+
+
+    def withdrawal_status(self, account, purchase, wd):
+        self.status_calls.append((wd.client_oid, wd.withdrawal_id))
+        if self.status_raises:
+            raise ps.ExecutionError("NETWORK: exchange unreachable", stage="withdrawal_status", code="NETWORK")
+        state = self.withdrawal_state
+        if state is None:
+            return {"found": False, "raw_status": None, "tx_hash": None, "fee": None, "done": False, "ok": None}
+        done = state in ("success", "wallet_fail", "cancel", "reject", "fail", "failed")
+        return {"found": True, "raw_status": state, "tx_hash": "0xconfirmed" if state == "success" else None,
+                "fee": 0.00003 if state == "success" else None, "done": done, "ok": (state == "success") if done else None}
 
 
 class FailingGateway(FakeGateway):

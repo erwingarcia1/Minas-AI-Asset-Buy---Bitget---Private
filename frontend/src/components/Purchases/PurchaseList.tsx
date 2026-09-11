@@ -7,6 +7,12 @@ import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
 import { capitalize, fmtDate } from "@/utils/format";
 
 const FREQ: Record<string, string> = { one_time: "One-time", daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+/** Purchases parked after a filled buy whose withdrawal did not go through: the coins sit on the exchange. */
+const PARKED: Record<string, string> = {
+  withdrawal_failed: "The buy filled but the withdrawal failed, so the coins are still on the exchange. Fix the cause (key permissions, IP whitelist, address book, chain) and retry the withdrawal; the buy is never repeated.",
+  needs_info: "The exchange wants beneficiary (travel-rule) details before it will send this withdrawal. Add them to the purchase, then retry; nothing is bought again.",
+  needs_review: "The buy's outcome could not be confirmed on the exchange. Support is reviewing it; nothing is retried automatically.",
+};
 const fmtUsd = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 interface Props {
@@ -50,12 +56,15 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                   <StatusBadge status={purchaseMode(p) === "autobuy" ? "autobuy" : purchaseMode(p) === "dca" ? "accumulate" : "unknown mode"} />
                   <div className="mt-1 font-mono text-xs text-slate-400" title={p.wallet_address ?? ""}>{p.wallet_address ? `${p.wallet_address.slice(0, 12)}…` : "no wallet on file"}</div>
                 </td>
-                <td className="px-4 py-2"><StatusBadge status={p.status} />{p.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.last_error}>{p.last_error}</div>}</td>
+                <td className="px-4 py-2"><StatusBadge status={p.status} />{p.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.last_error}>{p.last_error}</div>}{PARKED[p.status] && <div className="mt-1 max-w-xs text-xs text-slate-500" data-testid="parked-help">{PARKED[p.status]}</div>}</td>
                 <td className="whitespace-nowrap px-4 py-2 text-xs">{fmtDate(p.next_execution)}</td>
                 <td className="space-x-2 whitespace-nowrap px-4 py-2 text-right">
                   <button className="btn-secondary !py-1" onClick={() => setOpen(open?.id === p.id ? null : p)}>{open?.id === p.id ? "Hide" : "Transactions"}</button>
                   {p.status === "active" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "paused" }))}>Pause</button>}
                   {p.status === "paused" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
+                  {["withdrawal_failed", "needs_info"].includes(p.status) && (
+                    <button className="btn-primary !py-1" onClick={() => { if (confirm(`Send the ${p.crypto_symbol} already bought to ${p.wallet_address ?? "the wallet on file"} on ${p.blockchain_network} again? No new buy is placed.`)) void act(() => autoBuyAPI.retryWithdrawal(p.id)); }}>Retry withdrawal</button>
+                  )}
                   {["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
                     <button className="btn-secondary !py-1" onClick={() => setSwitching(p)}>Switch to withdraw</button>
                   )}
@@ -97,14 +106,14 @@ function TransactionHistory({ purchase }: { purchase: AutoBuyPurchase }) {
       {error && <Alert kind="error">{error}</Alert>}
       {rows === null && !error ? <Loading /> : rows && rows.length === 0 ? <p className="text-sm text-slate-500">No transactions{status ? ` with status "${status}"` : ""} yet.</p> : (
         <table className="w-full text-sm">
-          <thead className="text-left text-slate-500"><tr><th className="py-1">Date</th><th>Amount</th><th>Status</th><th>Exchange TX ID</th><th className="text-right">Fee</th></tr></thead>
+          <thead className="text-left text-slate-500"><tr><th className="py-1">Date</th><th>Amount</th><th>Status</th><th>Exchange ID / tx hash</th><th className="text-right">Fee</th></tr></thead>
           <tbody>{rows?.map((t) => (
             <tr key={t.id} className="border-t border-slate-100">
               <td className="py-2">{fmtDate(t.executed_at ?? t.created_at)}</td>
               <td>{t.amount_executed != null ? `${t.amount_executed.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${purchase.crypto_symbol}` : "—"}</td>
               <td><StatusBadge status={t.status} /> {t.tx_type && <span className="text-xs text-slate-400">{t.tx_type}</span>}{t.error_message && <div className="text-xs text-red-600">{t.error_message}</div>}</td>
-              <td className="font-mono text-xs">{t.exchange_tx_id ?? "—"}</td>
-              <td className="text-right">{t.fee != null ? t.fee : "—"}</td>
+              <td className="font-mono text-xs">{t.exchange_tx_id ?? "—"}{t.tx_type === "withdrawal" && <div className="text-slate-400" title="on-chain transaction hash">{t.tx_hash ? `tx ${t.tx_hash.slice(0, 18)}…` : t.raw_status === "simulated" ? "simulated (dry run)" : `awaiting tx hash${t.raw_status ? ` · ${t.raw_status}` : ""}`}</div>}</td>
+              <td className="text-right">{t.tx_type === "withdrawal" ? (t.withdrawal_fee != null ? `${t.withdrawal_fee} ${t.withdrawal_fee_currency ?? ""}` : "—") : t.fee != null ? `${t.fee} ${t.fee_currency ?? ""}` : "—"}</td>
             </tr>
           ))}</tbody>
         </table>

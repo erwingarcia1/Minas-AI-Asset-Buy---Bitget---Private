@@ -9,6 +9,7 @@ import type {
   AlertItem,
   ApplicantStatusResponse,
   ChangePasswordRequest,
+  CoinMarketOut,
   ComparisonResponse,
   CreateApplicantRequest,
   CreateApplicantResponse,
@@ -40,6 +41,7 @@ import type {
   ResetPasswordRequest,
   ResetTokenRequest,
   ResetTokenValidity,
+  RetryWithdrawalOut,
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
@@ -65,33 +67,177 @@ import type {
 /** `system` endpoints. */
 export declare class SystemApi {
   constructor(http: HttpTransport);
-  /** Health Check — `GET /health` */
-  healthCheck(): Promise<unknown>;
   /** Root — `GET /` */
   root(): Promise<unknown>;
+  /** Health Check — `GET /health` */
+  healthCheck(): Promise<unknown>;
+}
+
+/** `admin` endpoints. */
+export declare class AdminApi {
+  constructor(http: HttpTransport);
+  /** Alerts — `GET /api/admin/alerts` */
+  alerts(): Promise<AlertItem[]>;
+  /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
+  forceRetry(purchaseId: string): Promise<unknown>;
+  /** Pause Scheduler — `POST /api/admin/scheduler/pause` */
+  pauseScheduler(): Promise<unknown>;
+  /** Resume Scheduler — `POST /api/admin/scheduler/resume` */
+  resumeScheduler(): Promise<unknown>;
+  /** Platform Stats — `GET /api/admin/stats` */
+  platformStats(): Promise<PlatformStats>;
+  /** All Transactions — `GET /api/admin/transactions` */
+  allTransactions(query?: { status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }): Promise<AdminTransactionList>;
+  /** List Users — `GET /api/admin/users` */
+  listUsers(query?: { q?: string | null; limit?: number; offset?: number }): Promise<AdminUserList>;
+  /** Delete User — `DELETE /api/admin/users/{user_id}` */
+  deleteUser(userId: string, query: { confirm: string }): Promise<unknown>;
+  /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
+  kycOverride(userId: string, body: KycOverride): Promise<unknown>;
+  /** Suspend User — `POST /api/admin/users/{user_id}/suspend` */
+  suspendUser(userId: string): Promise<unknown>;
+  /** Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend` */
+  unsuspendUser(userId: string): Promise<unknown>;
+}
+
+/** `analytics` endpoints. */
+export declare class AnalyticsApi {
+  constructor(http: HttpTransport);
+  /** Comparison — `GET /api/analytics/comparison` */
+  comparison(): Promise<ComparisonResponse>;
+  /** Performance — `GET /api/analytics/performance` */
+  performance(): Promise<PerformanceResponse>;
+  /** Recurring — `GET /api/analytics/recurring` */
+  recurring(): Promise<RecurringResponse>;
+  /** Volatility — `GET /api/analytics/volatility` */
+  volatility(): Promise<VolatilityResponse>;
 }
 
 /** `auth` endpoints. */
 export declare class AuthApi {
   constructor(http: HttpTransport);
-  /** Register — `POST /api/auth/register` */
-  register(body: RegisterRequest): Promise<UserOut>;
-  /** Login — `POST /api/auth/login` */
-  login(body: LoginRequest): Promise<TokenResponse>;
-  /** Verify — `POST /api/auth/verify` */
-  verify(body: VerifyRequest): Promise<VerifyResponse>;
-  /** Refresh — `POST /api/auth/refresh` */
-  refresh(body: RefreshRequest): Promise<TokenResponse>;
-  /** Logout — `POST /api/auth/logout` */
-  logout(body: LogoutRequest): Promise<unknown>;
   /** Change Password — `POST /api/auth/change-password` */
   changePassword(body: ChangePasswordRequest): Promise<unknown>;
   /** Forgot Password — `POST /api/auth/forgot-password` */
   forgotPassword(body: ForgotPasswordRequest): Promise<ForgotPasswordResponse>;
-  /** Validate Reset Token — `POST /api/auth/reset-password/validate` */
-  validateResetToken(body: ResetTokenRequest): Promise<ResetTokenValidity>;
+  /** Login — `POST /api/auth/login` */
+  login(body: LoginRequest): Promise<TokenResponse>;
+  /** Logout — `POST /api/auth/logout` */
+  logout(body: LogoutRequest): Promise<unknown>;
+  /** Refresh — `POST /api/auth/refresh` */
+  refresh(body: RefreshRequest): Promise<TokenResponse>;
+  /** Register — `POST /api/auth/register` */
+  register(body: RegisterRequest): Promise<UserOut>;
   /** Reset Password — `POST /api/auth/reset-password` */
   resetPassword(body: ResetPasswordRequest): Promise<unknown>;
+  /** Validate Reset Token — `POST /api/auth/reset-password/validate` */
+  validateResetToken(body: ResetTokenRequest): Promise<ResetTokenValidity>;
+  /** Verify — `POST /api/auth/verify` */
+  verify(body: VerifyRequest): Promise<VerifyResponse>;
+}
+
+/** `dashboard` endpoints. */
+export declare class DashboardApi {
+  constructor(http: HttpTransport);
+  /** Dashboard — `GET /api/dashboard/` */
+  dashboard(): Promise<DashboardResponse>;
+  /** Analytics Timeline — `GET /api/dashboard/analytics/timeline` */
+  analyticsTimeline(query?: { days?: number }): Promise<TimelineResponse>;
+  /** Quick Stats — `GET /api/dashboard/stats` */
+  quickStats(): Promise<QuickStats>;
+}
+
+/** `email` endpoints. */
+export declare class EmailApi {
+  constructor(http: HttpTransport);
+  /** Send Notification — `POST /api/email/send-notification` */
+  sendNotification(body: SendNotificationRequest): Promise<EmailSentResponse>;
+  /** Send Verification — `POST /api/email/send-verification` */
+  sendVerification(body: SendVerificationRequest): Promise<EmailSentResponse>;
+}
+
+/** `exchange` endpoints. */
+export declare class ExchangeApi {
+  constructor(http: HttpTransport);
+  /** List Keys — `GET /api/exchange/keys` */
+  listKeys(): Promise<APIKeyResponse[]>;
+  /** Add Or Update Key — `POST /api/exchange/keys` */
+  addOrUpdateKey(body: APIKeyCreate): Promise<APIKeyResponse>;
+  /** Delete Key — `DELETE /api/exchange/keys/{key_id}` */
+  deleteKey(keyId: string): Promise<unknown>;
+  /** Verify Key — `POST /api/exchange/keys/{key_id}/verify` */
+  verifyKey(keyId: string): Promise<KeyVerifyResponse>;
+  /** Supported Exchanges — `GET /api/exchange/supported` */
+  supportedExchanges(): Promise<string[]>;
+}
+
+/** `integrations` endpoints. */
+export declare class IntegrationsApi {
+  constructor(http: HttpTransport);
+  /** Available — `GET /api/integrations/available` */
+  available(): Promise<IntegrationInfo[]>;
+  /** List Webhooks — `GET /api/integrations/webhooks` */
+  listWebhooks(): Promise<WebhookRow[]>;
+  /** Create Webhook — `POST /api/integrations/webhooks` */
+  createWebhook(body: WebhookCreate): Promise<WebhookCreated>;
+  /** Delete Webhook — `DELETE /api/integrations/webhooks/{webhook_id}` */
+  deleteWebhook(webhookId: string): Promise<unknown>;
+  /** Ping Webhook — `POST /api/integrations/webhooks/{webhook_id}/ping` */
+  pingWebhook(webhookId: string): Promise<WebhookRow>;
+}
+
+/** `kyc` endpoints. */
+export declare class KycApi {
+  constructor(http: HttpTransport);
+  /** Applicant Status — `GET /api/kyc/applicant/{applicant_id}/status` */
+  applicantStatus(applicantId: string): Promise<ApplicantStatusResponse>;
+  /** Create Applicant — `POST /api/kyc/create-applicant` */
+  createApplicant(body: CreateApplicantRequest): Promise<CreateApplicantResponse>;
+  /** Initiate Kyc — `POST /api/kyc/initiate` */
+  initiateKyc(): Promise<InitiateResponse>;
+  /** Kyc Status — `GET /api/kyc/status` */
+  kycStatus(query?: { sync?: boolean }): Promise<StatusResponse>;
+  /** Sumsub Webhook — `POST /api/kyc/webhook` */
+  sumsubWebhook(): Promise<unknown>;
+}
+
+/** `notifications` endpoints. */
+export declare class NotificationsApi {
+  constructor(http: HttpTransport);
+  /** History — `GET /api/notifications/history` */
+  history(query?: { limit?: number; offset?: number }): Promise<HistoryResponse>;
+  /** Get Preferences — `GET /api/notifications/preferences` */
+  getPreferences(): Promise<PreferencesResponse>;
+  /** Update Preferences — `PUT /api/notifications/preferences` */
+  updatePreferences(body: PreferencesPayload): Promise<PreferencesResponse>;
+  /** Send Test — `POST /api/notifications/test` */
+  sendTest(): Promise<unknown>;
+}
+
+/** `reports` endpoints. */
+export declare class ReportsApi {
+  constructor(http: HttpTransport);
+  /** Export Pdf — `GET /api/reports/export` */
+  exportPdf(query?: { year?: number; format?: string }): Promise<unknown>;
+  /** Performance — `GET /api/reports/performance` */
+  performance(): Promise<unknown>;
+  /** Tax Summary — `GET /api/reports/tax-summary` */
+  taxSummary(query?: { year?: number; format?: string }): Promise<unknown>;
+}
+
+/** `transactions` endpoints. */
+export declare class TransactionsApi {
+  constructor(http: HttpTransport);
+  /** List Transactions — `GET /api/transactions/` */
+  listTransactions(query?: { limit?: number; offset?: number; status_filter?: string | null }): Promise<TransactionListResponse>;
+  /** Transactions By Crypto — `GET /api/transactions/crypto/{crypto}` */
+  transactionsByCrypto(crypto: string, query?: { limit?: number; offset?: number }): Promise<TransactionResponse[]>;
+  /** Transaction Stats — `GET /api/transactions/stats/summary` */
+  transactionStats(): Promise<TransactionStats>;
+  /** Transactions By Status — `GET /api/transactions/status/{tx_status}` */
+  transactionsByStatus(txStatus: string, query?: { limit?: number; offset?: number }): Promise<TransactionResponse[]>;
+  /** Get Transaction — `GET /api/transactions/{transaction_id}` */
+  getTransaction(transactionId: string): Promise<TransactionResponse>;
 }
 
 /** `user` endpoints. */
@@ -105,170 +251,23 @@ export declare class UserApi {
   getUserById(userId: string): Promise<UserPublicProfile>;
 }
 
-/** `exchange` endpoints. */
-export declare class ExchangeApi {
-  constructor(http: HttpTransport);
-  /** List Keys — `GET /api/exchange/keys` */
-  listKeys(): Promise<APIKeyResponse[]>;
-  /** Add Or Update Key — `POST /api/exchange/keys` */
-  addOrUpdateKey(body: APIKeyCreate): Promise<APIKeyResponse>;
-  /** Verify Key — `POST /api/exchange/keys/{key_id}/verify` */
-  verifyKey(keyId: string): Promise<KeyVerifyResponse>;
-  /** Delete Key — `DELETE /api/exchange/keys/{key_id}` */
-  deleteKey(keyId: string): Promise<unknown>;
-}
-
-/** `transactions` endpoints. */
-export declare class TransactionsApi {
-  constructor(http: HttpTransport);
-  /** List Transactions — `GET /api/transactions/` */
-  listTransactions(query?: { limit?: number; offset?: number; status_filter?: string | null }): Promise<TransactionListResponse>;
-  /** Transaction Stats — `GET /api/transactions/stats/summary` */
-  transactionStats(): Promise<TransactionStats>;
-  /** Transactions By Crypto — `GET /api/transactions/crypto/{crypto}` */
-  transactionsByCrypto(crypto: string, query?: { limit?: number; offset?: number }): Promise<TransactionResponse[]>;
-  /** Transactions By Status — `GET /api/transactions/status/{tx_status}` */
-  transactionsByStatus(txStatus: string, query?: { limit?: number; offset?: number }): Promise<TransactionResponse[]>;
-  /** Get Transaction — `GET /api/transactions/{transaction_id}` */
-  getTransaction(transactionId: string): Promise<TransactionResponse>;
-}
-
-/** `dashboard` endpoints. */
-export declare class DashboardApi {
-  constructor(http: HttpTransport);
-  /** Dashboard — `GET /api/dashboard/` */
-  dashboard(): Promise<DashboardResponse>;
-  /** Quick Stats — `GET /api/dashboard/stats` */
-  quickStats(): Promise<QuickStats>;
-  /** Analytics Timeline — `GET /api/dashboard/analytics/timeline` */
-  analyticsTimeline(query?: { days?: number }): Promise<TimelineResponse>;
-}
-
-/** `integrations` endpoints. */
-export declare class IntegrationsApi {
-  constructor(http: HttpTransport);
-  /** Available — `GET /api/integrations/available` */
-  available(): Promise<IntegrationInfo[]>;
-  /** List Webhooks — `GET /api/integrations/webhooks` */
-  listWebhooks(): Promise<WebhookRow[]>;
-  /** Create Webhook — `POST /api/integrations/webhooks` */
-  createWebhook(body: WebhookCreate): Promise<WebhookCreated>;
-  /** Ping Webhook — `POST /api/integrations/webhooks/{webhook_id}/ping` */
-  pingWebhook(webhookId: string): Promise<WebhookRow>;
-  /** Delete Webhook — `DELETE /api/integrations/webhooks/{webhook_id}` */
-  deleteWebhook(webhookId: string): Promise<unknown>;
-}
-
-/** `reports` endpoints. */
-export declare class ReportsApi {
-  constructor(http: HttpTransport);
-  /** Tax Summary — `GET /api/reports/tax-summary` */
-  taxSummary(query?: { year?: number; format?: string }): Promise<unknown>;
-  /** Performance — `GET /api/reports/performance` */
-  performance(): Promise<unknown>;
-  /** Export Pdf — `GET /api/reports/export` */
-  exportPdf(query?: { year?: number; format?: string }): Promise<unknown>;
-}
-
-/** `notifications` endpoints. */
-export declare class NotificationsApi {
-  constructor(http: HttpTransport);
-  /** Get Preferences — `GET /api/notifications/preferences` */
-  getPreferences(): Promise<PreferencesResponse>;
-  /** Update Preferences — `PUT /api/notifications/preferences` */
-  updatePreferences(body: PreferencesPayload): Promise<PreferencesResponse>;
-  /** History — `GET /api/notifications/history` */
-  history(query?: { limit?: number; offset?: number }): Promise<HistoryResponse>;
-  /** Send Test — `POST /api/notifications/test` */
-  sendTest(): Promise<unknown>;
-}
-
-/** `admin` endpoints. */
-export declare class AdminApi {
-  constructor(http: HttpTransport);
-  /** Platform Stats — `GET /api/admin/stats` */
-  platformStats(): Promise<PlatformStats>;
-  /** List Users — `GET /api/admin/users` */
-  listUsers(query?: { q?: string | null; limit?: number; offset?: number }): Promise<AdminUserList>;
-  /** Suspend User — `POST /api/admin/users/{user_id}/suspend` */
-  suspendUser(userId: string): Promise<unknown>;
-  /** Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend` */
-  unsuspendUser(userId: string): Promise<unknown>;
-  /** Delete User — `DELETE /api/admin/users/{user_id}` */
-  deleteUser(userId: string, query: { confirm: string }): Promise<unknown>;
-  /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
-  kycOverride(userId: string, body: KycOverride): Promise<unknown>;
-  /** All Transactions — `GET /api/admin/transactions` */
-  allTransactions(query?: { status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }): Promise<AdminTransactionList>;
-  /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
-  forceRetry(purchaseId: string): Promise<unknown>;
-  /** Alerts — `GET /api/admin/alerts` */
-  alerts(): Promise<AlertItem[]>;
-  /** Pause Scheduler — `POST /api/admin/scheduler/pause` */
-  pauseScheduler(): Promise<unknown>;
-  /** Resume Scheduler — `POST /api/admin/scheduler/resume` */
-  resumeScheduler(): Promise<unknown>;
-}
-
-/** `analytics` endpoints. */
-export declare class AnalyticsApi {
-  constructor(http: HttpTransport);
-  /** Performance — `GET /api/analytics/performance` */
-  performance(): Promise<PerformanceResponse>;
-  /** Comparison — `GET /api/analytics/comparison` */
-  comparison(): Promise<ComparisonResponse>;
-  /** Recurring — `GET /api/analytics/recurring` */
-  recurring(): Promise<RecurringResponse>;
-  /** Volatility — `GET /api/analytics/volatility` */
-  volatility(): Promise<VolatilityResponse>;
-}
-
-/** `kyc` endpoints. */
-export declare class KycApi {
-  constructor(http: HttpTransport);
-  /** Initiate Kyc — `POST /api/kyc/initiate` */
-  initiateKyc(): Promise<InitiateResponse>;
-  /** Kyc Status — `GET /api/kyc/status` */
-  kycStatus(query?: { sync?: boolean }): Promise<StatusResponse>;
-  /** Sumsub Webhook — `POST /api/kyc/webhook` */
-  sumsubWebhook(): Promise<unknown>;
-  /** Create Applicant — `POST /api/kyc/create-applicant` */
-  createApplicant(body: CreateApplicantRequest): Promise<CreateApplicantResponse>;
-  /** Applicant Status — `GET /api/kyc/applicant/{applicant_id}/status` */
-  applicantStatus(applicantId: string): Promise<ApplicantStatusResponse>;
-}
-
-/** `webhooks` endpoints. */
-export declare class WebhooksApi {
-  constructor(http: HttpTransport);
-  /** Sumsub Events — `POST /api/webhooks/sumsub` */
-  sumsubEvents(): Promise<unknown>;
-  /** Resend Events — `POST /api/webhooks/resend` */
-  resendEvents(): Promise<unknown>;
-}
-
-/** `email` endpoints. */
-export declare class EmailApi {
-  constructor(http: HttpTransport);
-  /** Send Verification — `POST /api/email/send-verification` */
-  sendVerification(body: SendVerificationRequest): Promise<EmailSentResponse>;
-  /** Send Notification — `POST /api/email/send-notification` */
-  sendNotification(body: SendNotificationRequest): Promise<EmailSentResponse>;
-}
-
 /** `v2` endpoints. */
 export declare class V2Api {
   constructor(http: HttpTransport);
+  /** Coin Market — `GET /api/v2/market/coins/{coin}` */
+  coinMarket(coin: string, query?: { amount_usd?: number | null }): Promise<CoinMarketOut>;
   /** List Purchases — `GET /api/v2/purchases` */
   listPurchases(): Promise<PurchaseOut[]>;
   /** Create Purchase — `POST /api/v2/purchases` */
   createPurchase(body: PurchaseCreateRequest): Promise<PurchaseCreatedOut>;
+  /** Cancel Purchase — `DELETE /api/v2/purchases/{purchase_id}` */
+  cancelPurchase(purchaseId: string): Promise<unknown>;
   /** Get Purchase — `GET /api/v2/purchases/{purchase_id}` */
   getPurchase(purchaseId: string): Promise<PurchaseDetailOut>;
   /** Update Purchase — `PUT /api/v2/purchases/{purchase_id}` */
   updatePurchase(purchaseId: string, body: PurchaseUpdateRequest): Promise<PurchaseOut>;
-  /** Cancel Purchase — `DELETE /api/v2/purchases/{purchase_id}` */
-  cancelPurchase(purchaseId: string): Promise<unknown>;
+  /** Retry Withdrawal — `POST /api/v2/purchases/{purchase_id}/retry-withdrawal` */
+  retryWithdrawal(purchaseId: string): Promise<RetryWithdrawalOut>;
   /** Purchase Transactions — `GET /api/v2/purchases/{purchase_id}/transactions` */
   purchaseTransactions(purchaseId: string, query?: { status_filter?: string | null }): Promise<TransactionOut[]>;
 }
@@ -276,30 +275,39 @@ export declare class V2Api {
 /** `wallets` endpoints. */
 export declare class WalletsApi {
   constructor(http: HttpTransport);
-  /** Add Wallet — `POST /api/wallets` */
-  addWallet(body: WalletCreateRequest): Promise<WalletOut>;
   /** List Wallets — `GET /api/wallets` */
   listWallets(query?: { blockchain_network?: string | null }): Promise<WalletOut[]>;
+  /** Add Wallet — `POST /api/wallets` */
+  addWallet(body: WalletCreateRequest): Promise<WalletOut>;
   /** Delete Wallet — `DELETE /api/wallets/{wallet_id}` */
   deleteWallet(walletId: string): Promise<unknown>;
 }
 
+/** `webhooks` endpoints. */
+export declare class WebhooksApi {
+  constructor(http: HttpTransport);
+  /** Resend Events — `POST /api/webhooks/resend` */
+  resendEvents(): Promise<unknown>;
+  /** Sumsub Events — `POST /api/webhooks/sumsub` */
+  sumsubEvents(): Promise<unknown>;
+}
+
 export interface Api {
   readonly system: SystemApi;
-  readonly auth: AuthApi;
-  readonly user: UserApi;
-  readonly exchange: ExchangeApi;
-  readonly transactions: TransactionsApi;
-  readonly dashboard: DashboardApi;
-  readonly integrations: IntegrationsApi;
-  readonly reports: ReportsApi;
-  readonly notifications: NotificationsApi;
   readonly admin: AdminApi;
   readonly analytics: AnalyticsApi;
-  readonly kyc: KycApi;
-  readonly webhooks: WebhooksApi;
+  readonly auth: AuthApi;
+  readonly dashboard: DashboardApi;
   readonly email: EmailApi;
+  readonly exchange: ExchangeApi;
+  readonly integrations: IntegrationsApi;
+  readonly kyc: KycApi;
+  readonly notifications: NotificationsApi;
+  readonly reports: ReportsApi;
+  readonly transactions: TransactionsApi;
+  readonly user: UserApi;
   readonly v2: V2Api;
   readonly wallets: WalletsApi;
+  readonly webhooks: WebhooksApi;
 }
 export declare function buildApi(http: HttpTransport): Api;

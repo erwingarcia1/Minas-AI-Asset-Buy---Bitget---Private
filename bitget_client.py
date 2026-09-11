@@ -243,10 +243,17 @@ class BitgetClient:
             raise BitgetAPIError("SYMBOL", f"unknown coin {coin!r}")
         return data[0].get("chains") or []
 
-    def withdraw(self, coin, address, amount, network=None, client_oid=None, tag=None, remark=None):
+    # Optional travel-rule / beneficiary fields Bitget accepts on a withdrawal,
+    # keyed by our snake_case names.
+    TRAVEL_RULE_FIELDS = {"first_name": "firstName", "last_name": "lastName", "identity_type": "identityType",
+                          "company_name": "companyName", "area_code": "areaCode", "member_code": "memberCode"}
+
+    def withdraw(self, coin, address, amount, network=None, client_oid=None, tag=None, remark=None,
+                 travel_rule=None):
         """On-chain withdrawal (POST /api/v2/spot/wallet/withdrawal). Needs the
         Withdraw permission, a whitelisted IP and the address in the account's
-        address book. Returns Bitget's withdrawal orderId."""
+        address book. `travel_rule` (dict, see TRAVEL_RULE_FIELDS) is sent when
+        given. Returns Bitget's withdrawal orderId."""
         body = {"coin": coin, "transferType": "on_chain", "address": address, "chain": network,
                 "size": str(amount)}
         if tag:
@@ -255,6 +262,9 @@ class BitgetClient:
             body["remark"] = remark
         if client_oid:
             body["clientOid"] = client_oid
+        for ours, theirs in self.TRAVEL_RULE_FIELDS.items():
+            if (travel_rule or {}).get(ours):
+                body[theirs] = str(travel_rule[ours])
         data = self._request("POST", "/api/v2/spot/wallet/withdrawal", body=body) or {}
         return str(data.get("orderId") or "")
 

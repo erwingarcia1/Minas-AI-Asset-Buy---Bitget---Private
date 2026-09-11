@@ -35,7 +35,7 @@ from calendar import monthrange
 from datetime import datetime, timedelta
 from typing import Optional, Protocol
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import NullPool
@@ -43,6 +43,7 @@ from sqlalchemy.pool import NullPool
 from api.config import settings
 from api.database import DATABASE_URL
 from api.models import APIKey, Purchase, PurchaseTransaction, User, utcnow
+from api.services.history import BUY_TYPES
 
 logger = logging.getLogger("autobuy.tasks.purchases")
 
@@ -99,6 +100,9 @@ class ExchangeGateway(Protocol):
 
     def withdraw(self, account: APIKey, purchase: Purchase, amount: float, client_oid: str, dry_run: bool) -> dict:
         """{withdrawal_id, chain, withdrawal_fee, withdrawal_fee_currency, tx_hash, raw_status}."""
+
+    def withdrawal_status(self, account: APIKey, purchase: Purchase, wd: PurchaseTransaction) -> dict:
+        """The exchange's record of a sent withdrawal: {found, raw_status, tx_hash, fee, done, ok}."""
         ...
 
 
@@ -187,12 +191,29 @@ class ExchangeClientGateway:
             result = client.withdraw(purchase.crypto_symbol, purchase.wallet_address, size,
                                      network=chain if account.exchange == "bitget"
                                      else WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol, chain),
-                                     client_oid=client_oid, dry_run=dry_run)
+                                     client_oid=client_oid, dry_run=dry_run,
+                                     travel_rule=purchase.travel_rule_dict() or None)
         except Exception as exc:
             raise self._wrap(exc, "withdraw") from exc
         return {"withdrawal_id": result["withdrawal_id"], "chain": chain, "size": size,
                 "withdrawal_fee": result.get("fee", fee), "withdrawal_fee_currency": result.get("fee_currency", fee_currency),
                 "tx_hash": result.get("tx_hash"), "raw_status": "simulated" if dry_run else "submitted"}
+
+
+    def withdrawal_status(self, account, purchase, wd):
+        """Bitget's withdrawal record for `wd` (by client id / withdrawal id),
+        searched from an hour before it was sent. Raises for other venues."""
+        if account.exchange != "bitget":
+            raise ExecutionError(f"withdrawal tracking is not implemented for {account.exchange}",
+                                 stage="withdrawal_status", code="UNSUPPORTED")
+        sent = wd.executed_at or wd.created_at or utcnow()
+        since_ms = int((sent - timedelta(hours=1)).timestamp() * 1000)
+        until_ms = int(utcnow().timestamp() * 1000)
+        try:
+            return _client_for(account).withdrawal_status(purchase.crypto_symbol, wd.client_oid, wd.withdrawal_id,
+                                                          since_ms, until_ms)
+        except Exception as exc:
+            raise self._wrap(exc, "withdrawal_status") from exc
 
 
 # --------------------------------------------------------------------------- scheduling math
@@ -501,6 +522,154 @@ async def _withdraw_after_buy(db: AsyncSession, purchase: Purchase, account: API
     return wd
 
 
+def stranded_buy(purchase: Purchase) -> Optional[PurchaseTransaction]:
+    """The latest filled buy whose coins never left the exchange: no child
+    withdrawal row succeeded. None when there is nothing to retry."""
+    txs = list(purchase.transactions or [])
+    buys = sorted((t for t in txs if t.tx_type in BUY_TYPES and t.status == "success"),
+                  key=lambda t: t.created_at, reverse=True)
+    for buy in buys:
+        children = [t for t in txs if t.parent_transaction_id == buy.id and t.tx_type == "withdrawal"]
+        if children and not any(c.status == "success" for c in children):
+            return buy
+    return None
+
+
+async def retry_withdrawal(db: AsyncSession, purchase: Purchase, gateway: Optional[ExchangeGateway] = None,
+                           now: Optional[datetime] = None, dry_run: Optional[bool] = None) -> PurchaseTransaction:
+    """Send the coins of a stranded buy again. Only the withdrawal is retried —
+    place_buy is never called. On success the schedule resumes from now."""
+    now = now or utcnow()
+    gateway = gateway or ExchangeClientGateway()
+    dry_run = settings.autobuy_dry_run if dry_run is None else dry_run
+    if purchase.status not in ("withdrawal_failed", "needs_info"):
+        raise ValueError(f"purchase is {purchase.status}; only withdrawal_failed / needs_info purchases can retry a withdrawal")
+    if not purchase.wallet_address:
+        raise ValueError("the purchase has no wallet address to withdraw to")
+    buy = stranded_buy(purchase)
+    if buy is None:
+        raise ValueError("no filled buy with a failed withdrawal to retry")
+    account = purchase.exchange_account
+    if account is None or not account.verified:
+        raise ValueError("the purchase's exchange key is missing or unverified")
+    events: list = []
+    wd = await _withdraw_after_buy(db, purchase, account, buy, gateway, now, dry_run, events)
+    if wd.status == "success":
+        purchase.status = "active"
+        _advance(purchase, now)   # may complete a one-time purchase
+        await db.commit()
+        logger.info("purchase %s: withdrawal retried and sent (%s), schedule resumed", purchase.id, wd.id)
+    from api.services.purchase_events import PurchaseEvent, emit
+    for kind, err, tx in events:
+        try:
+            await emit(db, PurchaseEvent(type=kind, user=purchase.user, purchase=purchase, tx=tx, dry_run=dry_run,
+                                         error=err, exchange=account.exchange))
+        except Exception:
+            logger.exception("purchase %s: event emission failed", purchase.id)
+    return wd
+
+
+# Withdrawal statuses that need no further polling. "simulated" = dry run, nothing was sent.
+WITHDRAWAL_SETTLED = ("success", "wallet_fail", "cancel", "reject", "fail", "failed", "simulated", "unconfirmed")
+WITHDRAWAL_POLL_WINDOW = timedelta(days=7)
+WITHDRAWAL_POLL_INTERVAL_MINUTES = 10
+WITHDRAWAL_LOCK_KEY = 0x41425750  # "ABWP"
+
+
+async def find_open_withdrawals(db: AsyncSession, now: datetime, limit: int = BATCH_LIMIT) -> list[PurchaseTransaction]:
+    """Sent withdrawals (last 7 days) the exchange has not settled yet."""
+    since = now - WITHDRAWAL_POLL_WINDOW
+    q = (select(PurchaseTransaction)
+         .options(selectinload(PurchaseTransaction.purchase).selectinload(Purchase.exchange_account),
+                  selectinload(PurchaseTransaction.purchase).selectinload(Purchase.user))
+         .where(PurchaseTransaction.tx_type == "withdrawal", PurchaseTransaction.status == "success",
+                PurchaseTransaction.executed_at >= since,
+                or_(PurchaseTransaction.raw_status.is_(None), PurchaseTransaction.raw_status.notin_(WITHDRAWAL_SETTLED)))
+         .order_by(PurchaseTransaction.executed_at.asc()).limit(limit))
+    return list((await db.execute(q)).scalars().all())
+
+
+async def poll_withdrawals(db: AsyncSession, now: Optional[datetime] = None,
+                           gateway: Optional[ExchangeGateway] = None) -> dict:
+    """Ask the exchange about every unsettled withdrawal: store the on-chain tx
+    hash and final fee when it succeeds; when the exchange failed, cancelled or
+    rejected it, mark the row failed and park the purchase as withdrawal_failed
+    (coins are still on the exchange; the withdrawal can be retried, the buy is
+    never repeated). Withdrawals unresolved after the 7-day window are marked
+    unconfirmed and flagged on Slack."""
+    now = now or utcnow()
+    gateway = gateway or ExchangeClientGateway()
+    counts = {"confirmed": 0, "failed": 0, "pending": 0, "skipped": 0}
+    from api.services import scheduler_state
+    try:
+        pause = await scheduler_state.pause_info()
+    except scheduler_state.PauseStateUnavailable as exc:
+        logger.error("withdrawal poll skipped: cannot read the pause switch (%s); failing closed", exc)
+        return counts
+    if pause["paused"]:
+        await scheduler_state.record_run("withdrawals", "skipped_paused", detail=f"paused by {pause['by']}")
+        return counts
+    async with db.bind.connect() as lock_conn:
+        got = (await lock_conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": WITHDRAWAL_LOCK_KEY})).scalar()
+        if not got:
+            return counts
+        try:
+            for wd in await find_open_withdrawals(db, now):
+                purchase = wd.purchase
+                account = purchase.exchange_account if purchase else None
+                if account is None or account.exchange != "bitget":
+                    counts["skipped"] += 1
+                    continue
+                try:
+                    info = await asyncio.to_thread(gateway.withdrawal_status, account, purchase, wd)
+                except Exception as exc:
+                    logger.warning("withdrawal %s: status lookup failed: %s", wd.id, exc)
+                    counts["pending"] += 1
+                    continue
+                if info.get("found"):
+                    wd.raw_status = info.get("raw_status") or wd.raw_status
+                    wd.tx_hash = info.get("tx_hash") or wd.tx_hash
+                    if info.get("fee") is not None:
+                        wd.withdrawal_fee = info["fee"]
+                if info.get("done") and info.get("ok"):
+                    counts["confirmed"] += 1
+                    await db.commit()
+                    logger.info("withdrawal %s confirmed by the exchange: tx %s", wd.id, wd.tx_hash)
+                elif info.get("done"):
+                    wd.status = "failed"
+                    wd.error_message = f"exchange reported the withdrawal as {wd.raw_status}"[:500]
+                    purchase.status = "withdrawal_failed"
+                    purchase.next_execution = None
+                    purchase.last_error = wd.error_message
+                    await db.commit()
+                    counts["failed"] += 1
+                    logger.error("withdrawal %s %s on the exchange; purchase %s parked as withdrawal_failed, no re-buy",
+                                 wd.id, wd.raw_status, purchase.id)
+                    try:
+                        from api.services.purchase_events import PurchaseEvent, emit
+                        await emit(db, PurchaseEvent(type="withdrawal_failed", user=purchase.user, purchase=purchase, tx=wd,
+                                                     dry_run=settings.autobuy_dry_run, error=wd.error_message,
+                                                     exchange=account.exchange))
+                    except Exception:
+                        logger.exception("withdrawal %s: event emission failed", wd.id)
+                elif (wd.executed_at or now) < now - WITHDRAWAL_POLL_WINDOW + timedelta(hours=1):
+                    wd.raw_status = "unconfirmed"
+                    await db.commit()
+                    counts["pending"] += 1
+                    from api.services.slack_service import send_slack
+                    await send_slack(f":warning: AutoBuy withdrawal {wd.id} (purchase {purchase.id}, {purchase.crypto_symbol}) "
+                                     f"still unconfirmed after 7 days — check it on {account.exchange}")
+                else:
+                    await db.commit()
+                    counts["pending"] += 1
+        finally:
+            await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": WITHDRAWAL_LOCK_KEY})
+            await lock_conn.commit()
+    await scheduler_state.record_run("withdrawals", "ok" if not counts["failed"] else "failed", counts=counts)
+    logger.info("withdrawal poll finished: %s", counts)
+    return counts
+
+
 async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None,
                                 gateway: Optional[ExchangeGateway] = None,
                                 dry_run: Optional[bool] = None) -> dict:
@@ -619,6 +788,26 @@ def execute_purchases() -> dict:
         return {"executed": 0, "failed": 0, "skipped": 0}
 
 
+async def _poll_once() -> dict:
+    engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            return await poll_withdrawals(session)
+    finally:
+        await engine.dispose()
+
+
+def poll_withdrawals_job() -> dict:
+    """APScheduler entry point: confirm sent withdrawals with the exchange."""
+    try:
+        return asyncio.run(_poll_once())
+    except Exception as exc:
+        logger.exception("withdrawal poll failed")
+        from api.services import scheduler_state
+        scheduler_state.record_run_sync("withdrawals", "error", detail=repr(exc))
+        return {"confirmed": 0, "failed": 0, "pending": 0, "skipped": 0}
+
+
 # Session-level advisory lock for the weekly digest: one worker sends, the
 # other three find the lock taken and return.
 DIGEST_LOCK_KEY = 0x41425744  # "ABWD"
@@ -663,6 +852,8 @@ def build_scheduler():
     sched = BackgroundScheduler(timezone="UTC")
     sched.add_job(execute_purchases, "interval", minutes=INTERVAL_MINUTES, id="execute_purchases",
                   max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE_SECONDS)
+    sched.add_job(poll_withdrawals_job, "interval", minutes=WITHDRAWAL_POLL_INTERVAL_MINUTES, id="poll_withdrawals",
+                  max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE_SECONDS)
     sched.add_job(send_weekly_digest, "cron", day_of_week="mon", hour=9, minute=0, id="weekly_digest",
                   max_instances=1, coalesce=True, misfire_grace_time=3600)
     sched.add_listener(job_event_listener, EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR)
@@ -676,7 +867,7 @@ def job_event_listener(event) -> None:
     Register with EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR.
     """
     from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
-    if getattr(event, "job_id", None) != "execute_purchases":
+    if getattr(event, "job_id", None) not in ("execute_purchases", "poll_withdrawals"):
         return
     when = getattr(event, "scheduled_run_time", None)
     if event.code == EVENT_JOB_MISSED:

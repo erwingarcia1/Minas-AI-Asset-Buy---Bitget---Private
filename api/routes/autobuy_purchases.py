@@ -6,6 +6,7 @@ chain and the declared network, (2) that the exchange account can withdraw
 to that network, and (3) that the caller owns the exchange account.
 """
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -35,6 +36,31 @@ MIN_AMOUNT_USD, MAX_AMOUNT_USD = 10.0, 1_000_000.0
 
 # --------------------------------------------------------------------------- schemas
 
+class TravelRuleInfo(BaseModel):
+    """Optional beneficiary / travel-rule details some venues require before an
+    API withdrawal (Bitget: firstName, lastName, identityType, companyName,
+    areaCode, memberCode). Stored on the purchase and sent with withdrawals.
+    Nothing is prefilled: the KYC provider's data is not stored on the user."""
+    first_name: Optional[str] = Field(default=None, max_length=100)
+    last_name: Optional[str] = Field(default=None, max_length=100)
+    identity_type: Optional[str] = Field(default=None, max_length=20)     # user | company (Bitget's values)
+    company_name: Optional[str] = Field(default=None, max_length=200)
+    area_code: Optional[str] = Field(default=None, max_length=20)
+    member_code: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+    def to_json(self) -> Optional[str]:
+        data = {k: v for k, v in self.model_dump().items() if v}
+        return json.dumps(data) if data else None
+
+
 class PurchaseCreateRequest(BaseModel):
     crypto_symbol: str = Field(min_length=2, max_length=10)
     amount_usd: float = Field(ge=MIN_AMOUNT_USD, le=MAX_AMOUNT_USD)
@@ -49,6 +75,7 @@ class PurchaseCreateRequest(BaseModel):
     purchase_type: str = "autobuy"
     # Deprecated alias for purchase_type (true = autobuy, false = dca); must agree with it when both are sent.
     withdraw_immediately: Optional[bool] = None
+    travel_rule_info: Optional[TravelRuleInfo] = None
 
     @field_validator("purchase_type")
     @classmethod
@@ -118,6 +145,7 @@ class PurchaseUpdateRequest(BaseModel):
     wallet_address: Optional[str] = Field(default=None, max_length=128)
     blockchain_network: Optional[str] = None
     confirm_wallet_address: Optional[str] = None
+    travel_rule_info: Optional[TravelRuleInfo] = None   # replaces the stored details; send {} to clear
 
     @field_validator("purchase_type")
     @classmethod
@@ -155,13 +183,26 @@ class TransactionOut(BaseModel):
     id: UUID
     purchase_id: UUID
     exchange_tx_id: Optional[str] = None
-    tx_type: str = "withdrawal"   # withdrawal | accumulation
+    tx_type: str = "withdrawal"   # buy | withdrawal | accumulation
     status: str
     amount_executed: Optional[float] = None
     fee: Optional[float] = None
     error_message: Optional[str] = None
     executed_at: Optional[datetime] = None
     created_at: datetime
+    # buy rows
+    order_id: Optional[str] = None
+    fill_price: Optional[float] = None
+    cost_usd: Optional[float] = None
+    fee_currency: Optional[str] = None
+    # withdrawal rows (parent_transaction_id -> the buy whose coins were sent)
+    parent_transaction_id: Optional[UUID] = None
+    withdrawal_id: Optional[str] = None
+    withdrawal_chain: Optional[str] = None
+    withdrawal_fee: Optional[float] = None
+    withdrawal_fee_currency: Optional[str] = None
+    tx_hash: Optional[str] = None
+    raw_status: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -184,6 +225,7 @@ class PurchaseOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     latest_transaction: Optional[TransactionOut] = None
+    travel_rule_info: Optional[TravelRuleInfo] = None
 
     model_config = {"from_attributes": True}
 
@@ -196,6 +238,13 @@ class PurchaseCreatedOut(BaseModel):
     purchase_id: UUID
     status: str
     next_execution: Optional[datetime] = None
+
+
+class RetryWithdrawalOut(BaseModel):
+    purchase_id: UUID
+    status: str                       # the purchase's status after the retry
+    next_execution: Optional[datetime] = None
+    withdrawal: TransactionOut        # the new withdrawal row (success | failed | needs_info)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -212,6 +261,7 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
         status=p.status, failure_count=p.failure_count, last_error=p.last_error,
         next_execution=p.next_execution, created_at=p.created_at, updated_at=p.updated_at,
         latest_transaction=TransactionOut.model_validate(txs[0]) if txs else None,
+        travel_rule_info=TravelRuleInfo(**p.travel_rule_dict()) if p.travel_rule_dict() else None,
     )
     if detail:
         return PurchaseDetailOut(**base, transactions=[TransactionOut.model_validate(t) for t in txs])
@@ -220,7 +270,8 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
 
 async def _owned_purchase(db: AsyncSession, purchase_id: UUID, user: User) -> Purchase:
     p = (await db.execute(
-        select(Purchase).options(selectinload(Purchase.transactions), selectinload(Purchase.exchange_account))
+        select(Purchase).options(selectinload(Purchase.transactions), selectinload(Purchase.exchange_account),
+                                 selectinload(Purchase.user))
         .where(Purchase.id == purchase_id, Purchase.user_id == user.id))).scalar_one_or_none()
     if p is None:
         raise HTTPException(status_code=404, detail="Purchase not found")
@@ -308,6 +359,7 @@ async def create_purchase(
         user_id=current_user.id, exchange_account_id=account.id, crypto_symbol=payload.crypto_symbol,
         amount_usd=payload.amount_usd, frequency=payload.frequency, wallet_address=payload.wallet_address,
         blockchain_network=payload.blockchain_network, purchase_type=payload.purchase_type,
+        travel_rule_info=payload.travel_rule_info.to_json() if payload.travel_rule_info else None,
         status="active", failure_count=0,
         next_execution=utcnow(),  # due on the scheduler's next run
     )
@@ -349,8 +401,10 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     if p.status in ("cancelled", "completed", "failed"):
         raise HTTPException(status_code=409, detail=f"Purchase is {p.status} and cannot be changed")
     if (payload.status is None and payload.amount_usd is None and payload.frequency is None
-            and payload.purchase_type is None and payload.wallet_address is None):
+            and payload.purchase_type is None and payload.wallet_address is None and payload.travel_rule_info is None):
         raise HTTPException(status_code=400, detail="Nothing to update")
+    if payload.travel_rule_info is not None:
+        p.travel_rule_info = payload.travel_rule_info.to_json()
     if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
         # switching ON withdraw-immediately: real address + network + typed confirmation, every time
         address = payload.wallet_address
@@ -393,6 +447,43 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     await db.commit()
     await db.refresh(p)
     return _to_out(p)
+
+
+def _gateway():
+    """The executor gateway used for manual withdrawal retries (patched in tests)."""
+    from api.tasks.purchase_scheduler import ExchangeClientGateway
+    return ExchangeClientGateway()
+
+
+@router.post("/{purchase_id}/retry-withdrawal", response_model=RetryWithdrawalOut)
+async def retry_withdrawal(purchase_id: UUID, current_user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    """Send the coins of the last filled buy to the wallet again. Only for
+    purchases parked as `withdrawal_failed` or `needs_info`; the buy is never
+    repeated. The wallet, chain and Bitget minimum are re-checked first. On
+    success the purchase becomes `active` again and the schedule resumes; a
+    failed retry leaves it parked with the new error. Runs in dry-run mode
+    when AUTOBUY_DRY_RUN is set (nothing is sent)."""
+    from api.tasks import purchase_scheduler as ps
+    p = await _owned_purchase(db, purchase_id, current_user)
+    if p.status not in ("withdrawal_failed", "needs_info"):
+        raise HTTPException(status_code=409, detail={
+            "error": "not_retryable",
+            "details": {"status": p.status, "message": f"Purchase is {p.status}; only withdrawal_failed / needs_info purchases can retry a withdrawal"}})
+    if not p.wallet_address:
+        raise _reject("wallet_address_required", {"message": "The purchase has no wallet address to withdraw to"})
+    if ps.stranded_buy(p) is None:
+        raise HTTPException(status_code=409, detail={"error": "nothing_to_retry",
+                                                    "details": {"message": "No filled buy with a failed withdrawal was found"}})
+    if p.exchange_account is None or not p.exchange_account.verified:
+        raise _reject("exchange_key_unverified", {"message": "The purchase's exchange key is missing or unverified"})
+    _check_wallet(p.wallet_address, p.blockchain_network, p.crypto_symbol)
+    await _validate_against_exchange(p.exchange_account, p.crypto_symbol, float(p.amount_usd), p.blockchain_network, withdraw=True)
+    wd = await ps.retry_withdrawal(db, p, gateway=_gateway())
+    logger.info("withdrawal retried", extra={"purchase_id": str(p.id), "user_id": str(current_user.id),
+                                             "withdrawal_id": str(wd.id), "result": wd.status})
+    return RetryWithdrawalOut(purchase_id=p.id, status=p.status, next_execution=p.next_execution,
+                              withdrawal=TransactionOut.model_validate(wd))
 
 
 @router.delete("/{purchase_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)

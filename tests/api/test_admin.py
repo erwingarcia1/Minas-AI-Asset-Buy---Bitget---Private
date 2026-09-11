@@ -169,6 +169,14 @@ async def test_transactions_audit_and_force_retry(db, admin, user, binance_key):
     done = await make_autobuy_purchase(db, user, crypto="SOL", key=binance_key, status="completed", next_execution=None)
     async with client() as c:
         assert (await c.post(f"/api/admin/purchases/{done.id}/force-retry", headers=H)).status_code == 409
+    # a filled buy whose withdrawal failed must never be re-armed for another buy
+    for parked in ("withdrawal_failed", "needs_info"):
+        stranded = await make_autobuy_purchase(db, user, crypto="BTC", key=binance_key, status=parked, next_execution=None)
+        async with client() as c:
+            r = await c.post(f"/api/admin/purchases/{stranded.id}/force-retry", headers=H)
+        assert r.status_code == 409 and "retry the withdrawal" in r.json()["detail"]
+        await db.refresh(stranded)
+        assert stranded.status == parked and stranded.next_execution is None
 
 
 async def test_alerts_snapshot(admin):

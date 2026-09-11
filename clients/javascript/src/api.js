@@ -8,6 +8,14 @@ export class SystemApi {
   }
 
   /**
+   * Root — `GET /`
+   * @returns {Promise<unknown>}
+   */
+  root() {
+    return this.http.request("GET", "/", { auth: false });
+  }
+
+  /**
    * Health Check — `GET /health`
    * @returns {Promise<unknown>}
    */
@@ -15,12 +23,151 @@ export class SystemApi {
     return this.http.request("GET", "/health", { auth: false });
   }
 
+}
+
+/** `admin` endpoints. */
+export class AdminApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
   /**
-   * Root — `GET /`
+   * Alerts — `GET /api/admin/alerts`
+   * @returns {Promise<import('./types.js').AlertItem[]>}
+   */
+  alerts() {
+    return this.http.request("GET", "/api/admin/alerts", { auth: true });
+  }
+
+  /**
+   * Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry`
+   * @param {string} purchaseId
    * @returns {Promise<unknown>}
    */
-  root() {
-    return this.http.request("GET", "/", { auth: false });
+  forceRetry(purchaseId) {
+    return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
+  }
+
+  /**
+   * Pause Scheduler — `POST /api/admin/scheduler/pause`
+   * @returns {Promise<unknown>}
+   */
+  pauseScheduler() {
+    return this.http.request("POST", "/api/admin/scheduler/pause", { auth: true });
+  }
+
+  /**
+   * Resume Scheduler — `POST /api/admin/scheduler/resume`
+   * @returns {Promise<unknown>}
+   */
+  resumeScheduler() {
+    return this.http.request("POST", "/api/admin/scheduler/resume", { auth: true });
+  }
+
+  /**
+   * Platform Stats — `GET /api/admin/stats`
+   * @returns {Promise<import('./types.js').PlatformStats>}
+   */
+  platformStats() {
+    return this.http.request("GET", "/api/admin/stats", { auth: true });
+  }
+
+  /**
+   * All Transactions — `GET /api/admin/transactions`
+   * @param {{ status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }} [query]
+   * @returns {Promise<import('./types.js').AdminTransactionList>}
+   */
+  allTransactions(query) {
+    return this.http.request("GET", "/api/admin/transactions", { query, auth: true });
+  }
+
+  /**
+   * List Users — `GET /api/admin/users`
+   * @param {{ q?: string | null; limit?: number; offset?: number }} [query]
+   * @returns {Promise<import('./types.js').AdminUserList>}
+   */
+  listUsers(query) {
+    return this.http.request("GET", "/api/admin/users", { query, auth: true });
+  }
+
+  /**
+   * Delete User — `DELETE /api/admin/users/{user_id}`
+   * @param {string} userId
+   * @param {{ confirm: string }} [query]
+   * @returns {Promise<unknown>}
+   */
+  deleteUser(userId, query) {
+    return this.http.request("DELETE", "/api/admin/users/" + encodeURIComponent(String(userId)), { query, auth: true });
+  }
+
+  /**
+   * Kyc Override — `POST /api/admin/users/{user_id}/kyc-override`
+   * @param {string} userId
+   * @param {import('./types.js').KycOverride} body
+   * @returns {Promise<unknown>}
+   */
+  kycOverride(userId, body) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/kyc-override", { body, auth: true });
+  }
+
+  /**
+   * Suspend User — `POST /api/admin/users/{user_id}/suspend`
+   * @param {string} userId
+   * @returns {Promise<unknown>}
+   */
+  suspendUser(userId) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/suspend", { auth: true });
+  }
+
+  /**
+   * Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend`
+   * @param {string} userId
+   * @returns {Promise<unknown>}
+   */
+  unsuspendUser(userId) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { auth: true });
+  }
+
+}
+
+/** `analytics` endpoints. */
+export class AnalyticsApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Comparison — `GET /api/analytics/comparison`
+   * @returns {Promise<import('./types.js').ComparisonResponse>}
+   */
+  comparison() {
+    return this.http.request("GET", "/api/analytics/comparison", { auth: true });
+  }
+
+  /**
+   * Performance — `GET /api/analytics/performance`
+   * @returns {Promise<import('./types.js').PerformanceResponse>}
+   */
+  performance() {
+    return this.http.request("GET", "/api/analytics/performance", { auth: true });
+  }
+
+  /**
+   * Recurring — `GET /api/analytics/recurring`
+   * @returns {Promise<import('./types.js').RecurringResponse>}
+   */
+  recurring() {
+    return this.http.request("GET", "/api/analytics/recurring", { auth: true });
+  }
+
+  /**
+   * Volatility — `GET /api/analytics/volatility`
+   * @returns {Promise<import('./types.js').VolatilityResponse>}
+   */
+  volatility() {
+    return this.http.request("GET", "/api/analytics/volatility", { auth: true });
   }
 
 }
@@ -30,51 +177,6 @@ export class AuthApi {
   /** @param {import('./http.js').HttpTransport} http */
   constructor(http) {
     this.http = http;
-  }
-
-  /**
-   * Register — `POST /api/auth/register`
-   * @param {import('./types.js').RegisterRequest} body
-   * @returns {Promise<import('./types.js').UserOut>}
-   */
-  register(body) {
-    return this.http.request("POST", "/api/auth/register", { body, auth: false });
-  }
-
-  /**
-   * Login — `POST /api/auth/login`
-   * @param {import('./types.js').LoginRequest} body
-   * @returns {Promise<import('./types.js').TokenResponse>}
-   */
-  login(body) {
-    return this.http.request("POST", "/api/auth/login", { body, auth: false });
-  }
-
-  /**
-   * Verify — `POST /api/auth/verify`
-   * @param {import('./types.js').VerifyRequest} body
-   * @returns {Promise<import('./types.js').VerifyResponse>}
-   */
-  verify(body) {
-    return this.http.request("POST", "/api/auth/verify", { body, auth: false });
-  }
-
-  /**
-   * Refresh — `POST /api/auth/refresh`
-   * @param {import('./types.js').RefreshRequest} body
-   * @returns {Promise<import('./types.js').TokenResponse>}
-   */
-  refresh(body) {
-    return this.http.request("POST", "/api/auth/refresh", { body, auth: false });
-  }
-
-  /**
-   * Logout — `POST /api/auth/logout`
-   * @param {import('./types.js').LogoutRequest} body
-   * @returns {Promise<unknown>}
-   */
-  logout(body) {
-    return this.http.request("POST", "/api/auth/logout", { body, auth: false });
   }
 
   /**
@@ -96,12 +198,39 @@ export class AuthApi {
   }
 
   /**
-   * Validate Reset Token — `POST /api/auth/reset-password/validate`
-   * @param {import('./types.js').ResetTokenRequest} body
-   * @returns {Promise<import('./types.js').ResetTokenValidity>}
+   * Login — `POST /api/auth/login`
+   * @param {import('./types.js').LoginRequest} body
+   * @returns {Promise<import('./types.js').TokenResponse>}
    */
-  validateResetToken(body) {
-    return this.http.request("POST", "/api/auth/reset-password/validate", { body, auth: false });
+  login(body) {
+    return this.http.request("POST", "/api/auth/login", { body, auth: false });
+  }
+
+  /**
+   * Logout — `POST /api/auth/logout`
+   * @param {import('./types.js').LogoutRequest} body
+   * @returns {Promise<unknown>}
+   */
+  logout(body) {
+    return this.http.request("POST", "/api/auth/logout", { body, auth: false });
+  }
+
+  /**
+   * Refresh — `POST /api/auth/refresh`
+   * @param {import('./types.js').RefreshRequest} body
+   * @returns {Promise<import('./types.js').TokenResponse>}
+   */
+  refresh(body) {
+    return this.http.request("POST", "/api/auth/refresh", { body, auth: false });
+  }
+
+  /**
+   * Register — `POST /api/auth/register`
+   * @param {import('./types.js').RegisterRequest} body
+   * @returns {Promise<import('./types.js').UserOut>}
+   */
+  register(body) {
+    return this.http.request("POST", "/api/auth/register", { body, auth: false });
   }
 
   /**
@@ -111,6 +240,374 @@ export class AuthApi {
    */
   resetPassword(body) {
     return this.http.request("POST", "/api/auth/reset-password", { body, auth: false });
+  }
+
+  /**
+   * Validate Reset Token — `POST /api/auth/reset-password/validate`
+   * @param {import('./types.js').ResetTokenRequest} body
+   * @returns {Promise<import('./types.js').ResetTokenValidity>}
+   */
+  validateResetToken(body) {
+    return this.http.request("POST", "/api/auth/reset-password/validate", { body, auth: false });
+  }
+
+  /**
+   * Verify — `POST /api/auth/verify`
+   * @param {import('./types.js').VerifyRequest} body
+   * @returns {Promise<import('./types.js').VerifyResponse>}
+   */
+  verify(body) {
+    return this.http.request("POST", "/api/auth/verify", { body, auth: false });
+  }
+
+}
+
+/** `dashboard` endpoints. */
+export class DashboardApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Dashboard — `GET /api/dashboard/`
+   * @returns {Promise<import('./types.js').DashboardResponse>}
+   */
+  dashboard() {
+    return this.http.request("GET", "/api/dashboard/", { auth: true });
+  }
+
+  /**
+   * Analytics Timeline — `GET /api/dashboard/analytics/timeline`
+   * @param {{ days?: number }} [query]
+   * @returns {Promise<import('./types.js').TimelineResponse>}
+   */
+  analyticsTimeline(query) {
+    return this.http.request("GET", "/api/dashboard/analytics/timeline", { query, auth: true });
+  }
+
+  /**
+   * Quick Stats — `GET /api/dashboard/stats`
+   * @returns {Promise<import('./types.js').QuickStats>}
+   */
+  quickStats() {
+    return this.http.request("GET", "/api/dashboard/stats", { auth: true });
+  }
+
+}
+
+/** `email` endpoints. */
+export class EmailApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Send Notification — `POST /api/email/send-notification`
+   * @param {import('./types.js').SendNotificationRequest} body
+   * @returns {Promise<import('./types.js').EmailSentResponse>}
+   */
+  sendNotification(body) {
+    return this.http.request("POST", "/api/email/send-notification", { body, auth: true });
+  }
+
+  /**
+   * Send Verification — `POST /api/email/send-verification`
+   * @param {import('./types.js').SendVerificationRequest} body
+   * @returns {Promise<import('./types.js').EmailSentResponse>}
+   */
+  sendVerification(body) {
+    return this.http.request("POST", "/api/email/send-verification", { body, auth: true });
+  }
+
+}
+
+/** `exchange` endpoints. */
+export class ExchangeApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * List Keys — `GET /api/exchange/keys`
+   * @returns {Promise<import('./types.js').APIKeyResponse[]>}
+   */
+  listKeys() {
+    return this.http.request("GET", "/api/exchange/keys", { auth: true });
+  }
+
+  /**
+   * Add Or Update Key — `POST /api/exchange/keys`
+   * @param {import('./types.js').APIKeyCreate} body
+   * @returns {Promise<import('./types.js').APIKeyResponse>}
+   */
+  addOrUpdateKey(body) {
+    return this.http.request("POST", "/api/exchange/keys", { body, auth: true });
+  }
+
+  /**
+   * Delete Key — `DELETE /api/exchange/keys/{key_id}`
+   * @param {string} keyId
+   * @returns {Promise<unknown>}
+   */
+  deleteKey(keyId) {
+    return this.http.request("DELETE", "/api/exchange/keys/" + encodeURIComponent(String(keyId)), { auth: true });
+  }
+
+  /**
+   * Verify Key — `POST /api/exchange/keys/{key_id}/verify`
+   * @param {string} keyId
+   * @returns {Promise<import('./types.js').KeyVerifyResponse>}
+   */
+  verifyKey(keyId) {
+    return this.http.request("POST", "/api/exchange/keys/" + encodeURIComponent(String(keyId)) + "/verify", { auth: true });
+  }
+
+  /**
+   * Supported Exchanges — `GET /api/exchange/supported`
+   * @returns {Promise<import('./types.js').string[]>}
+   */
+  supportedExchanges() {
+    return this.http.request("GET", "/api/exchange/supported", { auth: false });
+  }
+
+}
+
+/** `integrations` endpoints. */
+export class IntegrationsApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Available — `GET /api/integrations/available`
+   * @returns {Promise<import('./types.js').IntegrationInfo[]>}
+   */
+  available() {
+    return this.http.request("GET", "/api/integrations/available", { auth: true });
+  }
+
+  /**
+   * List Webhooks — `GET /api/integrations/webhooks`
+   * @returns {Promise<import('./types.js').WebhookRow[]>}
+   */
+  listWebhooks() {
+    return this.http.request("GET", "/api/integrations/webhooks", { auth: true });
+  }
+
+  /**
+   * Create Webhook — `POST /api/integrations/webhooks`
+   * @param {import('./types.js').WebhookCreate} body
+   * @returns {Promise<import('./types.js').WebhookCreated>}
+   */
+  createWebhook(body) {
+    return this.http.request("POST", "/api/integrations/webhooks", { body, auth: true });
+  }
+
+  /**
+   * Delete Webhook — `DELETE /api/integrations/webhooks/{webhook_id}`
+   * @param {string} webhookId
+   * @returns {Promise<unknown>}
+   */
+  deleteWebhook(webhookId) {
+    return this.http.request("DELETE", "/api/integrations/webhooks/" + encodeURIComponent(String(webhookId)), { auth: true });
+  }
+
+  /**
+   * Ping Webhook — `POST /api/integrations/webhooks/{webhook_id}/ping`
+   * @param {string} webhookId
+   * @returns {Promise<import('./types.js').WebhookRow>}
+   */
+  pingWebhook(webhookId) {
+    return this.http.request("POST", "/api/integrations/webhooks/" + encodeURIComponent(String(webhookId)) + "/ping", { auth: true });
+  }
+
+}
+
+/** `kyc` endpoints. */
+export class KycApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Applicant Status — `GET /api/kyc/applicant/{applicant_id}/status`
+   * @param {string} applicantId
+   * @returns {Promise<import('./types.js').ApplicantStatusResponse>}
+   */
+  applicantStatus(applicantId) {
+    return this.http.request("GET", "/api/kyc/applicant/" + encodeURIComponent(String(applicantId)) + "/status", { auth: true });
+  }
+
+  /**
+   * Create Applicant — `POST /api/kyc/create-applicant`
+   * @param {import('./types.js').CreateApplicantRequest} body
+   * @returns {Promise<import('./types.js').CreateApplicantResponse>}
+   */
+  createApplicant(body) {
+    return this.http.request("POST", "/api/kyc/create-applicant", { body, auth: true });
+  }
+
+  /**
+   * Initiate Kyc — `POST /api/kyc/initiate`
+   * @returns {Promise<import('./types.js').InitiateResponse>}
+   */
+  initiateKyc() {
+    return this.http.request("POST", "/api/kyc/initiate", { auth: true });
+  }
+
+  /**
+   * Kyc Status — `GET /api/kyc/status`
+   * @param {{ sync?: boolean }} [query]
+   * @returns {Promise<import('./types.js').StatusResponse>}
+   */
+  kycStatus(query) {
+    return this.http.request("GET", "/api/kyc/status", { query, auth: true });
+  }
+
+  /**
+   * Sumsub Webhook — `POST /api/kyc/webhook`
+   * @returns {Promise<unknown>}
+   */
+  sumsubWebhook() {
+    return this.http.request("POST", "/api/kyc/webhook", { auth: false });
+  }
+
+}
+
+/** `notifications` endpoints. */
+export class NotificationsApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * History — `GET /api/notifications/history`
+   * @param {{ limit?: number; offset?: number }} [query]
+   * @returns {Promise<import('./types.js').HistoryResponse>}
+   */
+  history(query) {
+    return this.http.request("GET", "/api/notifications/history", { query, auth: true });
+  }
+
+  /**
+   * Get Preferences — `GET /api/notifications/preferences`
+   * @returns {Promise<import('./types.js').PreferencesResponse>}
+   */
+  getPreferences() {
+    return this.http.request("GET", "/api/notifications/preferences", { auth: true });
+  }
+
+  /**
+   * Update Preferences — `PUT /api/notifications/preferences`
+   * @param {import('./types.js').PreferencesPayload} body
+   * @returns {Promise<import('./types.js').PreferencesResponse>}
+   */
+  updatePreferences(body) {
+    return this.http.request("PUT", "/api/notifications/preferences", { body, auth: true });
+  }
+
+  /**
+   * Send Test — `POST /api/notifications/test`
+   * @returns {Promise<unknown>}
+   */
+  sendTest() {
+    return this.http.request("POST", "/api/notifications/test", { auth: true });
+  }
+
+}
+
+/** `reports` endpoints. */
+export class ReportsApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Export Pdf — `GET /api/reports/export`
+   * @param {{ year?: number; format?: string }} [query]
+   * @returns {Promise<unknown>}
+   */
+  exportPdf(query) {
+    return this.http.request("GET", "/api/reports/export", { query, auth: true });
+  }
+
+  /**
+   * Performance — `GET /api/reports/performance`
+   * @returns {Promise<unknown>}
+   */
+  performance() {
+    return this.http.request("GET", "/api/reports/performance", { auth: true });
+  }
+
+  /**
+   * Tax Summary — `GET /api/reports/tax-summary`
+   * @param {{ year?: number; format?: string }} [query]
+   * @returns {Promise<unknown>}
+   */
+  taxSummary(query) {
+    return this.http.request("GET", "/api/reports/tax-summary", { query, auth: true });
+  }
+
+}
+
+/** `transactions` endpoints. */
+export class TransactionsApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * List Transactions — `GET /api/transactions/`
+   * @param {{ limit?: number; offset?: number; status_filter?: string | null }} [query]
+   * @returns {Promise<import('./types.js').TransactionListResponse>}
+   */
+  listTransactions(query) {
+    return this.http.request("GET", "/api/transactions/", { query, auth: true });
+  }
+
+  /**
+   * Transactions By Crypto — `GET /api/transactions/crypto/{crypto}`
+   * @param {string} crypto
+   * @param {{ limit?: number; offset?: number }} [query]
+   * @returns {Promise<import('./types.js').TransactionResponse[]>}
+   */
+  transactionsByCrypto(crypto, query) {
+    return this.http.request("GET", "/api/transactions/crypto/" + encodeURIComponent(String(crypto)), { query, auth: true });
+  }
+
+  /**
+   * Transaction Stats — `GET /api/transactions/stats/summary`
+   * @returns {Promise<import('./types.js').TransactionStats>}
+   */
+  transactionStats() {
+    return this.http.request("GET", "/api/transactions/stats/summary", { auth: true });
+  }
+
+  /**
+   * Transactions By Status — `GET /api/transactions/status/{tx_status}`
+   * @param {string} txStatus
+   * @param {{ limit?: number; offset?: number }} [query]
+   * @returns {Promise<import('./types.js').TransactionResponse[]>}
+   */
+  transactionsByStatus(txStatus, query) {
+    return this.http.request("GET", "/api/transactions/status/" + encodeURIComponent(String(txStatus)), { query, auth: true });
+  }
+
+  /**
+   * Get Transaction — `GET /api/transactions/{transaction_id}`
+   * @param {string} transactionId
+   * @returns {Promise<import('./types.js').TransactionResponse>}
+   */
+  getTransaction(transactionId) {
+    return this.http.request("GET", "/api/transactions/" + encodeURIComponent(String(transactionId)), { auth: true });
   }
 
 }
@@ -150,525 +647,21 @@ export class UserApi {
 
 }
 
-/** `exchange` endpoints. */
-export class ExchangeApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * List Keys — `GET /api/exchange/keys`
-   * @returns {Promise<import('./types.js').APIKeyResponse[]>}
-   */
-  listKeys() {
-    return this.http.request("GET", "/api/exchange/keys", { auth: true });
-  }
-
-  /**
-   * Add Or Update Key — `POST /api/exchange/keys`
-   * @param {import('./types.js').APIKeyCreate} body
-   * @returns {Promise<import('./types.js').APIKeyResponse>}
-   */
-  addOrUpdateKey(body) {
-    return this.http.request("POST", "/api/exchange/keys", { body, auth: true });
-  }
-
-  /**
-   * Verify Key — `POST /api/exchange/keys/{key_id}/verify`
-   * @param {string} keyId
-   * @returns {Promise<import('./types.js').KeyVerifyResponse>}
-   */
-  verifyKey(keyId) {
-    return this.http.request("POST", "/api/exchange/keys/" + encodeURIComponent(String(keyId)) + "/verify", { auth: true });
-  }
-
-  /**
-   * Delete Key — `DELETE /api/exchange/keys/{key_id}`
-   * @param {string} keyId
-   * @returns {Promise<unknown>}
-   */
-  deleteKey(keyId) {
-    return this.http.request("DELETE", "/api/exchange/keys/" + encodeURIComponent(String(keyId)), { auth: true });
-  }
-
-}
-
-/** `transactions` endpoints. */
-export class TransactionsApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * List Transactions — `GET /api/transactions/`
-   * @param {{ limit?: number; offset?: number; status_filter?: string | null }} [query]
-   * @returns {Promise<import('./types.js').TransactionListResponse>}
-   */
-  listTransactions(query) {
-    return this.http.request("GET", "/api/transactions/", { query, auth: true });
-  }
-
-  /**
-   * Transaction Stats — `GET /api/transactions/stats/summary`
-   * @returns {Promise<import('./types.js').TransactionStats>}
-   */
-  transactionStats() {
-    return this.http.request("GET", "/api/transactions/stats/summary", { auth: true });
-  }
-
-  /**
-   * Transactions By Crypto — `GET /api/transactions/crypto/{crypto}`
-   * @param {string} crypto
-   * @param {{ limit?: number; offset?: number }} [query]
-   * @returns {Promise<import('./types.js').TransactionResponse[]>}
-   */
-  transactionsByCrypto(crypto, query) {
-    return this.http.request("GET", "/api/transactions/crypto/" + encodeURIComponent(String(crypto)), { query, auth: true });
-  }
-
-  /**
-   * Transactions By Status — `GET /api/transactions/status/{tx_status}`
-   * @param {string} txStatus
-   * @param {{ limit?: number; offset?: number }} [query]
-   * @returns {Promise<import('./types.js').TransactionResponse[]>}
-   */
-  transactionsByStatus(txStatus, query) {
-    return this.http.request("GET", "/api/transactions/status/" + encodeURIComponent(String(txStatus)), { query, auth: true });
-  }
-
-  /**
-   * Get Transaction — `GET /api/transactions/{transaction_id}`
-   * @param {string} transactionId
-   * @returns {Promise<import('./types.js').TransactionResponse>}
-   */
-  getTransaction(transactionId) {
-    return this.http.request("GET", "/api/transactions/" + encodeURIComponent(String(transactionId)), { auth: true });
-  }
-
-}
-
-/** `dashboard` endpoints. */
-export class DashboardApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Dashboard — `GET /api/dashboard/`
-   * @returns {Promise<import('./types.js').DashboardResponse>}
-   */
-  dashboard() {
-    return this.http.request("GET", "/api/dashboard/", { auth: true });
-  }
-
-  /**
-   * Quick Stats — `GET /api/dashboard/stats`
-   * @returns {Promise<import('./types.js').QuickStats>}
-   */
-  quickStats() {
-    return this.http.request("GET", "/api/dashboard/stats", { auth: true });
-  }
-
-  /**
-   * Analytics Timeline — `GET /api/dashboard/analytics/timeline`
-   * @param {{ days?: number }} [query]
-   * @returns {Promise<import('./types.js').TimelineResponse>}
-   */
-  analyticsTimeline(query) {
-    return this.http.request("GET", "/api/dashboard/analytics/timeline", { query, auth: true });
-  }
-
-}
-
-/** `integrations` endpoints. */
-export class IntegrationsApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Available — `GET /api/integrations/available`
-   * @returns {Promise<import('./types.js').IntegrationInfo[]>}
-   */
-  available() {
-    return this.http.request("GET", "/api/integrations/available", { auth: true });
-  }
-
-  /**
-   * List Webhooks — `GET /api/integrations/webhooks`
-   * @returns {Promise<import('./types.js').WebhookRow[]>}
-   */
-  listWebhooks() {
-    return this.http.request("GET", "/api/integrations/webhooks", { auth: true });
-  }
-
-  /**
-   * Create Webhook — `POST /api/integrations/webhooks`
-   * @param {import('./types.js').WebhookCreate} body
-   * @returns {Promise<import('./types.js').WebhookCreated>}
-   */
-  createWebhook(body) {
-    return this.http.request("POST", "/api/integrations/webhooks", { body, auth: true });
-  }
-
-  /**
-   * Ping Webhook — `POST /api/integrations/webhooks/{webhook_id}/ping`
-   * @param {string} webhookId
-   * @returns {Promise<import('./types.js').WebhookRow>}
-   */
-  pingWebhook(webhookId) {
-    return this.http.request("POST", "/api/integrations/webhooks/" + encodeURIComponent(String(webhookId)) + "/ping", { auth: true });
-  }
-
-  /**
-   * Delete Webhook — `DELETE /api/integrations/webhooks/{webhook_id}`
-   * @param {string} webhookId
-   * @returns {Promise<unknown>}
-   */
-  deleteWebhook(webhookId) {
-    return this.http.request("DELETE", "/api/integrations/webhooks/" + encodeURIComponent(String(webhookId)), { auth: true });
-  }
-
-}
-
-/** `reports` endpoints. */
-export class ReportsApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Tax Summary — `GET /api/reports/tax-summary`
-   * @param {{ year?: number; format?: string }} [query]
-   * @returns {Promise<unknown>}
-   */
-  taxSummary(query) {
-    return this.http.request("GET", "/api/reports/tax-summary", { query, auth: true });
-  }
-
-  /**
-   * Performance — `GET /api/reports/performance`
-   * @returns {Promise<unknown>}
-   */
-  performance() {
-    return this.http.request("GET", "/api/reports/performance", { auth: true });
-  }
-
-  /**
-   * Export Pdf — `GET /api/reports/export`
-   * @param {{ year?: number; format?: string }} [query]
-   * @returns {Promise<unknown>}
-   */
-  exportPdf(query) {
-    return this.http.request("GET", "/api/reports/export", { query, auth: true });
-  }
-
-}
-
-/** `notifications` endpoints. */
-export class NotificationsApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Get Preferences — `GET /api/notifications/preferences`
-   * @returns {Promise<import('./types.js').PreferencesResponse>}
-   */
-  getPreferences() {
-    return this.http.request("GET", "/api/notifications/preferences", { auth: true });
-  }
-
-  /**
-   * Update Preferences — `PUT /api/notifications/preferences`
-   * @param {import('./types.js').PreferencesPayload} body
-   * @returns {Promise<import('./types.js').PreferencesResponse>}
-   */
-  updatePreferences(body) {
-    return this.http.request("PUT", "/api/notifications/preferences", { body, auth: true });
-  }
-
-  /**
-   * History — `GET /api/notifications/history`
-   * @param {{ limit?: number; offset?: number }} [query]
-   * @returns {Promise<import('./types.js').HistoryResponse>}
-   */
-  history(query) {
-    return this.http.request("GET", "/api/notifications/history", { query, auth: true });
-  }
-
-  /**
-   * Send Test — `POST /api/notifications/test`
-   * @returns {Promise<unknown>}
-   */
-  sendTest() {
-    return this.http.request("POST", "/api/notifications/test", { auth: true });
-  }
-
-}
-
-/** `admin` endpoints. */
-export class AdminApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Platform Stats — `GET /api/admin/stats`
-   * @returns {Promise<import('./types.js').PlatformStats>}
-   */
-  platformStats() {
-    return this.http.request("GET", "/api/admin/stats", { auth: true });
-  }
-
-  /**
-   * List Users — `GET /api/admin/users`
-   * @param {{ q?: string | null; limit?: number; offset?: number }} [query]
-   * @returns {Promise<import('./types.js').AdminUserList>}
-   */
-  listUsers(query) {
-    return this.http.request("GET", "/api/admin/users", { query, auth: true });
-  }
-
-  /**
-   * Suspend User — `POST /api/admin/users/{user_id}/suspend`
-   * @param {string} userId
-   * @returns {Promise<unknown>}
-   */
-  suspendUser(userId) {
-    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/suspend", { auth: true });
-  }
-
-  /**
-   * Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend`
-   * @param {string} userId
-   * @returns {Promise<unknown>}
-   */
-  unsuspendUser(userId) {
-    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { auth: true });
-  }
-
-  /**
-   * Delete User — `DELETE /api/admin/users/{user_id}`
-   * @param {string} userId
-   * @param {{ confirm: string }} [query]
-   * @returns {Promise<unknown>}
-   */
-  deleteUser(userId, query) {
-    return this.http.request("DELETE", "/api/admin/users/" + encodeURIComponent(String(userId)), { query, auth: true });
-  }
-
-  /**
-   * Kyc Override — `POST /api/admin/users/{user_id}/kyc-override`
-   * @param {string} userId
-   * @param {import('./types.js').KycOverride} body
-   * @returns {Promise<unknown>}
-   */
-  kycOverride(userId, body) {
-    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/kyc-override", { body, auth: true });
-  }
-
-  /**
-   * All Transactions — `GET /api/admin/transactions`
-   * @param {{ status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }} [query]
-   * @returns {Promise<import('./types.js').AdminTransactionList>}
-   */
-  allTransactions(query) {
-    return this.http.request("GET", "/api/admin/transactions", { query, auth: true });
-  }
-
-  /**
-   * Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry`
-   * @param {string} purchaseId
-   * @returns {Promise<unknown>}
-   */
-  forceRetry(purchaseId) {
-    return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
-  }
-
-  /**
-   * Alerts — `GET /api/admin/alerts`
-   * @returns {Promise<import('./types.js').AlertItem[]>}
-   */
-  alerts() {
-    return this.http.request("GET", "/api/admin/alerts", { auth: true });
-  }
-
-  /**
-   * Pause Scheduler — `POST /api/admin/scheduler/pause`
-   * @returns {Promise<unknown>}
-   */
-  pauseScheduler() {
-    return this.http.request("POST", "/api/admin/scheduler/pause", { auth: true });
-  }
-
-  /**
-   * Resume Scheduler — `POST /api/admin/scheduler/resume`
-   * @returns {Promise<unknown>}
-   */
-  resumeScheduler() {
-    return this.http.request("POST", "/api/admin/scheduler/resume", { auth: true });
-  }
-
-}
-
-/** `analytics` endpoints. */
-export class AnalyticsApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Performance — `GET /api/analytics/performance`
-   * @returns {Promise<import('./types.js').PerformanceResponse>}
-   */
-  performance() {
-    return this.http.request("GET", "/api/analytics/performance", { auth: true });
-  }
-
-  /**
-   * Comparison — `GET /api/analytics/comparison`
-   * @returns {Promise<import('./types.js').ComparisonResponse>}
-   */
-  comparison() {
-    return this.http.request("GET", "/api/analytics/comparison", { auth: true });
-  }
-
-  /**
-   * Recurring — `GET /api/analytics/recurring`
-   * @returns {Promise<import('./types.js').RecurringResponse>}
-   */
-  recurring() {
-    return this.http.request("GET", "/api/analytics/recurring", { auth: true });
-  }
-
-  /**
-   * Volatility — `GET /api/analytics/volatility`
-   * @returns {Promise<import('./types.js').VolatilityResponse>}
-   */
-  volatility() {
-    return this.http.request("GET", "/api/analytics/volatility", { auth: true });
-  }
-
-}
-
-/** `kyc` endpoints. */
-export class KycApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Initiate Kyc — `POST /api/kyc/initiate`
-   * @returns {Promise<import('./types.js').InitiateResponse>}
-   */
-  initiateKyc() {
-    return this.http.request("POST", "/api/kyc/initiate", { auth: true });
-  }
-
-  /**
-   * Kyc Status — `GET /api/kyc/status`
-   * @param {{ sync?: boolean }} [query]
-   * @returns {Promise<import('./types.js').StatusResponse>}
-   */
-  kycStatus(query) {
-    return this.http.request("GET", "/api/kyc/status", { query, auth: true });
-  }
-
-  /**
-   * Sumsub Webhook — `POST /api/kyc/webhook`
-   * @returns {Promise<unknown>}
-   */
-  sumsubWebhook() {
-    return this.http.request("POST", "/api/kyc/webhook", { auth: false });
-  }
-
-  /**
-   * Create Applicant — `POST /api/kyc/create-applicant`
-   * @param {import('./types.js').CreateApplicantRequest} body
-   * @returns {Promise<import('./types.js').CreateApplicantResponse>}
-   */
-  createApplicant(body) {
-    return this.http.request("POST", "/api/kyc/create-applicant", { body, auth: true });
-  }
-
-  /**
-   * Applicant Status — `GET /api/kyc/applicant/{applicant_id}/status`
-   * @param {string} applicantId
-   * @returns {Promise<import('./types.js').ApplicantStatusResponse>}
-   */
-  applicantStatus(applicantId) {
-    return this.http.request("GET", "/api/kyc/applicant/" + encodeURIComponent(String(applicantId)) + "/status", { auth: true });
-  }
-
-}
-
-/** `webhooks` endpoints. */
-export class WebhooksApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Sumsub Events — `POST /api/webhooks/sumsub`
-   * @returns {Promise<unknown>}
-   */
-  sumsubEvents() {
-    return this.http.request("POST", "/api/webhooks/sumsub", { auth: false });
-  }
-
-  /**
-   * Resend Events — `POST /api/webhooks/resend`
-   * @returns {Promise<unknown>}
-   */
-  resendEvents() {
-    return this.http.request("POST", "/api/webhooks/resend", { auth: false });
-  }
-
-}
-
-/** `email` endpoints. */
-export class EmailApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Send Verification — `POST /api/email/send-verification`
-   * @param {import('./types.js').SendVerificationRequest} body
-   * @returns {Promise<import('./types.js').EmailSentResponse>}
-   */
-  sendVerification(body) {
-    return this.http.request("POST", "/api/email/send-verification", { body, auth: true });
-  }
-
-  /**
-   * Send Notification — `POST /api/email/send-notification`
-   * @param {import('./types.js').SendNotificationRequest} body
-   * @returns {Promise<import('./types.js').EmailSentResponse>}
-   */
-  sendNotification(body) {
-    return this.http.request("POST", "/api/email/send-notification", { body, auth: true });
-  }
-
-}
-
 /** `v2` endpoints. */
 export class V2Api {
   /** @param {import('./http.js').HttpTransport} http */
   constructor(http) {
     this.http = http;
+  }
+
+  /**
+   * Coin Market — `GET /api/v2/market/coins/{coin}`
+   * @param {string} coin
+   * @param {{ amount_usd?: number | null }} [query]
+   * @returns {Promise<import('./types.js').CoinMarketOut>}
+   */
+  coinMarket(coin, query) {
+    return this.http.request("GET", "/api/v2/market/coins/" + encodeURIComponent(String(coin)), { query, auth: true });
   }
 
   /**
@@ -686,6 +679,15 @@ export class V2Api {
    */
   createPurchase(body) {
     return this.http.request("POST", "/api/v2/purchases", { body, auth: true });
+  }
+
+  /**
+   * Cancel Purchase — `DELETE /api/v2/purchases/{purchase_id}`
+   * @param {string} purchaseId
+   * @returns {Promise<unknown>}
+   */
+  cancelPurchase(purchaseId) {
+    return this.http.request("DELETE", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
   }
 
   /**
@@ -708,12 +710,12 @@ export class V2Api {
   }
 
   /**
-   * Cancel Purchase — `DELETE /api/v2/purchases/{purchase_id}`
+   * Retry Withdrawal — `POST /api/v2/purchases/{purchase_id}/retry-withdrawal`
    * @param {string} purchaseId
-   * @returns {Promise<unknown>}
+   * @returns {Promise<import('./types.js').RetryWithdrawalOut>}
    */
-  cancelPurchase(purchaseId) {
-    return this.http.request("DELETE", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
+  retryWithdrawal(purchaseId) {
+    return this.http.request("POST", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)) + "/retry-withdrawal", { auth: true });
   }
 
   /**
@@ -736,21 +738,21 @@ export class WalletsApi {
   }
 
   /**
-   * Add Wallet — `POST /api/wallets`
-   * @param {import('./types.js').WalletCreateRequest} body
-   * @returns {Promise<import('./types.js').WalletOut>}
-   */
-  addWallet(body) {
-    return this.http.request("POST", "/api/wallets", { body, auth: true });
-  }
-
-  /**
    * List Wallets — `GET /api/wallets`
    * @param {{ blockchain_network?: string | null }} [query]
    * @returns {Promise<import('./types.js').WalletOut[]>}
    */
   listWallets(query) {
     return this.http.request("GET", "/api/wallets", { query, auth: true });
+  }
+
+  /**
+   * Add Wallet — `POST /api/wallets`
+   * @param {import('./types.js').WalletCreateRequest} body
+   * @returns {Promise<import('./types.js').WalletOut>}
+   */
+  addWallet(body) {
+    return this.http.request("POST", "/api/wallets", { body, auth: true });
   }
 
   /**
@@ -764,24 +766,49 @@ export class WalletsApi {
 
 }
 
+/** `webhooks` endpoints. */
+export class WebhooksApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Resend Events — `POST /api/webhooks/resend`
+   * @returns {Promise<unknown>}
+   */
+  resendEvents() {
+    return this.http.request("POST", "/api/webhooks/resend", { auth: false });
+  }
+
+  /**
+   * Sumsub Events — `POST /api/webhooks/sumsub`
+   * @returns {Promise<unknown>}
+   */
+  sumsubEvents() {
+    return this.http.request("POST", "/api/webhooks/sumsub", { auth: false });
+  }
+
+}
+
 /** All resource groups, keyed by API module. */
 export function buildApi(http) {
   return {
     system: new SystemApi(http),
-    auth: new AuthApi(http),
-    user: new UserApi(http),
-    exchange: new ExchangeApi(http),
-    transactions: new TransactionsApi(http),
-    dashboard: new DashboardApi(http),
-    integrations: new IntegrationsApi(http),
-    reports: new ReportsApi(http),
-    notifications: new NotificationsApi(http),
     admin: new AdminApi(http),
     analytics: new AnalyticsApi(http),
-    kyc: new KycApi(http),
-    webhooks: new WebhooksApi(http),
+    auth: new AuthApi(http),
+    dashboard: new DashboardApi(http),
     email: new EmailApi(http),
+    exchange: new ExchangeApi(http),
+    integrations: new IntegrationsApi(http),
+    kyc: new KycApi(http),
+    notifications: new NotificationsApi(http),
+    reports: new ReportsApi(http),
+    transactions: new TransactionsApi(http),
+    user: new UserApi(http),
     v2: new V2Api(http),
     wallets: new WalletsApi(http),
+    webhooks: new WebhooksApi(http),
   };
 }

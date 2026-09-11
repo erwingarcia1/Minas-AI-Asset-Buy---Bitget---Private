@@ -5,7 +5,7 @@ import type {
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
   PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
-} from "@/types";
+ RetryWithdrawalResult } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
 
@@ -83,6 +83,8 @@ export const autoBuyAPI = {
   remove: (id: string) => api.delete(`/v2/purchases/${id}`),
   transactions: (id: string, status_filter?: string) =>
     data<AutoBuyTransaction[]>(api.get(`/v2/purchases/${id}/transactions`, { params: { status_filter } })),
+  /** Re-send the coins of the last filled buy (withdrawal_failed / needs_info only; never buys again). */
+  retryWithdrawal: (id: string) => data<RetryWithdrawalResult>(api.post(`/v2/purchases/${id}/retry-withdrawal`)),
 };
 
 export const analyticsAPI = {

@@ -61,6 +61,9 @@ class Purchase(Base):
     purchase_type = Column(Enum(*PURCHASE_TYPES, name="purchase_type"), nullable=False, default="autobuy",
                            server_default="autobuy")
     status = Column(String(20), nullable=False, default="active")
+    # optional travel-rule / beneficiary details some venues require before an API
+    # withdrawal (JSON: first_name, last_name, identity_type, company_name, area_code, member_code)
+    travel_rule_info = Column(String(1000), nullable=True)
     failure_count = Column(Integer, nullable=False, default=0)  # consecutive failed attempts
     last_error = Column(String(500), nullable=True)
     next_execution = Column(DateTime(timezone=True), nullable=True)
@@ -76,6 +79,18 @@ class Purchase(Base):
         return self.purchase_type == "autobuy"
     transactions = relationship("PurchaseTransaction", back_populates="purchase",
                                 cascade="all, delete-orphan", order_by="PurchaseTransaction.created_at.desc()")
+
+
+    def travel_rule_dict(self) -> dict:
+        """Parsed travel_rule_info with empty values dropped ({} when none stored)."""
+        import json
+        if not self.travel_rule_info:
+            return {}
+        try:
+            raw = json.loads(self.travel_rule_info)
+        except ValueError:
+            return {}
+        return {k: v for k, v in (raw or {}).items() if v not in (None, "")}
 
 
 class PurchaseTransaction(Base):

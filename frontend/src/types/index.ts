@@ -240,6 +240,36 @@ export interface AutoBuyTransaction {
   error_message: string | null;
   executed_at: string | null;
   created_at: string;
+  // buy rows
+  order_id?: string | null;
+  fill_price?: number | null;
+  cost_usd?: number | null;
+  fee_currency?: string | null;
+  // withdrawal rows (parent_transaction_id -> the buy whose coins were sent)
+  parent_transaction_id?: string | null;
+  withdrawal_id?: string | null;
+  withdrawal_chain?: string | null;
+  withdrawal_fee?: number | null;
+  withdrawal_fee_currency?: string | null;
+  tx_hash?: string | null;
+  raw_status?: string | null;
+}
+
+/** Optional beneficiary details some exchanges require before an API withdrawal. */
+export interface TravelRuleInfo {
+  first_name?: string | null;
+  last_name?: string | null;
+  identity_type?: string | null;
+  company_name?: string | null;
+  area_code?: string | null;
+  member_code?: string | null;
+}
+
+export interface RetryWithdrawalResult {
+  purchase_id: string;
+  status: AutoBuyStatus;
+  next_execution: string | null;
+  withdrawal: AutoBuyTransaction;
 }
 
 export interface AutoBuyPurchase {
@@ -260,6 +290,7 @@ export interface AutoBuyPurchase {
   created_at: string;
   updated_at: string;
   latest_transaction: AutoBuyTransaction | null;
+  travel_rule_info?: TravelRuleInfo | null;
 }
 
 export interface AutoBuyPurchaseCreate {

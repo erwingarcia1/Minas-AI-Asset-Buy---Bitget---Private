@@ -203,7 +203,7 @@ class BinanceClient:
 
 
     def withdraw(self, coin: str, address: str, amount: float, network: str | None = None,
-                 client_oid: str | None = None, dry_run: bool = True) -> dict:
+                 client_oid: str | None = None, dry_run: bool = True, travel_rule: dict | None = None) -> dict:
         """Withdraw `amount` of `coin` to `address`.
 
         Returns {withdrawal_id, amount, dry_run}. Dry runs validate inputs and
@@ -220,13 +220,42 @@ class BinanceClient:
                 f"withdrawals are not implemented for {self.exchange}", "WITHDRAW_UNSUPPORTED")
         try:
             with time_binance("withdraw"):
-                wid = self._client.withdraw(coin, address, amount, network=network, client_oid=client_oid)
+                kwargs = {"travel_rule": travel_rule} if (travel_rule and self.exchange == "bitget") else {}
+                wid = self._client.withdraw(coin, address, amount, network=network, client_oid=client_oid, **kwargs)
         except ExchangeAPIError as exc:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
         if not wid:
             raise BinanceClientError("exchange returned no withdrawal id", "NO_WITHDRAWAL_ID")
         return {"withdrawal_id": wid, "amount": amount, "dry_run": False}
 
+
+    # Exchange withdrawal statuses -> (done, ok). Anything else is still in flight.
+    WITHDRAWAL_TERMINAL = {"success": (True, True), "wallet_fail": (True, False), "cancel": (True, False),
+                           "reject": (True, False), "fail": (True, False), "failed": (True, False)}
+
+    def withdrawal_status(self, coin: str, client_oid: str | None, withdrawal_id: str | None,
+                          since_ms: int, until_ms: int) -> dict:
+        """The exchange's record of one withdrawal (Bitget only):
+        {found, raw_status, tx_hash, fee, done, ok}. `ok` is None while in flight."""
+        if not hasattr(self._client, "get_withdrawal_records"):
+            raise BinanceClientError(f"withdrawal records are not implemented for {self.exchange}", "UNSUPPORTED")
+        try:
+            with time_binance("withdrawal_records"):
+                rows = self._client.get_withdrawal_records(coin, since_ms, until_ms, client_oid=client_oid,
+                                                           order_id=withdrawal_id)
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
+        row = next((r for r in rows or [] if (withdrawal_id and str(r.get("orderId")) == str(withdrawal_id))
+                    or (client_oid and r.get("clientOid") == client_oid)), None)
+        if row is None:
+            row = rows[0] if len(rows or []) == 1 else None
+        if row is None:
+            return {"found": False, "raw_status": None, "tx_hash": None, "fee": None, "done": False, "ok": None}
+        raw = str(row.get("status") or "").lower()
+        done, ok = self.WITHDRAWAL_TERMINAL.get(raw, (False, None))
+        fee = row.get("fee")
+        return {"found": True, "raw_status": raw, "tx_hash": row.get("tradeId") or None,
+                "fee": float(fee) if fee not in (None, "") else None, "done": done, "ok": ok}
 
     # ------------------------------------------------------------- idempotent buy flow
 

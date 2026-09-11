@@ -3,27 +3,32 @@
 /* eslint-disable */
 
 export interface APIKeyCreate {
-  exchange?: string;
   api_key: string;
   api_secret: string;
+  exchange?: string;
   passphrase?: string;
 }
 
 export interface APIKeyResponse {
-  id: string;
-  exchange: string;
   api_key_masked: string;
-  verified: boolean;
   created_at: string;
+  exchange: string;
+  id: string;
+  last_checked_at?: string | null;
   updated_at: string;
+  verification_error?: string | null;
+  verification_status?: string;
+  verified: boolean;
+  verified_at?: string | null;
+  withdrawal_enabled?: boolean | null;
 }
 
 /** An active Auto-Buy purchase (either type). Field names are kept from the original schedule shape so existing clients keep working: ``crypto`` is the purchase's crypto_symbol, ``amount_usdt`` its amount_usd and ``next_purchase_date`` its next_execution. */
 export interface ActivePurchase {
-  id: string;
-  crypto: string;
   amount_usdt: number;
+  crypto: string;
   frequency: string;
+  id: string;
   next_purchase_date?: string | null;
   purchase_type?: string;
 }
@@ -34,13 +39,13 @@ export interface AdminTransactionList {
 }
 
 export interface AdminTransactionRow {
-  id: string;
-  user_id: string;
-  crypto: string;
   cost_usdt: number;
-  status: string;
-  error_message?: string | null;
   created_at: string;
+  crypto: string;
+  error_message?: string | null;
+  id: string;
+  status: string;
+  user_id: string;
 }
 
 export interface AdminUserList {
@@ -49,28 +54,48 @@ export interface AdminUserList {
 }
 
 export interface AdminUserRow {
-  id: string;
-  email: string;
-  role: string;
-  kyc_status: string;
-  suspended: boolean;
   created_at: string;
+  email: string;
+  id: string;
   invested_usdt?: number;
+  kyc_status: string;
+  role: string;
+  suspended: boolean;
 }
 
 export interface AlertItem {
+  detail: string;
   name: string;
   severity: string;
   value: string;
-  detail: string;
 }
 
 export interface ApplicantStatusResponse {
   applicant_id: string;
   kyc_status: string;
-  review_status: string;
-  review_answer?: string | null;
   reject_labels?: string[];
+  review_answer?: string | null;
+  review_status: string;
+}
+
+export interface ChainOut {
+  browser_url?: string | null;
+  chain: string;
+  estimated_received?: number | null;
+  extra_withdraw_fee_pct: number;
+  family?: string | null;
+  family_label?: string | null;
+  fee_usd?: number | null;
+  is_default?: boolean;
+  meets_minimum?: boolean | null;
+  min_purchase_usd?: number | null;
+  min_withdraw_amount: number;
+  need_tag: boolean;
+  supported: boolean;
+  withdraw_confirm: number;
+  withdraw_fee: number;
+  withdraw_min_scale: number;
+  withdrawable: boolean;
 }
 
 export interface ChangePasswordRequest {
@@ -78,16 +103,28 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
+export interface CoinMarketOut {
+  chains: ChainOut[];
+  coin: string;
+  min_trade_usdt: number;
+  note?: string;
+  online: boolean;
+  pair: string;
+  price_ask?: number | null;
+  quantity_precision: number;
+  taker_fee_rate?: number | null;
+}
+
 export interface ComparisonEntry {
-  crypto: string;
   average_buy_price: number;
-  current_price?: number | null;
   buy_price_vs_market_pct?: number | null;
+  crypto: string;
+  current_price?: number | null;
 }
 
 export interface ComparisonResponse {
-  entries: ComparisonEntry[];
   diversification_score: number;
+  entries: ComparisonEntry[];
 }
 
 export interface CreateApplicantRequest {
@@ -98,8 +135,8 @@ export interface CreateApplicantRequest {
 
 export interface CreateApplicantResponse {
   applicant_id: string;
-  kyc_status: string;
   created: boolean;
+  kyc_status: string;
 }
 
 export interface CryptoHolding {
@@ -109,15 +146,15 @@ export interface CryptoHolding {
 }
 
 export interface DashboardResponse {
-  holdings: CryptoHolding[];
   active_purchases: ActivePurchase[];
-  upcoming_purchases: UpcomingPurchase[];
+  holdings: CryptoHolding[];
   monthly_average_usdt: number;
+  upcoming_purchases: UpcomingPurchase[];
 }
 
 export interface EmailSentResponse {
-  sent: boolean;
   email_id?: string | null;
+  sent: boolean;
 }
 
 export interface ForgotPasswordRequest {
@@ -138,14 +175,14 @@ export interface HistoryResponse {
 }
 
 export interface HoldingPerformance {
-  crypto: string;
-  total_amount: number;
-  invested_usdt: number;
   average_buy_price: number;
+  crypto: string;
   current_price?: number | null;
+  invested_usdt: number;
   market_value?: number | null;
-  unrealized_pnl_usdt?: number | null;
+  total_amount: number;
   unrealized_pnl_pct?: number | null;
+  unrealized_pnl_usdt?: number | null;
 }
 
 export interface InitiateResponse {
@@ -154,22 +191,28 @@ export interface InitiateResponse {
 }
 
 export interface IntegrationInfo {
-  name: string;
-  kind: string;
-  status: string;
   detail: string;
+  kind: string;
+  name: string;
+  status: string;
 }
 
 export interface KeyVerifyResponse {
-  verified: boolean;
-  result: string;
   detail: string;
+  key?: APIKeyResponse | null;
+  last_checked_at?: string | null;
+  result: string;
+  verification_error?: string | null;
+  verification_status?: string;
+  verified: boolean;
+  verified_at?: string | null;
+  withdrawal_enabled?: boolean | null;
   withdrawal_permission_warning?: boolean;
 }
 
 export interface KycOverride {
-  status: string;
   note: string;
+  status: string;
 }
 
 export interface LoginRequest {
@@ -182,55 +225,55 @@ export interface LogoutRequest {
 }
 
 export interface NotificationRow {
-  id: string;
   channel: string;
-  template: string;
-  subject: string;
-  status: string;
   created_at: string;
+  id: string;
+  status: string;
+  subject: string;
+  template: string;
 }
 
 export interface PerformanceResponse {
-  price_available: boolean;
+  best_performer?: string | null;
   holdings: HoldingPerformance[];
+  price_available: boolean;
   total_invested_usdt: number;
   total_market_value?: number | null;
-  total_pnl_usdt?: number | null;
   total_pnl_pct?: number | null;
-  best_performer?: string | null;
+  total_pnl_usdt?: number | null;
   worst_performer?: string | null;
 }
 
 export interface PlatformStats {
-  total_users: number;
-  verified_users: number;
+  active_purchases: number;
+  failed_transactions_24h: number;
+  signups_7d: number;
   suspended_users: number;
   total_invested_usdt: number;
   total_transactions: number;
-  failed_transactions_24h: number;
-  active_purchases: number;
-  signups_7d: number;
+  total_users: number;
+  verified_users: number;
   volume_7d_usdt: number;
 }
 
 export interface PreferencesPayload {
-  email_enabled?: boolean | null;
-  sms_enabled?: boolean | null;
-  push_enabled?: boolean | null;
-  quiet_hours_start?: number | null;
-  quiet_hours_end?: number | null;
-  phone_number?: string | null;
   device_token?: string | null;
+  email_enabled?: boolean | null;
+  phone_number?: string | null;
+  push_enabled?: boolean | null;
+  quiet_hours_end?: number | null;
+  quiet_hours_start?: number | null;
+  sms_enabled?: boolean | null;
 }
 
 export interface PreferencesResponse {
   email_enabled: boolean;
-  sms_enabled: boolean;
-  push_enabled: boolean;
-  quiet_hours_start: number;
-  quiet_hours_end: number;
-  phone_number?: string | null;
   has_device_token: boolean;
+  phone_number?: string | null;
+  push_enabled: boolean;
+  quiet_hours_end: number;
+  quiet_hours_start: number;
+  sms_enabled: boolean;
 }
 
 export interface ProfileUpdateRequest {
@@ -238,89 +281,97 @@ export interface ProfileUpdateRequest {
 }
 
 export interface PurchaseCreateRequest {
-  crypto_symbol: string;
   amount_usd: number;
-  wallet_address: string;
-  blockchain_network: string;
-  frequency: string;
+  blockchain_network?: string | null;
+  crypto_symbol: string;
   exchange_account_id: string;
+  frequency: string;
   purchase_type?: string;
+  travel_rule_info?: TravelRuleInfo | null;
+  wallet_address?: string | null;
   withdraw_immediately?: boolean | null;
 }
 
 export interface PurchaseCreatedOut {
+  next_execution?: string | null;
   purchase_id: string;
   status: string;
-  next_execution?: string | null;
 }
 
 export interface PurchaseDetailOut {
-  id: string;
-  crypto_symbol: string;
   amount_usd: number;
-  frequency: string;
-  wallet_address: string;
   blockchain_network: string;
-  purchase_type: string;
-  withdraw_immediately: boolean;
-  exchange_account_id?: string | null;
-  exchange?: string | null;
-  status: string;
-  failure_count: number;
-  last_error?: string | null;
-  next_execution?: string | null;
   created_at: string;
-  updated_at: string;
+  crypto_symbol: string;
+  exchange?: string | null;
+  exchange_account_id?: string | null;
+  failure_count: number;
+  frequency: string;
+  id: string;
+  last_error?: string | null;
   latest_transaction?: TransactionOut | null;
+  next_execution?: string | null;
+  purchase_type: string;
+  status: string;
   transactions?: TransactionOut[];
+  travel_rule_info?: TravelRuleInfo | null;
+  updated_at: string;
+  wallet_address?: string | null;
+  withdraw_immediately: boolean;
 }
 
 export interface PurchaseOut {
-  id: string;
-  crypto_symbol: string;
   amount_usd: number;
-  frequency: string;
-  wallet_address: string;
   blockchain_network: string;
-  purchase_type: string;
-  withdraw_immediately: boolean;
-  exchange_account_id?: string | null;
-  exchange?: string | null;
-  status: string;
-  failure_count: number;
-  last_error?: string | null;
-  next_execution?: string | null;
   created_at: string;
-  updated_at: string;
+  crypto_symbol: string;
+  exchange?: string | null;
+  exchange_account_id?: string | null;
+  failure_count: number;
+  frequency: string;
+  id: string;
+  last_error?: string | null;
   latest_transaction?: TransactionOut | null;
+  next_execution?: string | null;
+  purchase_type: string;
+  status: string;
+  travel_rule_info?: TravelRuleInfo | null;
+  updated_at: string;
+  wallet_address?: string | null;
+  withdraw_immediately: boolean;
 }
 
 export interface PurchaseUpdateRequest {
-  status?: string | null;
   amount_usd?: number | null;
+  blockchain_network?: string | null;
+  confirm_wallet_address?: string | null;
   frequency?: string | null;
+  purchase_type?: string | null;
+  status?: string | null;
+  travel_rule_info?: TravelRuleInfo | null;
+  wallet_address?: string | null;
 }
 
 export interface QuickStats {
-  total_invested_usdt: number;
-  transaction_count: number;
   active_purchases: number;
   kyc_status: string;
+  total_invested_usdt: number;
+  transaction_count: number;
 }
 
 export interface RecurringProjection {
+  amount_usdt: number;
   crypto: string;
   frequency: string;
-  amount_usdt: number;
   monthly_usdt: number;
   purchase_type?: string;
 }
 
 export interface RecurringResponse {
-  schedules: RecurringProjection[];
   expected_monthly_usdt: number;
-  projected_annual_usdt: number;
   note?: string;
+  projected_annual_usdt: number;
+  schedules: RecurringProjection[];
 }
 
 export interface RefreshRequest {
@@ -333,8 +384,8 @@ export interface RegisterRequest {
 }
 
 export interface ResetPasswordRequest {
-  token: string;
   new_password: string;
+  token: string;
 }
 
 export interface ResetTokenRequest {
@@ -345,10 +396,17 @@ export interface ResetTokenValidity {
   valid: boolean;
 }
 
+export interface RetryWithdrawalOut {
+  next_execution?: string | null;
+  purchase_id: string;
+  status: string;
+  withdrawal: TransactionOut;
+}
+
 export interface SendNotificationRequest {
   email: string;
-  subject: string;
   message: string;
+  subject: string;
 }
 
 export interface SendVerificationRequest {
@@ -356,19 +414,19 @@ export interface SendVerificationRequest {
 }
 
 export interface StatusResponse {
-  kyc_status: string;
   applicant_id?: string | null;
-  review_status?: string | null;
+  kyc_status: string;
   reject_labels?: string[];
   rejection_reason?: string | null;
   retryable?: boolean;
+  review_status?: string | null;
   synced?: boolean;
 }
 
 export interface TimelinePoint {
   date: string;
-  transaction_count: number;
   total_usdt: number;
+  transaction_count: number;
 }
 
 export interface TimelineResponse {
@@ -378,98 +436,119 @@ export interface TimelineResponse {
 
 export interface TokenResponse {
   access_token: string;
+  expires_in: number;
   refresh_token: string;
   token_type?: string;
-  expires_in: number;
 }
 
 export interface TransactionListResponse {
   items: TransactionResponse[];
-  total: number;
   limit: number;
   offset: number;
+  total: number;
 }
 
 export interface TransactionOut {
-  id: string;
-  purchase_id: string;
-  exchange_tx_id?: string | null;
-  tx_type?: string;
-  status: string;
   amount_executed?: number | null;
-  fee?: number | null;
-  error_message?: string | null;
-  executed_at?: string | null;
+  cost_usd?: number | null;
   created_at: string;
+  error_message?: string | null;
+  exchange_tx_id?: string | null;
+  executed_at?: string | null;
+  fee?: number | null;
+  fee_currency?: string | null;
+  fill_price?: number | null;
+  id: string;
+  order_id?: string | null;
+  parent_transaction_id?: string | null;
+  purchase_id: string;
+  raw_status?: string | null;
+  status: string;
+  tx_hash?: string | null;
+  tx_type?: string;
+  withdrawal_chain?: string | null;
+  withdrawal_fee?: number | null;
+  withdrawal_fee_currency?: string | null;
+  withdrawal_id?: string | null;
 }
 
 /** One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id`` keep their historical names for existing clients; ``order_id`` and the withdrawal fields are the new, explicit ones. */
 export interface TransactionResponse {
-  id: string;
-  purchase_id: string;
-  crypto: string;
-  purchase_type: string;
-  tx_type: string;
   amount_crypto: number;
-  cost_usdt: number;
-  exchange_rate?: number | null;
-  exchange?: string | null;
-  order_id?: string | null;
   binance_order_id?: string | null;
+  blockchain_network?: string | null;
+  cost_usdt: number;
+  created_at: string;
+  crypto: string;
+  error_message?: string | null;
+  exchange?: string | null;
+  exchange_rate?: number | null;
+  executed_at?: string | null;
   fee?: number | null;
   fee_currency?: string | null;
-  withdrawal_id?: string | null;
+  id: string;
+  order_id?: string | null;
+  purchase_id: string;
+  purchase_type: string;
+  status: string;
+  tx_hash?: string | null;
+  tx_type: string;
   wallet_address?: string | null;
-  blockchain_network?: string | null;
   withdrawal_fee?: number | null;
   withdrawal_fee_currency?: string | null;
-  tx_hash?: string | null;
-  executed_at?: string | null;
-  status: string;
-  error_message?: string | null;
-  created_at: string;
+  withdrawal_id?: string | null;
 }
 
 export interface TransactionStats {
-  total_transactions: number;
-  total_invested_usdt: number;
   average_purchase_usdt: number;
   completed_count: number;
   failed_count: number;
   pending_count: number;
+  total_invested_usdt: number;
+  total_transactions: number;
+}
+
+/** Optional beneficiary / travel-rule details some venues require before an API withdrawal (Bitget: firstName, lastName, identityType, companyName, areaCode, memberCode). Stored on the purchase and sent with withdrawals. Nothing is prefilled: the KYC provider's data is not stored on the user. */
+export interface TravelRuleInfo {
+  area_code?: string | null;
+  company_name?: string | null;
+  first_name?: string | null;
+  identity_type?: string | null;
+  last_name?: string | null;
+  member_code?: string | null;
 }
 
 export interface UpcomingPurchase {
-  id: string;
-  crypto: string;
   amount_usdt: number;
+  crypto: string;
   frequency: string;
+  id: string;
   next_purchase_date?: string | null;
   purchase_type?: string;
 }
 
 export interface UserOut {
-  id: string;
-  email: string;
-  kyc_status: string;
   created_at: string;
+  email: string;
+  id: string;
+  kyc_status: string;
 }
 
 export interface UserProfile {
-  id: string;
+  created_at: string;
   email: string;
-  role?: string;
+  id: string;
   kyc_status: string;
   kyc_sumsub_id?: string | null;
-  created_at: string;
+  role?: string;
   updated_at: string;
 }
 
 export interface UserPublicProfile {
-  id: string;
-  email: string;
-  kyc_status: string;
   created_at: string;
+  email: string;
+  id: string;
+  kyc_status: string;
 }
 
 export interface ValidationError {
@@ -483,15 +562,15 @@ export interface VerifyRequest {
 }
 
 export interface VerifyResponse {
-  valid: boolean;
   user_id?: string | null;
+  valid: boolean;
 }
 
 export interface VolatilityEntry {
   crypto: string;
-  volatility_30d_pct?: number | null;
   level: string;
   recommendation: string;
+  volatility_30d_pct?: number | null;
 }
 
 export interface VolatilityResponse {
@@ -505,13 +584,13 @@ export interface WalletCreateRequest {
 }
 
 export interface WalletOut {
-  id: string;
   address: string;
   blockchain_network: string;
   chain?: string | null;
+  created_at: string;
+  id: string;
   label?: string | null;
   verified_at?: string | null;
-  created_at: string;
 }
 
 export interface WebhookCreate {
@@ -519,18 +598,18 @@ export interface WebhookCreate {
 }
 
 export interface WebhookCreated {
-  id: string;
-  url: string;
-  enabled: boolean;
-  last_status?: string | null;
   created_at: string;
+  enabled: boolean;
+  id: string;
+  last_status?: string | null;
   secret: string;
+  url: string;
 }
 
 export interface WebhookRow {
-  id: string;
-  url: string;
-  enabled: boolean;
-  last_status?: string | null;
   created_at: string;
+  enabled: boolean;
+  id: string;
+  last_status?: string | null;
+  url: string;
 }
