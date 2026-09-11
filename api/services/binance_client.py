@@ -31,32 +31,43 @@ _LegacyClient = _LegacyBinance
 
 
 # Bitget reports a key's permissions in /api/v2/spot/account/info "authorities".
-# The documented values (spot docs, changelog, checked 2026-09-11) are the
-# words "readonly", "trade", "withdraw", "transfer"; live accounts return
-# undocumented short codes instead (a read + spot-trade key answered
-# ["taxw", "p2pw", "wtow", "stow", "smow"]). Only the documented words plus
-# "stow" (spot trade, inferred from that key) are interpreted. Any other code
-# is UNCONFIRMED: the key is verified (it authenticated) but its withdrawal
-# permission is reported as "possible", which the UI shows as a warning.
+# Bitget reports a key's permissions as short codes in `authorities`
+# (GET /api/v2/spot/account/info). Confirmed from Bitget's "Edit API key"
+# screen on 2026-09-11:
+#   stow = Spot -> Trade            (REQUIRED for purchases)
+#   smow = Margin -> Trade          (spot margin; not needed)
+#   taxw = Taxation -> Search       (read trading history; not needed)
+#   p2pw = P2P -> Search            (read merchant info; not needed)
+#   wtow = Wallet -> Transfer       (internal transfers between the user's own
+#                                    Bitget accounts; NOT an external withdrawal)
+# plus the documented words readonly / read / trade / withdraw / transfer.
+# The code Bitget uses for external Withdraw is still unconfirmed, so ANY other
+# code is treated as "withdrawal possible" until it has been confirmed.
 BITGET_TRADE_TOKENS = {"trade", "stow"}
 BITGET_WITHDRAW_TOKENS = {"withdraw"}
-BITGET_TRANSFER_TOKENS = {"transfer"}
-BITGET_KNOWN_TOKENS = BITGET_TRADE_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_TRANSFER_TOKENS | {"readonly", "read"}
+# recognised, harmless for withdrawals, but more than AutoBuy needs
+BITGET_EXTRA_TOKENS = {"smow", "taxw", "p2pw", "wtow", "transfer"}
+BITGET_EXTRA_LABELS = {"smow": "Margin trade", "taxw": "Taxation search", "p2pw": "P2P search",
+                       "wtow": "Wallet transfer (internal)", "transfer": "Transfer (internal)"}
+BITGET_KNOWN_TOKENS = BITGET_TRADE_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_EXTRA_TOKENS | {"readonly", "read"}
 
 
 def interpret_bitget_authorities(auths: list) -> dict:
-    """{can_trade, can_withdraw, permissions_known, unconfirmed} from Bitget's
-    authorities list.
+    """{can_trade, can_withdraw, permissions_known, unconfirmed, extra} from
+    Bitget's authorities list.
 
-    can_trade / can_withdraw are True when a known token is present, False only
-    when every token is understood and the permission is absent, and None
-    ("possible" — treat as enabled) when the list is empty or carries codes
-    this code cannot confirm. ``unconfirmed`` lists those codes.
+    can_trade is True with stow/trade, else False (spot trading is required).
+    can_withdraw is True with the documented "withdraw", False when every code
+    is recognised and none grants withdrawal, and None ("possible" — treat as
+    enabled) when the list is empty or carries codes not yet confirmed.
+    ``unconfirmed`` lists those codes; ``extra`` lists recognised codes the
+    platform does not need (margin, transfer, taxation/P2P search).
     """
     tokens = {a.strip().lower() for a in auths if a}
     unconfirmed = sorted(tokens - BITGET_KNOWN_TOKENS)
+    extra = sorted(tokens & BITGET_EXTRA_TOKENS)
     if not tokens:
-        return {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": []}
+        return {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": []}
     trade = bool(tokens & BITGET_TRADE_TOKENS)
     withdraw = bool(tokens & BITGET_WITHDRAW_TOKENS)
     fully_understood = not unconfirmed
@@ -65,6 +76,7 @@ def interpret_bitget_authorities(auths: list) -> dict:
         "can_withdraw": True if withdraw else (False if fully_understood else None),
         "permissions_known": trade or withdraw or fully_understood,
         "unconfirmed": unconfirmed,
+        "extra": extra,
     }
 
 

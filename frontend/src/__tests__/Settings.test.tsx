@@ -77,6 +77,28 @@ describe("Settings: unconfirmed withdrawal permission", () => {
   });
 });
 
+describe("Settings: extra permissions", () => {
+  it("warns, without blocking, when a verified key carries permissions AutoBuy does not need", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([{ ...FAILED, verified: true, verification_status: "verified", verification_error: null,
+      verified_at: "2026-09-11T11:45:00Z", withdrawal_enabled: false, permissions: ["taxw", "p2pw", "wtow", "stow", "smow"],
+      extra_permissions: ["p2pw", "smow", "taxw", "wtow"] }] as never);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByTestId("exchange-key");
+    expect(screen.getByTestId("extra-permissions")).toHaveTextContent(/more permissions than AutoBuy needs \(P2P → Search, Margin → Trade, Taxation → Search, Wallet → Transfer \(internal\)\)\. For safety, use a key with only Spot → Trade\./);
+    expect(screen.queryByRole("status")).toBeNull();          // withdrawal_enabled=false: no withdrawal warning
+    expect(screen.queryByRole("alert")).toBeNull();           // nothing blocking
+    expect(screen.queryByRole("button", { name: /Verify now|Retry verification/ })).toBeNull();
+  });
+
+  it("shows no extra-permissions note for a Spot → Trade only key", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([{ ...FAILED, verified: true, verification_status: "verified", verification_error: null,
+      verified_at: "2026-09-11T11:45:00Z", withdrawal_enabled: false, permissions: ["stow"], extra_permissions: [] }] as never);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByTestId("exchange-key");
+    expect(screen.queryByTestId("extra-permissions")).toBeNull();
+  });
+});
+
 describe("Settings: Bitget guidance", () => {
   it("offers only the exchanges the deployment supports and explains the key permissions, IP whitelist and address book", async () => {
     vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);

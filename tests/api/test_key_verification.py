@@ -223,28 +223,96 @@ async def test_executor_refuses_unverified_key(db, user, binance_key):
 def test_bitget_authorities_interpretation():
     from api.services.binance_client import interpret_bitget_authorities as f
     # documented words
-    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": []}
-    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": []}
-    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True, "unconfirmed": []}
-    # the undocumented codes a live read + spot-trade key returns: trade recognised, withdrawal POSSIBLE (None)
-    live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
-    assert live == {"can_trade": True, "can_withdraw": None, "permissions_known": True, "unconfirmed": ["p2pw", "smow", "taxw", "wtow"]}
+    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": []}
+    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": []}
+    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True, "unconfirmed": [], "extra": []}
     # nothing / only unknown codes: never a rejection, never "safe"
-    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": []}
-    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": ["zzz"]}
+    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": []}
+    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": ["zzz"], "extra": []}
 
 
-async def test_bitget_live_shaped_authorities_verify_with_unknown_withdrawal(db, user, binance_key, client):
-    Venue.info = {"can_trade": True, "can_withdraw": None, "permissions": ["taxw", "p2pw", "wtow", "stow", "smow"],
-                  "permissions_known": True}
+@pytest.mark.parametrize("code, trade, extra", [
+    ("stow", True, []),         # Spot -> Trade: the one AutoBuy needs
+    ("smow", False, ["smow"]),  # Margin -> Trade
+    ("taxw", False, ["taxw"]),  # Taxation -> Search
+    ("p2pw", False, ["p2pw"]),  # P2P -> Search
+    ("wtow", False, ["wtow"]),  # Wallet -> Transfer (internal, not an external withdrawal)
+])
+def test_each_confirmed_bitget_code_is_mapped_and_none_grants_withdrawal(code, trade, extra):
+    from api.services.binance_client import interpret_bitget_authorities as f
+    r = f([code])
+    assert r["can_trade"] is trade and r["can_withdraw"] is False and r["unconfirmed"] == [] and r["extra"] == extra
+    assert r["permissions_known"] is True
+
+
+def test_live_bitget_key_with_all_five_codes_cannot_withdraw():
+    from api.services.binance_client import interpret_bitget_authorities as f
+    live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
+    assert live == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [],
+                    "extra": ["p2pw", "smow", "taxw", "wtow"]}
+    # any other code (e.g. whatever Bitget uses for Withdraw) still means "withdrawal possible"
+    unknown = f(["stow", "wdxx"])
+    assert unknown["can_trade"] is True and unknown["can_withdraw"] is None and unknown["unconfirmed"] == ["wdxx"]
+
+
+async def test_bitget_key_with_confirmed_codes_verifies_with_withdrawal_false_and_extra_warning(db, user, binance_key, client):
+    Venue.info = {"can_trade": True, "can_withdraw": False, "permissions": ["taxw", "p2pw", "wtow", "stow", "smow"],
+                  "permissions_known": True, "unconfirmed": [], "extra": ["p2pw", "smow", "taxw", "wtow"]}
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
     body = (await verify(client, user, binance_key)).json()
     assert body["verified"] is True and body["result"] == "ok"
-    assert "treat this key as able to withdraw" in body["detail"] and "taxw" in body["detail"]
+    assert body["withdrawal_enabled"] is False and body["withdrawal_permission_warning"] is False
+    assert body["extra_permissions"] == ["p2pw", "smow", "taxw", "wtow"]
+    assert "more permissions than AutoBuy needs (p2pw, smow, taxw, wtow)" in body["detail"]
+    assert "use a key with only Spot -> Trade" in body["detail"]
+    assert body["key"]["permissions"] == ["taxw", "p2pw", "wtow", "stow", "smow"] and body["key"]["extra_permissions"] == ["p2pw", "smow", "taxw", "wtow"]
+    await assert_row(db, binance_key, verified=True, status="verified", withdrawal=False, before=before)
+    assert binance_key.permissions == "taxw,p2pw,wtow,stow,smow"
+    # the stored codes come back on the key list
+    async with fresh() as c:
+        keys = (await c.get("/api/exchange/keys", headers=auth(user))).json()
+    assert next(k for k in keys if k["id"] == str(binance_key.id))["extra_permissions"] == ["p2pw", "smow", "taxw", "wtow"]
+
+
+async def test_bitget_key_without_stow_fails_with_clear_reason(db, user, binance_key, client):
+    Venue.info = {"can_trade": False, "can_withdraw": False, "permissions": ["taxw", "wtow"],
+                  "permissions_known": True, "unconfirmed": [], "extra": ["taxw", "wtow"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is False and body["result"] == "no_trade_permission"
+    assert body["detail"].startswith("Spot trading permission is required")
+    assert "no Spot -> Trade permission" in body["detail"] and "taxw, wtow" in body["detail"]
+    await assert_row(db, binance_key, verified=False, status="failed", error_contains="Spot trading permission is required",
+                     withdrawal=False, before=before)
+
+
+async def test_spot_trade_only_key_has_no_extra_warning(db, user, binance_key, client):
+    Venue.info = {"can_trade": True, "can_withdraw": False, "permissions": ["stow"], "permissions_known": True,
+                  "unconfirmed": [], "extra": []}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["extra_permissions"] == [] and "more permissions" not in body["detail"]
+    assert body["withdrawal_enabled"] is False and body["withdrawal_permission_warning"] is False
+
+
+async def test_bitget_unconfirmed_code_still_means_withdrawal_possible(db, user, binance_key, client):
+    """Whatever code Bitget uses for Withdraw is not confirmed yet: it must never be reported as safe."""
+    Venue.info = {"can_trade": True, "can_withdraw": None, "permissions": ["stow", "taxw", "wdxx"],
+                  "permissions_known": True, "unconfirmed": ["wdxx"], "extra": ["taxw"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["result"] == "ok"
+    assert "treat this key as able to withdraw" in body["detail"] and "wdxx" in body["detail"]
     assert body["withdrawal_enabled"] is None and body["withdrawal_permission_warning"] is True, \
         "unconfirmed codes are never reported as safe"
+    assert body["extra_permissions"] == ["taxw"]
     await assert_row(db, binance_key, verified=True, status="verified", withdrawal=None, before=before)
 
 

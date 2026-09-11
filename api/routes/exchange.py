@@ -92,6 +92,8 @@ class APIKeyResponse(UTCModel):
     verified_at: Optional[datetime] = None
     last_checked_at: Optional[datetime] = None
     withdrawal_enabled: Optional[bool] = None     # None = not reported by the exchange
+    permissions: List[str] = []                   # codes the exchange reported at verification
+    extra_permissions: List[str] = []             # recognised codes AutoBuy does not need (warn, non-blocking)
     created_at: datetime
     updated_at: datetime
 
@@ -99,6 +101,13 @@ class APIKeyResponse(UTCModel):
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
+
+def _extra_permissions(key: APIKey) -> list:
+    from api.services.binance_client import BITGET_EXTRA_TOKENS
+    if key.exchange != "bitget":
+        return []
+    return sorted(p for p in key.permission_list if p in BITGET_EXTRA_TOKENS)
+
 
 def _to_response(key: APIKey) -> APIKeyResponse:
     return APIKeyResponse(
@@ -111,6 +120,8 @@ def _to_response(key: APIKey) -> APIKeyResponse:
         verified_at=key.verified_at,
         last_checked_at=key.last_checked_at,
         withdrawal_enabled=key.withdrawal_enabled,
+        permissions=key.permission_list,
+        extra_permissions=_extra_permissions(key),
         created_at=key.created_at,
         updated_at=key.updated_at,
     )
@@ -161,6 +172,7 @@ async def add_or_update_key(
         key.verification_error = None
         key.verified_at = None
         key.withdrawal_enabled = None
+        key.permissions = None
         key.updated_at = to_db_datetime(utc_now())
 
     await db.commit()
@@ -194,6 +206,7 @@ class KeyVerifyResponse(BaseModel):
     verified_at: Optional[datetime] = None
     last_checked_at: Optional[datetime] = None
     withdrawal_enabled: Optional[bool] = None
+    extra_permissions: List[str] = []             # non-blocking: key carries permissions AutoBuy does not need
     key: Optional[APIKeyResponse] = None
 
 
@@ -227,7 +240,7 @@ async def verify_key(
         withdrawal_permission_warning=outcome.verified and outcome.withdrawal_enabled is not False,
         verification_status=key.verification_status, verification_error=key.verification_error,
         verified_at=key.verified_at, last_checked_at=key.last_checked_at,
-        withdrawal_enabled=key.withdrawal_enabled, key=_to_response(key),
+        withdrawal_enabled=key.withdrawal_enabled, extra_permissions=outcome.extra_permissions, key=_to_response(key),
     )
 
 

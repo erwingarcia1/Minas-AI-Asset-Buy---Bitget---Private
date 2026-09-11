@@ -168,6 +168,8 @@ export interface ApiKey {
   verified_at?: string | null;
   last_checked_at?: string | null;
   withdrawal_enabled?: boolean | null;    // null = the exchange does not report permissions
+  permissions?: string[];                 // codes the exchange reported at verification
+  extra_permissions?: string[];           // recognised codes AutoBuy does not need (non-blocking warning)
   created_at: string;
   [key: string]: unknown;
 }
@@ -180,6 +182,7 @@ export interface KeyVerifyResponse {
   verification_status: VerificationStatus;
   verification_error?: string | null;
   withdrawal_enabled?: boolean | null;
+  extra_permissions?: string[];
   key?: ApiKey | null;
 }
 

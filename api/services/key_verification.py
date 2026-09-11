@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -55,6 +55,8 @@ class Verification:
     detail: str
     withdrawal_enabled: Optional[bool] = None
     error_code: Optional[str] = None
+    permissions: list = field(default_factory=list)   # codes the venue reported (never credentials)
+    extra_permissions: list = field(default_factory=list)   # recognised codes AutoBuy does not need
 
 
 def classify(exchange: str, exc: BinanceClientError) -> tuple[str, str]:
@@ -113,12 +115,14 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
 
     can_trade = info.get("can_trade")
     can_withdraw = info.get("can_withdraw")
+    permissions = list(info.get("permissions") or [])
+    extra = list(info.get("extra") or [])
     if can_trade is False:
         outcome = Verification(verified=False, result="no_trade_permission",
-                               detail=f"{venue} accepted the key but it has no spot trading permission "
-                                      f"(permissions: {', '.join(info.get('permissions') or []) or 'none'}). "
-                                      "Enable spot trading on the key.",
-                               withdrawal_enabled=can_withdraw)
+                               detail=f"Spot trading permission is required. {venue} accepted the key but it "
+                                      f"{'has no Spot -> Trade permission' if key.exchange == 'bitget' else 'cannot trade spot'} "
+                                      f"(permissions: {', '.join(permissions) or 'none'}). Enable spot trading on the key.",
+                               withdrawal_enabled=can_withdraw, permissions=permissions, extra_permissions=extra)
         _record(key, outcome, now)
         await db.commit()
         logger.warning("api_key_verification_failed",
@@ -142,7 +146,11 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
     else:
         detail = (f"Key verified on {venue}; {venue} does not report the key's permissions, so treat it as able "
                   "to withdraw unless you have disabled that on the exchange")
-    outcome = Verification(verified=True, result="ok", detail=detail, withdrawal_enabled=can_withdraw)
+    if extra:
+        detail += (". This key has more permissions than AutoBuy needs (" + ", ".join(extra) + "). "
+                   "For safety, use a key with only Spot -> Trade.")
+    outcome = Verification(verified=True, result="ok", detail=detail, withdrawal_enabled=can_withdraw,
+                           permissions=permissions, extra_permissions=extra)
     _record(key, outcome, now)
     await db.commit()
     logger.info("api_key_verified", extra={**log_ctx, "withdrawal_enabled": can_withdraw,
@@ -157,4 +165,5 @@ def _record(key: APIKey, outcome: Verification, now: datetime) -> None:
     key.last_checked_at = now
     key.verified_at = now if outcome.verified else key.verified_at
     key.withdrawal_enabled = outcome.withdrawal_enabled
+    key.permissions = ",".join(outcome.permissions)[:500] or None
     key.updated_at = now

@@ -49,6 +49,14 @@
             "title": "Exchange",
             "type": "string"
           },
+          "extra_permissions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra Permissions",
+            "type": "array"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -65,6 +73,14 @@
               }
             ],
             "title": "Last Checked At"
+          },
+          "permissions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
           },
           "updated_at": {
             "format": "date-time",
@@ -983,6 +999,14 @@
           "detail": {
             "title": "Detail",
             "type": "string"
+          },
+          "extra_permissions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra Permissions",
+            "type": "array"
           },
           "key": {
             "anyOf": [
@@ -3466,7 +3490,7 @@
     },
     "/api/admin/purchases/{purchase_id}/force-retry": {
       "post": {
-        "description": "Make an Auto-Buy purchase due immediately (the next execute_purchases\nrun picks it up). A failed purchase is re-armed: status back to active and\nthe attempt counter reset.",
+        "description": "Make an Auto-Buy purchase due immediately (the next execute_purchases\nrun picks it up). A failed purchase is re-armed: status back to active and\nthe attempt counter reset. Refused for withdrawal_failed / needs_info:\nthose buys already filled and re-arming would buy again \u2014 the owner (or\nan admin acting as them) must use retry-withdrawal instead.",
         "operationId": "force_retry_api_admin_purchases__purchase_id__force_retry_post",
         "parameters": [
           {

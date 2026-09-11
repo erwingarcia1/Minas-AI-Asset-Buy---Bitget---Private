@@ -23,8 +23,10 @@ class APIKeyResponse(TypedDict):
     api_key_masked: str
     created_at: str
     exchange: str
+    extra_permissions: NotRequired[List[str]]
     id: str
     last_checked_at: NotRequired[Optional[str]]
+    permissions: NotRequired[List[str]]
     updated_at: str
     verification_error: NotRequired[Optional[str]]
     verification_status: NotRequired[str]
@@ -233,6 +235,7 @@ class IntegrationInfo(TypedDict):
 class KeyVerifyResponse(TypedDict):
     """KeyVerifyResponse."""
     detail: str
+    extra_permissions: NotRequired[List[str]]
     key: NotRequired[Optional[APIKeyResponse]]
     last_checked_at: NotRequired[Optional[str]]
     result: str

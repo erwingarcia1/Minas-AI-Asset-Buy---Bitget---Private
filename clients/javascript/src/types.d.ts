@@ -13,8 +13,10 @@ export interface APIKeyResponse {
   api_key_masked: string;
   created_at: string;
   exchange: string;
+  extra_permissions?: string[];
   id: string;
   last_checked_at?: string | null;
+  permissions?: string[];
   updated_at: string;
   verification_error?: string | null;
   verification_status?: string;
@@ -199,6 +201,7 @@ export interface IntegrationInfo {
 
 export interface KeyVerifyResponse {
   detail: string;
+  extra_permissions?: string[];
   key?: APIKeyResponse | null;
   last_checked_at?: string | null;
   result: string;

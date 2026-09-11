@@ -11,6 +11,11 @@ import { capitalize, fmtDate } from "@/utils/format";
 
 type Msg = { kind: "error" | "success"; text: string } | null;
 
+/** Bitget permission codes AutoBuy recognises but does not need (confirmed from Bitget's "Edit API key" screen). */
+const PERMISSION_LABELS: Record<string, string> = {
+  smow: "Margin → Trade", wtow: "Wallet → Transfer (internal)", taxw: "Taxation → Search", p2pw: "P2P → Search", transfer: "Transfer (internal)",
+};
+
 export default function Settings() {
   const { user, logout } = useAuth();
   const keys = useAsync(() => userAPI.exchangeKeys());
@@ -98,7 +103,7 @@ export default function Settings() {
                 <li>Add your wallet address to your Bitget address book (withdrawal whitelist) first — Bitget rejects API withdrawals to unknown addresses.</li>
               </ul>
             </li>
-            <li>Bitget reports permissions as codes we cannot always confirm; if a key shows the withdrawal warning below, treat it as able to withdraw and use it only where that is intended.</li>
+            <li>Bitget reports permissions as codes. Spot → Trade is required; Margin → Trade, Wallet → Transfer, Taxation → Search and P2P → Search are recognised as not needed (a warning, nothing blocked). Any code we have not confirmed yet is treated as "withdrawal possible": use such a key only where that is intended.</li>
           </ul>
         </div>
         {keys.loading ? <Loading /> : keys.error ? <Alert kind="error">{keys.error}</Alert> : (
@@ -125,6 +130,9 @@ export default function Settings() {
                 )}
                 {k.verification_status === "verified" && k.withdrawal_enabled == null && (
                   <p className="mt-1 text-xs text-amber-700" role="status">Withdrawal permission could not be confirmed for this key — treat it as able to withdraw. Use it for accumulate purchases only unless you have disabled withdrawals on {capitalize(k.exchange)}.</p>
+                )}
+                {k.verification_status === "verified" && (k.extra_permissions?.length ?? 0) > 0 && (
+                  <p className="mt-1 text-xs text-amber-700" data-testid="extra-permissions">This key has more permissions than AutoBuy needs ({k.extra_permissions!.map((c) => PERMISSION_LABELS[c] ?? c).join(", ")}). For safety, use a key with only Spot → Trade.</p>
                 )}
                 {k.verification_status === "verified" && k.verified_at && (
                   <p className="mt-1 text-xs text-slate-400">Verified {fmtDate(k.verified_at)}</p>
