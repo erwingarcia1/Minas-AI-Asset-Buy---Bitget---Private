@@ -27,6 +27,40 @@ LEGACY_CLIENTS = {
 _LegacyClient = _LegacyBinance
 
 
+# Bitget reports a key's permissions in /api/v2/spot/account/info "authorities".
+# The documented values are words ("readonly", "trade", "withdraw", "transfer");
+# live accounts return undocumented short codes instead (a read + spot-trade
+# key answered ["taxw", "p2pw", "wtow", "stow", "smow"] on 2026-09-11). Only
+# the tokens below are interpreted — "stow" as spot trade, inferred from that
+# key — everything else is recorded verbatim and left "unknown" rather than
+# guessed, so an authenticated key is never wrongly rejected for lacking trade
+# permission, and withdrawal is only flagged on the documented value.
+BITGET_TRADE_TOKENS = {"trade", "stow"}
+BITGET_WITHDRAW_TOKENS = {"withdraw"}
+BITGET_TRANSFER_TOKENS = {"transfer"}
+
+
+def interpret_bitget_authorities(auths: list) -> dict:
+    """{can_trade, can_withdraw, permissions_known} from Bitget's authorities list.
+
+    can_trade / can_withdraw are True when a known token is present, False when
+    the list is non-empty and fully understood without it, and None (unknown)
+    when the list is empty or contains codes this code does not interpret.
+    """
+    known_tokens = BITGET_TRADE_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_TRANSFER_TOKENS | {"readonly", "read"}
+    tokens = {a.strip().lower() for a in auths if a}
+    if not tokens:
+        return {"can_trade": None, "can_withdraw": None, "permissions_known": False}
+    trade = bool(tokens & BITGET_TRADE_TOKENS)
+    withdraw = bool(tokens & BITGET_WITHDRAW_TOKENS)
+    fully_understood = tokens <= known_tokens
+    return {
+        "can_trade": True if trade else (False if fully_understood else None),
+        "can_withdraw": True if withdraw else (False if fully_understood else None),
+        "permissions_known": trade or withdraw or fully_understood,
+    }
+
+
 class BinanceClientError(Exception):
     """Normalized failure from any Binance interaction."""
 
@@ -82,13 +116,7 @@ class BinanceClient:
             if self.exchange == "bitget":
                 info = self._client.get_account_info()
                 auths = [a.lower() for a in info.get("authorities") or []]
-                known = bool(auths)
-                return {
-                    "can_trade": any("trade" in a or "spot" in a for a in auths) if known else None,
-                    "can_withdraw": any("withdraw" in a or "transfer" in a for a in auths) if known else None,
-                    "permissions": auths,
-                    "permissions_known": known,
-                }
+                return {**interpret_bitget_authorities(auths), "permissions": auths}
             # other venues: an authenticated balance read proves the key works
             self._client.get_spot_available("USDT")
             return {"can_trade": None, "can_withdraw": None, "permissions": [], "permissions_known": False}

@@ -125,10 +125,17 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
                        extra={**log_ctx, "result": outcome.result, "permissions": info.get("permissions")})
         return outcome
 
-    if info.get("permissions_known"):
+    perms = ", ".join(info.get("permissions") or [])
+    if can_trade is True:
         detail = f"Key verified on {venue}: spot trading enabled"
         if can_withdraw:
             detail += ". WARNING: this key can also withdraw — restrict it to spot trading only."
+        elif can_withdraw is None:
+            detail += f" (withdrawal permission could not be determined from: {perms})"
+    elif perms:
+        detail = (f"Key verified on {venue}: it authenticates, but {venue} reports its permissions as codes "
+                  f"this platform does not interpret ({perms}); trade permission is assumed and will be "
+                  "confirmed by the first order")
     else:
         detail = f"Key verified on {venue} (permissions are not reported by this exchange)"
     outcome = Verification(verified=True, result="ok", detail=detail, withdrawal_enabled=can_withdraw)

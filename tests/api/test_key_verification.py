@@ -215,3 +215,38 @@ async def test_executor_refuses_unverified_key(db, user, binance_key):
     assert counts["failed"] == 1 and gw.n == 0
     tx = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id))).scalar_one()
     assert tx.status == "failed" and "not verified" in tx.error_message
+
+
+def test_bitget_authorities_interpretation():
+    from api.services.binance_client import interpret_bitget_authorities as f
+    # documented words
+    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True}
+    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True}
+    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True}
+    # the undocumented codes a live read + spot-trade key returns: trade recognised, withdrawal unknown
+    live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
+    assert live == {"can_trade": True, "can_withdraw": None, "permissions_known": True}
+    # nothing / only unknown codes: never a rejection
+    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False}
+    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False}
+
+
+async def test_bitget_live_shaped_authorities_verify_with_unknown_withdrawal(db, user, binance_key, client):
+    Venue.info = {"can_trade": True, "can_withdraw": None, "permissions": ["taxw", "p2pw", "wtow", "stow", "smow"],
+                  "permissions_known": True}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["result"] == "ok"
+    assert "could not be determined" in body["detail"] and "stow" in body["detail"]
+    assert body["withdrawal_enabled"] is None and body["withdrawal_permission_warning"] is False
+    await assert_row(db, binance_key, verified=True, status="verified", withdrawal=None, before=before)
+
+
+async def test_unknown_codes_only_still_verify(db, user, binance_key, client):
+    Venue.info = {"can_trade": None, "can_withdraw": None, "permissions": ["zzz"], "permissions_known": False}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and "does not interpret (zzz)" in body["detail"]
