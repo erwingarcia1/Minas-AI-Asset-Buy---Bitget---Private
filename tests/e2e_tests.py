@@ -4,11 +4,12 @@ Runs against the same PostgreSQL + Redis the API uses (no HTTP server needed):
 
     pytest tests/e2e_tests.py -v
 
-Covers register -> login -> profile, purchase creation -> scheduler execution
+Covers register -> login -> profile, Auto-Buy purchase creation -> executor run
 (dry-run, exchange stubbed), transaction retrieval + dashboard stats, token
 refresh/revocation, rate limiting, and the generated Python SDK driving the
 same flow. Every test creates its own `e2e-*@example.com` user and deletes it
-(and its transactions) afterwards, so the local database is left as found.
+(cascading its purchases and history) afterwards, so the local database is
+left as found.
 Rate-limit counters are keyed by a random per-test client IP so they never
 collide with the dev server or with each other.
 """
@@ -29,31 +30,37 @@ from sqlalchemy import delete, select
 
 from api.database import AsyncSessionLocal
 from api.main import app
-from api.models import APIKey, RecurringPurchase, Transaction, User, utcnow
+from api.models import APIKey, Purchase, PurchaseTransaction, User, utcnow
 from api.routes.exchange import encrypt_value
-from api.services import purchase_service as ps_mod
 from api.services.rate_limit import limiter
-from api.services.recurring_scheduler import RecurringScheduler
+from api.tasks import purchase_scheduler as ps
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients" / "python"))
 
 PASSWORD = "Str0ng!Passw0rd-e2e"
-PURCHASE = {"crypto": "BTC", "amount_usdt": 25.0, "frequency": "weekly"}
+BTC_WALLET = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+
+
+def purchase_body(key_id: str, **over) -> dict:
+    body = {"crypto_symbol": "BTC", "amount_usd": 25.0, "frequency": "weekly", "wallet_address": BTC_WALLET,
+            "blockchain_network": "mainnet", "exchange_account_id": key_id, "purchase_type": "autobuy"}
+    body.update(over)
+    return body
 
 
 # --------------------------------------------------------------------------- helpers
 
-class FakeExchange:
-    """Stands in for the exchange client so the scheduler never touches Binance."""
-    def __init__(self, api_key, api_secret, passphrase="", exchange="binance"):
-        self.exchange = exchange
-
-    def spot_symbol(self, base, quote="USDT"):
-        return f"{base}{quote}"
-
-    def execute_order(self, symbol, usdt_amount, dry_run=True, client_oid=None):
-        return {"order_id": "DRY-e2e" if dry_run else "LIVE-e2e", "amount_crypto": usdt_amount / 50000.0,
-                "exchange_rate": 50000.0, "cost_usdt": usdt_amount, "dry_run": dry_run}
+class FakeGateway:
+    """Stands in for the exchange gateway so the executor never touches an exchange."""
+    def execute(self, account, purchase, dry_run):
+        oid = "DRY-e2e" if dry_run else "LIVE-e2e"
+        fill = {"order_id": oid, "amount_executed": purchase.amount_usd / 50000.0, "fill_price": 50000.0,
+                "cost_usd": purchase.amount_usd, "fee": None, "fee_currency": None}
+        if purchase.purchase_type == "dca":
+            return {**fill, "exchange_tx_id": oid, "tx_type": "accumulation", "withdrawal_id": None,
+                    "withdrawal_fee": None, "withdrawal_fee_currency": None, "tx_hash": None}
+        return {**fill, "exchange_tx_id": "DRY-WD-e2e", "tx_type": "withdrawal", "withdrawal_id": "DRY-WD-e2e",
+                "withdrawal_fee": None, "withdrawal_fee_currency": None, "tx_hash": None}
 
 
 def random_ip() -> str:
@@ -85,8 +92,7 @@ async def cleanup(db):
         user = (await db.execute(select(User).where(User.email == email.lower()))).scalar_one_or_none()
         if user is None:
             continue
-        await db.execute(delete(Transaction).where(Transaction.user_id == user.id))
-        await db.delete(user)  # cascades purchases + keys
+        await db.delete(user)  # cascades purchases, history and keys
     await db.commit()
 
 
@@ -121,36 +127,47 @@ async def register_and_login(client: httpx.AsyncClient, cleanup: list[str]) -> t
     return email, r.json()
 
 
-async def make_executable(db, email: str) -> User:
+async def make_executable(db, email: str) -> tuple[User, APIKey]:
     """KYC-verify the user and attach a (fake) verified Binance key — the executor's gates."""
     user = (await db.execute(select(User).where(User.email == email))).scalar_one()
     user.kyc_status = "verified"
-    db.add(APIKey(user_id=user.id, exchange="binance",
-                  encrypted_api_key=encrypt_value("e2e-api-key-000001"),
-                  encrypted_api_secret=encrypt_value("e2e-api-secret-01"), verified=True))
+    key = APIKey(user_id=user.id, exchange="binance",
+                 encrypted_api_key=encrypt_value("e2e-api-key-000001"),
+                 encrypted_api_secret=encrypt_value("e2e-api-secret-01"), verified=True)
+    db.add(key)
     await db.commit()
-    return user
+    return user, key
 
 
-async def run_scheduler_for(db, purchase_id: uuid.UUID, monkeypatch) -> dict:
-    """Make the purchase due, tick the scheduler in dry-run, return the completed transaction as a dict.
+async def add_key(db, email: str, verified: bool = False) -> APIKey:
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+    key = APIKey(user_id=user.id, exchange="binance",
+                 encrypted_api_key=encrypt_value("e2e-api-key-000001"),
+                 encrypted_api_secret=encrypt_value("e2e-api-secret-01"), verified=verified)
+    db.add(key)
+    await db.commit()
+    return key
 
-    The dev server's own scheduler may race for the advisory lock; if it wins
-    (and records a failure because the key is fake) we re-arm and tick again.
+
+async def run_executor_for(db, purchase_id: uuid.UUID) -> dict:
+    """Make the purchase due, run the Auto-Buy executor in dry-run, return the successful attempt as a dict.
+
+    The dev server's own job may race for the advisory lock; if it wins (and
+    records a failure because the key is fake) we re-arm and run again.
     """
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeExchange)
     for _ in range(3):
-        purchase = (await db.execute(select(RecurringPurchase).where(RecurringPurchase.id == purchase_id))).scalar_one()
-        purchase.next_purchase_date = utcnow() - timedelta(minutes=1)
+        purchase = (await db.execute(select(Purchase).where(Purchase.id == purchase_id))).scalar_one()
+        purchase.status, purchase.failure_count = "active", 0
+        purchase.next_execution = utcnow() - timedelta(minutes=1)
         await db.commit()
-        await RecurringScheduler(dry_run=True).tick()
+        await ps.execute_due_purchases(db, gateway=FakeGateway(), dry_run=True)
         db.expire_all()
-        tx = (await db.execute(select(Transaction).where(
-            Transaction.recurring_purchase_id == purchase_id, Transaction.status == "completed"))).scalars().first()
+        tx = (await db.execute(select(PurchaseTransaction).where(
+            PurchaseTransaction.purchase_id == purchase_id, PurchaseTransaction.status == "success"))).scalars().first()
         if tx is not None:
-            return {"id": str(tx.id), "status": tx.status, "binance_order_id": tx.binance_order_id,
-                    "cost_usdt": tx.cost_usdt, "crypto": tx.crypto, "exchange_rate": tx.exchange_rate}
-    pytest.fail("scheduler never produced a completed dry-run transaction")
+            return {"id": str(tx.id), "status": "completed", "order_id": tx.order_id,
+                    "cost_usd": tx.cost_usd, "fill_price": tx.fill_price, "withdrawal_id": tx.withdrawal_id}
+    pytest.fail("the executor never produced a successful dry-run attempt")
 
 
 # --------------------------------------------------------------------------- 1. registration -> login -> profile
@@ -185,56 +202,58 @@ async def test_register_login_profile(client, cleanup):
 
 # --------------------------------------------------------------------------- 2. purchase -> scheduler (dry run)
 
-async def test_purchase_creation_and_scheduler_dry_run(client, db, cleanup, monkeypatch):
+async def test_purchase_creation_and_executor_dry_run(client, db, cleanup):
     email, tokens = await register_and_login(client, cleanup)
     auth = bearer(tokens["access_token"])
+    key = await add_key(db, email, verified=True)
 
-    # validation guard: below the minimum amount
-    r = await client.post("/api/purchases/", json={**PURCHASE, "amount_usdt": 1}, headers=auth)
+    # validation guards: below the minimum amount; wallet must match the coin
+    r = await client.post("/api/v2/purchases", json=purchase_body(str(key.id), amount_usd=1), headers=auth)
+    assert r.status_code == 422
+    r = await client.post("/api/v2/purchases", json=purchase_body(str(key.id), wallet_address="0x52908400098527886E0F7030069857D2E4169EE7"), headers=auth)
     assert r.status_code == 422
 
-    r = await client.post("/api/purchases/", json=PURCHASE, headers=auth)
+    r = await client.post("/api/v2/purchases", json=purchase_body(str(key.id)), headers=auth)
     assert r.status_code == 201, r.text
-    purchase = r.json()
-    assert purchase["crypto"] == "BTC" and purchase["amount_usdt"] == 25.0 and purchase["frequency"] == "weekly"
-    assert purchase["enabled"] is True
-    first_due = purchase["next_purchase_date"]
-
-    # duplicate active schedule for the same coin is rejected
-    assert (await client.post("/api/purchases/", json=PURCHASE, headers=auth)).status_code == 422
-
-    # scheduler gates: unverified KYC must not buy -> the executor records a failure, not an order
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeExchange)
-    purchase_id = uuid.UUID(purchase["id"])
-    p = (await db.execute(select(RecurringPurchase).where(RecurringPurchase.id == purchase_id))).scalar_one()
-    p.next_purchase_date = utcnow() - timedelta(minutes=1)
-    await db.commit()
-    await RecurringScheduler(dry_run=True).tick()
-    db.expire_all()
-    failed = (await db.execute(select(Transaction).where(
-        Transaction.recurring_purchase_id == purchase_id, Transaction.status == "failed"))).scalars().all()
-    assert failed and any("KYC" in (t.error_message or "") or "API key" in (t.error_message or "") for t in failed)
-
-    # now verified + keyed: dry-run execution succeeds and the schedule advances one week
-    await make_executable(db, email)
-    tx = await run_scheduler_for(db, purchase_id, monkeypatch)
-    assert tx["status"] == "completed" and tx["binance_order_id"] == "DRY-e2e"
-    assert tx["cost_usdt"] == 25.0 and tx["crypto"] == "BTC" and tx["exchange_rate"] == 50000.0
-
-    r = await client.get(f"/api/purchases/{purchase['id']}", headers=auth)
+    purchase_id = uuid.UUID(r.json()["purchase_id"])
+    assert r.json()["status"] == "active"
+    r = await client.get(f"/api/v2/purchases/{purchase_id}", headers=auth)
     assert r.status_code == 200
-    assert r.json()["next_purchase_date"] > first_due
+    purchase = r.json()
+    assert purchase["crypto_symbol"] == "BTC" and purchase["amount_usd"] == 25.0 and purchase["frequency"] == "weekly"
+    first_due = purchase["next_execution"]
 
-    # toggle + list round-trip
-    r = await client.patch(f"/api/purchases/{purchase['id']}/toggle", headers=auth)
-    assert r.status_code == 200 and r.json()["enabled"] is False
-    r = await client.get("/api/purchases/", headers=auth)
-    assert r.status_code == 200 and [x["id"] for x in r.json()] == [purchase["id"]]
+    # executor gate: unverified KYC must not buy -> the run skips the purchase, records nothing
+    p = (await db.execute(select(Purchase).where(Purchase.id == purchase_id))).scalar_one()
+    p.next_execution = utcnow() - timedelta(minutes=1)
+    await db.commit()
+    counts = await ps.execute_due_purchases(db, gateway=FakeGateway(), dry_run=True)
+    assert counts["skipped"] >= 1 and counts["executed"] == 0
+    db.expire_all()
+    assert (await db.execute(select(PurchaseTransaction).where(
+        PurchaseTransaction.purchase_id == purchase_id))).scalars().all() == []
+
+    # now verified: dry-run execution succeeds and the schedule advances one week
+    await make_executable(db, email)
+    tx = await run_executor_for(db, purchase_id)
+    assert tx["status"] == "completed" and tx["order_id"] == "DRY-e2e" and tx["withdrawal_id"] == "DRY-WD-e2e"
+    assert tx["cost_usd"] == 25.0 and tx["fill_price"] == 50000.0
+
+    r = await client.get(f"/api/v2/purchases/{purchase_id}", headers=auth)
+    assert r.status_code == 200
+    assert r.json()["next_execution"] > first_due
+    assert r.json()["transactions"][0]["status"] == "success"
+
+    # pause + list round-trip
+    r = await client.put(f"/api/v2/purchases/{purchase_id}", json={"status": "paused"}, headers=auth)
+    assert r.status_code == 200 and r.json()["status"] == "paused"
+    r = await client.get("/api/v2/purchases", headers=auth)
+    assert r.status_code == 200 and [x["id"] for x in r.json()] == [str(purchase_id)]
 
 
 # --------------------------------------------------------------------------- 3. transactions + dashboard
 
-async def test_transactions_and_dashboard_stats(client, db, cleanup, monkeypatch):
+async def test_transactions_and_dashboard_stats(client, db, cleanup):
     email, tokens = await register_and_login(client, cleanup)
     auth = bearer(tokens["access_token"])
 
@@ -245,11 +264,11 @@ async def test_transactions_and_dashboard_stats(client, db, cleanup, monkeypatch
     assert r.status_code == 200
     assert r.json() == {"total_invested_usdt": 0, "transaction_count": 0, "active_purchases": 0, "kyc_status": "pending"}
 
-    await make_executable(db, email)
-    r = await client.post("/api/purchases/", json=PURCHASE, headers=auth)
+    _, key = await make_executable(db, email)
+    r = await client.post("/api/v2/purchases", json=purchase_body(str(key.id)), headers=auth)
     assert r.status_code == 201, r.text
-    purchase_id = uuid.UUID(r.json()["id"])
-    tx = await run_scheduler_for(db, purchase_id, monkeypatch)
+    purchase_id = uuid.UUID(r.json()["purchase_id"])
+    tx = await run_executor_for(db, purchase_id)
 
     # list + pagination
     r = await client.get("/api/transactions/", params={"limit": 10, "offset": 0}, headers=auth)
@@ -258,7 +277,9 @@ async def test_transactions_and_dashboard_stats(client, db, cleanup, monkeypatch
     assert page["total"] == 1 and page["limit"] == 10 and len(page["items"]) == 1
     item = page["items"][0]
     assert item["id"] == tx["id"] and item["status"] == "completed" and item["cost_usdt"] == 25.0
-    assert item["recurring_purchase_id"] == str(purchase_id)
+    assert item["purchase_id"] == str(purchase_id) and item["tx_type"] == "withdrawal"
+    assert item["wallet_address"] == BTC_WALLET and item["blockchain_network"] == "mainnet"
+    assert item["exchange"] == "binance" and item["order_id"] == "DRY-e2e"
     assert (await client.get("/api/transactions/", params={"limit": 10, "offset": 5}, headers=auth)).json()["items"] == []
 
     # single, by crypto, by status, summary
@@ -286,6 +307,14 @@ async def test_transactions_and_dashboard_stats(client, db, cleanup, monkeypatch
     assert [p["id"] for p in dash["active_purchases"]] == [str(purchase_id)]
     assert [u["crypto"] for u in dash["upcoming_purchases"]] == ["BTC"]
     assert dash["monthly_average_usdt"] > 0
+
+    # the tax CSV carries the fill and withdrawal details
+    year = utcnow().year
+    r = await client.get("/api/reports/tax-summary", params={"year": year, "format": "csv"}, headers=auth)
+    assert r.status_code == 200
+    lines = r.text.strip().splitlines()
+    assert lines[0].startswith("datetime_utc,crypto,quantity,fill_price_usd,usd_amount")
+    assert len(lines) == 2 and "DRY-e2e" in lines[1] and BTC_WALLET in lines[1] and "binance" in lines[1]
 
     # a different user cannot see it
     _, other = await register_and_login(client, cleanup)
@@ -391,7 +420,7 @@ async def test_rate_limit_per_user_on_authenticated_routes(make_client, cleanup,
 
 # --------------------------------------------------------------------------- 6. generated Python SDK against the real app
 
-async def test_python_sdk_end_to_end(db, cleanup, monkeypatch):
+async def test_python_sdk_end_to_end(db, cleanup):
     from autobuy_client import ApiError, AsyncAutoBuyClient, ValidationError
 
     email = new_email()
@@ -407,13 +436,13 @@ async def test_python_sdk_end_to_end(db, cleanup, monkeypatch):
         assert sdk.tokens and changes[-1]["access_token"] == sdk.tokens["access_token"]
         assert (await sdk.me())["id"] == user["id"]
 
+        _, key = await make_executable(db, email)
         with pytest.raises(ValidationError) as ei:
-            await sdk.create_purchase({**PURCHASE, "amount_usdt": 1})
-        assert any("amount_usdt" in e.get("loc", []) for e in ei.value.errors)
+            await sdk.auto_buy.create_purchase(purchase_body(str(key.id), amount_usd=1))
+        assert any("amount_usd" in e.get("loc", []) for e in ei.value.errors)
 
-        await make_executable(db, email)
-        purchase = await sdk.create_purchase(PURCHASE)
-        tx = await run_scheduler_for(db, uuid.UUID(purchase["id"]), monkeypatch)
+        purchase = await sdk.create_purchase(purchase_body(str(key.id)))
+        tx = await run_executor_for(db, uuid.UUID(purchase["purchase_id"]))
 
         page = await sdk.transactions.list_transactions(limit=5)
         assert page["total"] == 1 and page["items"][0]["id"] == tx["id"]
@@ -429,7 +458,7 @@ async def test_python_sdk_end_to_end(db, cleanup, monkeypatch):
         assert sdk.tokens["access_token"] != "stale.token.value"
 
         with pytest.raises(ApiError) as ei:
-            await sdk.purchases.get_purchase(str(uuid.uuid4()))
+            await sdk.auto_buy.get_purchase(str(uuid.uuid4()))
         assert ei.value.status == 404
 
         await sdk.logout()

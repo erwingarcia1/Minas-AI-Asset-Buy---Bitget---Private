@@ -21,26 +21,19 @@ import type {
   IntegrationInfo,
   KeyVerifyResponse,
   KycOverride,
-  LimitOrderCreate,
   LoginRequest,
   LogoutRequest,
-  OpportunitiesResponse,
   PerformanceResponse,
   PlatformStats,
   PreferencesPayload,
   PreferencesResponse,
   ProfileUpdateRequest,
-  PurchaseCreate,
   PurchaseCreateRequest,
   PurchaseCreatedOut,
   PurchaseDetailOut,
   PurchaseOut,
-  PurchaseResponse,
-  PurchaseUpdate,
   PurchaseUpdateRequest,
   QuickStats,
-  RebalanceCreate,
-  RebalancePlan,
   RecurringResponse,
   RefreshRequest,
   RegisterRequest,
@@ -123,23 +116,6 @@ export declare class ExchangeApi {
   verifyKey(keyId: string): Promise<KeyVerifyResponse>;
   /** Delete Key — `DELETE /api/exchange/keys/{key_id}` */
   deleteKey(keyId: string): Promise<unknown>;
-}
-
-/** `purchases` endpoints. */
-export declare class PurchasesApi {
-  constructor(http: HttpTransport);
-  /** List Purchases — `GET /api/purchases/` */
-  listPurchases(): Promise<PurchaseResponse[]>;
-  /** Create Purchase — `POST /api/purchases/` */
-  createPurchase(body: PurchaseCreate): Promise<PurchaseResponse>;
-  /** Get Purchase — `GET /api/purchases/{purchase_id}` */
-  getPurchase(purchaseId: string): Promise<PurchaseResponse>;
-  /** Update Purchase — `PUT /api/purchases/{purchase_id}` */
-  updatePurchase(purchaseId: string, body: PurchaseUpdate): Promise<PurchaseResponse>;
-  /** Delete Purchase — `DELETE /api/purchases/{purchase_id}` */
-  deletePurchase(purchaseId: string): Promise<unknown>;
-  /** Toggle Purchase — `PATCH /api/purchases/{purchase_id}/toggle` */
-  togglePurchase(purchaseId: string): Promise<PurchaseResponse>;
 }
 
 /** `transactions` endpoints. */
@@ -234,17 +210,6 @@ export declare class AdminApi {
   resumeScheduler(): Promise<unknown>;
 }
 
-/** `advanced` endpoints. */
-export declare class AdvancedApi {
-  constructor(http: HttpTransport);
-  /** Create Limit Order — `POST /api/advanced/limit-order` */
-  createLimitOrder(body: LimitOrderCreate): Promise<PurchaseResponse>;
-  /** Create Rebalance Plan — `POST /api/advanced/rebalance` */
-  createRebalancePlan(body: RebalanceCreate): Promise<RebalancePlan>;
-  /** Opportunities — `GET /api/advanced/opportunities` */
-  opportunities(): Promise<OpportunitiesResponse>;
-}
-
 /** `analytics` endpoints. */
 export declare class AnalyticsApi {
   constructor(http: HttpTransport);
@@ -324,14 +289,12 @@ export interface Api {
   readonly auth: AuthApi;
   readonly user: UserApi;
   readonly exchange: ExchangeApi;
-  readonly purchases: PurchasesApi;
   readonly transactions: TransactionsApi;
   readonly dashboard: DashboardApi;
   readonly integrations: IntegrationsApi;
   readonly reports: ReportsApi;
   readonly notifications: NotificationsApi;
   readonly admin: AdminApi;
-  readonly advanced: AdvancedApi;
   readonly analytics: AnalyticsApi;
   readonly kyc: KycApi;
   readonly webhooks: WebhooksApi;

@@ -1,12 +1,11 @@
 """Cross-worker scheduler state kept in Redis.
 
-Two schedulers run inside every gunicorn worker: the legacy ``RecurringScheduler``
-tick (every ``SCHEDULER_POLL_SECONDS``) and the Auto-Buy ``execute_purchases``
-job (every 5 minutes). Anything that must hold for *all* workers and survive
-an API restart lives here, never in process memory:
+The Auto-Buy ``execute_purchases`` job runs inside every gunicorn worker
+(every 5 minutes). Anything that must hold for *all* workers and survive an
+API restart lives here, never in process memory:
 
-* the admin **pause switch** (:func:`pause` / :func:`resume`): both schedulers
-  read it at the start of every run and skip while it is set;
+* the admin **pause switch** (:func:`pause` / :func:`resume`): the job reads
+  it at the start of every run and skips while it is set;
 * a **heartbeat** per scheduler (last run time, result, detail, counts), so
   ``/health`` and the admin alerts describe the worker that actually ran,
   not the worker that happened to answer the request;
@@ -30,7 +29,7 @@ from api.config import settings
 
 logger = logging.getLogger("autobuy.scheduler_state")
 
-SCHEDULERS = ("recurring", "autobuy")
+SCHEDULERS = ("autobuy",)
 PAUSE_KEY = "autobuy:schedulers:paused"
 _HEARTBEAT_KEY = "autobuy:schedulers:{name}:last_run"
 _FAILURES_KEY = "autobuy:schedulers:{name}:consecutive_failures"

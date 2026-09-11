@@ -1,6 +1,6 @@
-"""Admin pause switch for BOTH schedulers, the /health scheduler report and the
-Auto-Buy alerts. The switch lives in Redis so it applies to every gunicorn
-worker and survives an API restart; reads fail closed."""
+"""Admin pause switch for the Auto-Buy job, the /health scheduler report and
+the alerts. The switch lives in Redis so it applies to every gunicorn worker
+and survives an API restart; reads fail closed."""
 import logging
 import uuid
 from datetime import timedelta
@@ -11,7 +11,6 @@ from sqlalchemy import select
 
 from api.models import User
 from api.services import scheduler_state
-from api.services.recurring_scheduler import RecurringScheduler
 from api.tasks import purchase_scheduler as ps
 from tests.api.conftest import auth_headers
 from tests.conftest_autobuy import binance_key, db, make_key, make_purchase, other_user, user  # noqa: F401
@@ -103,11 +102,9 @@ async def test_redis_unreadable_fails_closed(db, user, binance_key, monkeypatch,
 
     with caplog.at_level(logging.ERROR):
         counts = await ps.execute_due_purchases(db, now=NOW, gateway=gw, dry_run=True)
-        tick = await RecurringScheduler(dry_run=True).tick()
     assert counts == {"executed": 0, "failed": 0, "skipped": 0} and gw.calls == []
-    assert tick == 0
     msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
-    assert sum("failing closed" in m for m in msgs) == 2, msgs
+    assert any("failing closed" in m for m in msgs), msgs
 
 
 async def test_failed_runs_are_counted_and_reset(db, user, binance_key):
@@ -122,29 +119,6 @@ async def test_failed_runs_are_counted_and_reset(db, user, binance_key):
     assert (await scheduler_state.last_run("autobuy"))["result"] == "ok"
 
 
-# --------------------------------------------------------------------------- legacy tick
-
-async def test_legacy_tick_skips_when_paused(monkeypatch, caplog):
-    await scheduler_state.pause("admin-legacy-test")
-    s = RecurringScheduler(dry_run=True)
-
-    async def must_not_run():
-        raise AssertionError("the tick must not process purchases while paused")
-    monkeypatch.setattr(s, "_process_due", must_not_run)
-
-    with caplog.at_level(logging.WARNING, logger="autobuy.scheduler"):
-        assert await s.tick() == 0
-    assert any("PAUSED" in r.getMessage() for r in caplog.records)
-    assert (await scheduler_state.last_run("recurring"))["result"] == "skipped_paused"
-    await scheduler_state.resume()
-
-    async def nothing_due():
-        return 0
-    monkeypatch.setattr(s, "_process_due", nothing_due)
-    assert await s.tick() == 0  # ran again after resume
-    assert (await scheduler_state.last_run("recurring"))["result"] == "ok"
-
-
 # --------------------------------------------------------------------------- persistence
 
 async def test_pause_state_survives_a_restart(admin):
@@ -154,33 +128,31 @@ async def test_pause_state_survives_a_restart(admin):
     async with api() as c:
         assert (await c.post("/api/admin/scheduler/pause", headers=auth_headers(admin))).status_code == 204
     await close_redis()                      # drop every in-process connection
-    assert RecurringScheduler().running is False
     assert (await scheduler_state.pause_info())["paused"] is True      # fresh async client
     sync_view = scheduler_state.pause_info_sync()                        # fresh sync connection
     assert sync_view["paused"] is True and sync_view["by"] == str(admin.id) and sync_view["since"]
     async with api() as c:
         h = (await c.get("/health")).json()
     assert h["schedulers"]["paused"] is True and h["schedulers"]["paused_by"] == str(admin.id)
-    assert h["schedulers"]["recurring"]["paused"] is True and h["schedulers"]["autobuy"]["paused"] is True
+    assert h["schedulers"]["autobuy"]["paused"] is True
 
 
 # --------------------------------------------------------------------------- health + alerts
 
-async def test_health_reports_both_schedulers(db, user, binance_key):
+async def test_health_reports_the_autobuy_job(db, user, binance_key):
     await make_purchase(db, user, binance_key, next_execution=NOW - timedelta(minutes=1))
     await ps.execute_due_purchases(db, now=NOW, gateway=FakeGateway(), dry_run=True)
-    await RecurringScheduler(dry_run=True).tick()
     async with api() as c:
         h = (await c.get("/health")).json()
+    assert "scheduler" not in h, "the legacy per-worker block is gone"
+    assert h["dry_run"] is True
     s = h["schedulers"]
+    assert set(s) == {"paused", "paused_since", "paused_by", "autobuy"}
     assert s["paused"] is False and s["paused_since"] is None
     assert s["autobuy"]["last_result"] == "ok" and s["autobuy"]["last_run_at"]
     assert s["autobuy"]["last_counts"]["executed"] == 1 and s["autobuy"]["consecutive_failures"] == 0
     assert s["autobuy"]["interval_minutes"] == 5 and s["autobuy"]["dry_run"] is True
-    assert s["recurring"]["last_result"] == "ok" and s["recurring"]["last_run_at"]
-    assert s["recurring"]["consecutive_failures"] == 0
     assert set(s["autobuy"]) >= {"running", "paused", "last_run_at", "last_result", "last_detail"}
-    assert h["scheduler"]["dry_run"] is True, "legacy key kept for existing monitors"
 
 
 async def test_alerts_cover_the_autobuy_job(db, user, binance_key, admin):

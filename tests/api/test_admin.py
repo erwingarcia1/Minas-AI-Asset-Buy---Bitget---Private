@@ -4,7 +4,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from api.models import Transaction, User
+from api.models import User
 from tests.api.conftest import auth_headers, make_autobuy_purchase, make_history
 
 PW = "Str0ng!passw0rd"
@@ -78,7 +78,7 @@ async def test_unauthenticated_gets_401_on_every_admin_route():
             assert r.status_code == 401, (method, path, r.status_code)
 
 
-async def test_stats_and_user_listing(db, admin, user, purchase, binance_key):
+async def test_stats_and_user_listing(db, admin, user, binance_key):
     await make_history(db, user, crypto="BTC", amount_crypto=0.001, cost_usd=123.0, key=binance_key)
     H = auth_headers(admin)
     async with client() as c:
@@ -147,23 +147,28 @@ async def test_kyc_override_requires_note(db, admin, user):
     assert user.kyc_status == "rejected"
 
 
-async def test_transactions_audit_and_force_retry(db, admin, user, purchase, binance_key):
+async def test_transactions_audit_and_force_retry(db, admin, user, binance_key):
     await make_history(db, user, crypto="BTC", amount_crypto=0.001, cost_usd=50.0, status="failed",
                        key=binance_key, error_message="boom")
-    from datetime import timedelta
-    purchase.next_purchase_date = purchase.next_purchase_date + timedelta(days=30)
-    await db.commit()
+    stuck = await make_autobuy_purchase(db, user, crypto="ETH", key=binance_key, status="failed",
+                                        failure_count=3, next_execution=None)
     H = auth_headers(admin)
     async with client() as c:
         log = (await c.get("/api/admin/transactions",
                            params={"status_filter": "failed",
                                    "user_id": str(user.id)}, headers=H)).json()
         assert log["total"] == 1 and log["items"][0]["error_message"] == "boom"
-        assert (await c.post(f"/api/admin/purchases/{purchase.id}/force-retry",
+        assert (await c.post(f"/api/admin/purchases/{stuck.id}/force-retry",
                              headers=H)).status_code == 204
-    await db.refresh(purchase)
+        assert (await c.post(f"/api/admin/purchases/{uuid.uuid4()}/force-retry",
+                             headers=H)).status_code == 404
+    await db.refresh(stuck)
     from datetime import datetime, timezone
-    assert purchase.next_purchase_date <= datetime.now(timezone.utc)
+    assert stuck.status == "active" and stuck.failure_count == 0
+    assert stuck.next_execution <= datetime.now(timezone.utc)
+    done = await make_autobuy_purchase(db, user, crypto="SOL", key=binance_key, status="completed", next_execution=None)
+    async with client() as c:
+        assert (await c.post(f"/api/admin/purchases/{done.id}/force-retry", headers=H)).status_code == 409
 
 
 async def test_alerts_snapshot(admin):
@@ -171,7 +176,6 @@ async def test_alerts_snapshot(admin):
     async with client() as c:
         items = (await c.get("/api/admin/alerts", headers=H)).json()
     names = {a["name"] for a in items}
-    assert {"scheduler_consecutive_failures", "scheduler_tick",
-            "failed_transactions_24h", "active_purchases",
-            "schedulers_paused", "autobuy_run", "autobuy_consecutive_failures"} <= names
+    assert names == {"schedulers_paused", "autobuy_run", "autobuy_consecutive_failures",
+                     "failed_transactions_24h"}, "only the Auto-Buy job's alerts remain"
     assert all(a["severity"] in ("ok", "warning", "critical") for a in items)

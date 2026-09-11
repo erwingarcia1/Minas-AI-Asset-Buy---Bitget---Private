@@ -194,69 +194,6 @@ export class ExchangeApi {
 
 }
 
-/** `purchases` endpoints. */
-export class PurchasesApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * List Purchases — `GET /api/purchases/`
-   * @returns {Promise<import('./types.js').PurchaseResponse[]>}
-   */
-  listPurchases() {
-    return this.http.request("GET", "/api/purchases/", { auth: true });
-  }
-
-  /**
-   * Create Purchase — `POST /api/purchases/`
-   * @param {import('./types.js').PurchaseCreate} body
-   * @returns {Promise<import('./types.js').PurchaseResponse>}
-   */
-  createPurchase(body) {
-    return this.http.request("POST", "/api/purchases/", { body, auth: true });
-  }
-
-  /**
-   * Get Purchase — `GET /api/purchases/{purchase_id}`
-   * @param {string} purchaseId
-   * @returns {Promise<import('./types.js').PurchaseResponse>}
-   */
-  getPurchase(purchaseId) {
-    return this.http.request("GET", "/api/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
-  }
-
-  /**
-   * Update Purchase — `PUT /api/purchases/{purchase_id}`
-   * @param {string} purchaseId
-   * @param {import('./types.js').PurchaseUpdate} body
-   * @returns {Promise<import('./types.js').PurchaseResponse>}
-   */
-  updatePurchase(purchaseId, body) {
-    return this.http.request("PUT", "/api/purchases/" + encodeURIComponent(String(purchaseId)), { body, auth: true });
-  }
-
-  /**
-   * Delete Purchase — `DELETE /api/purchases/{purchase_id}`
-   * @param {string} purchaseId
-   * @returns {Promise<unknown>}
-   */
-  deletePurchase(purchaseId) {
-    return this.http.request("DELETE", "/api/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
-  }
-
-  /**
-   * Toggle Purchase — `PATCH /api/purchases/{purchase_id}/toggle`
-   * @param {string} purchaseId
-   * @returns {Promise<import('./types.js').PurchaseResponse>}
-   */
-  togglePurchase(purchaseId) {
-    return this.http.request("PATCH", "/api/purchases/" + encodeURIComponent(String(purchaseId)) + "/toggle", { auth: true });
-  }
-
-}
-
 /** `transactions` endpoints. */
 export class TransactionsApi {
   /** @param {import('./http.js').HttpTransport} http */
@@ -582,41 +519,6 @@ export class AdminApi {
 
 }
 
-/** `advanced` endpoints. */
-export class AdvancedApi {
-  /** @param {import('./http.js').HttpTransport} http */
-  constructor(http) {
-    this.http = http;
-  }
-
-  /**
-   * Create Limit Order — `POST /api/advanced/limit-order`
-   * @param {import('./types.js').LimitOrderCreate} body
-   * @returns {Promise<import('./types.js').PurchaseResponse>}
-   */
-  createLimitOrder(body) {
-    return this.http.request("POST", "/api/advanced/limit-order", { body, auth: true });
-  }
-
-  /**
-   * Create Rebalance Plan — `POST /api/advanced/rebalance`
-   * @param {import('./types.js').RebalanceCreate} body
-   * @returns {Promise<import('./types.js').RebalancePlan>}
-   */
-  createRebalancePlan(body) {
-    return this.http.request("POST", "/api/advanced/rebalance", { body, auth: true });
-  }
-
-  /**
-   * Opportunities — `GET /api/advanced/opportunities`
-   * @returns {Promise<import('./types.js').OpportunitiesResponse>}
-   */
-  opportunities() {
-    return this.http.request("GET", "/api/advanced/opportunities", { auth: true });
-  }
-
-}
-
 /** `analytics` endpoints. */
 export class AnalyticsApi {
   /** @param {import('./http.js').HttpTransport} http */
@@ -869,14 +771,12 @@ export function buildApi(http) {
     auth: new AuthApi(http),
     user: new UserApi(http),
     exchange: new ExchangeApi(http),
-    purchases: new PurchasesApi(http),
     transactions: new TransactionsApi(http),
     dashboard: new DashboardApi(http),
     integrations: new IntegrationsApi(http),
     reports: new ReportsApi(http),
     notifications: new NotificationsApi(http),
     admin: new AdminApi(http),
-    advanced: new AdvancedApi(http),
     analytics: new AnalyticsApi(http),
     kyc: new KycApi(http),
     webhooks: new WebhooksApi(http),

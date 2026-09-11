@@ -29,19 +29,6 @@ class EmailService:
         except ResendError:
             return False  # logged by the integration
 
-    async def send_purchase_notification(self, user_email: str, purchase, transaction) -> bool:
-        crypto = transaction.crypto
-        if transaction.status == "completed":
-            subject = f"✓ Purchase complete: {transaction.amount_crypto:.8f} {crypto}"
-            text = (f"You purchased {transaction.amount_crypto:.8f} {crypto} for "
-                    f"{transaction.cost_usdt:.2f} USDT at {transaction.exchange_rate:.2f}. "
-                    f"Order: {transaction.binance_order_id}")
-        else:
-            subject = f"✗ Purchase failed: {crypto}"
-            text = (f"We tried to buy {crypto} for {purchase.amount_usdt:.2f} USDT but it failed: "
-                    f"{transaction.error_message}. We'll retry automatically in about an hour.")
-        return await self._send(user_email, subject, f"<p>{text}</p>", text, template="purchase")
-
     async def send_purchase_event_email(self, user_email: str, event) -> bool:
         """One email per Auto-Buy attempt outcome (see purchase_events)."""
         p, tx = event.purchase, event.tx

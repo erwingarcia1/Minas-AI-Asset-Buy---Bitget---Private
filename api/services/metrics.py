@@ -25,7 +25,7 @@ http_requests_total = Counter(
     "http_requests_total", "HTTP requests served",
     ["method", "path", "status"], registry=registry)
 active_purchases_total = Gauge(
-    "active_purchases_total", "Enabled recurring purchases (set each scheduler tick)",
+    "active_purchases_total", "Active Auto-Buy purchases (set each execute_purchases run)",
     registry=registry)
 transactions_total = Counter(
     "transactions_total", "Transactions recorded",
@@ -45,7 +45,7 @@ scheduler_job_duration_seconds = Histogram(
     "scheduler_job_duration_seconds", "Scheduler job duration",
     ["job_type"], registry=registry, buckets=(.1, .5, 1, 5, 15, 30, 60, 120, 300))
 scheduler_consecutive_failures = Gauge(
-    "scheduler_consecutive_failures", "Consecutive failed purchase executions",
+    "scheduler_consecutive_failures", "Consecutive failed Auto-Buy execute_purchases runs",
     registry=registry)
 
 

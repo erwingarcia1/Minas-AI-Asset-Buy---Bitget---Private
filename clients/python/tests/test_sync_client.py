@@ -33,14 +33,14 @@ def test_register_login_profile_attaches_bearer(server):
 
 
 def test_create_purchase_sends_json_body(server):
-    server.on("POST", "/api/purchases/", lambda r: json_response(
+    server.on("POST", "/api/v2/purchases", lambda r: json_response(
         {"id": "p1", **body_of(r), "is_active": True, "next_purchase_date": "2026-09-15T00:00:00Z",
          "created_at": "x", "exchange": "binance"}, 201))
     client = AutoBuyClient("http://api.test", transport=server.transport, tokens=TOKENS)
-    p = client.create_purchase({"crypto": "BTC", "amount_usdt": 50, "frequency": "weekly"})
+    p = client.create_purchase({"crypto": "BTC", "amount_usd": 50, "frequency": "weekly"})
     assert p["id"] == "p1" and p["crypto"] == "BTC"
     assert server.calls[0].headers["content-type"] == "application/json"
-    assert body_of(server.calls[0]) == {"crypto": "BTC", "amount_usdt": 50, "frequency": "weekly"}
+    assert body_of(server.calls[0]) == {"crypto": "BTC", "amount_usd": 50, "frequency": "weekly"}
 
 
 def test_list_transactions_query_params_skip_none(server):
@@ -99,19 +99,19 @@ def test_429_raises_rate_limit_error_with_retry_after(server):
 
 
 def test_422_raises_validation_error_with_field_errors(server):
-    server.on("POST", "/api/purchases/", lambda r: json_response(
-        {"detail": [{"loc": ["body", "amount_usdt"], "msg": "ensure this value is >= 10", "type": "value_error"}]}, 422))
+    server.on("POST", "/api/v2/purchases", lambda r: json_response(
+        {"detail": [{"loc": ["body", "amount_usd"], "msg": "ensure this value is >= 10", "type": "value_error"}]}, 422))
     client = AutoBuyClient("http://api.test", transport=server.transport, tokens=TOKENS)
     with pytest.raises(ValidationError) as ei:
-        client.create_purchase({"crypto": "BTC", "amount_usdt": 1, "frequency": "weekly"})
-    assert ei.value.errors[0]["loc"][1] == "amount_usdt"
+        client.create_purchase({"crypto_symbol": "BTC", "amount_usd": 1, "frequency": "weekly"})
+    assert ei.value.errors[0]["loc"][1] == "amount_usd"
 
 
 def test_other_errors_raise_api_error(server):
-    server.on("GET", "/api/purchases/nope", lambda r: json_response({"detail": "Purchase not found"}, 404))
+    server.on("GET", "/api/v2/purchases/nope", lambda r: json_response({"detail": "Purchase not found"}, 404))
     client = AutoBuyClient("http://api.test", transport=server.transport, tokens=TOKENS)
     with pytest.raises(ApiError) as ei:
-        client.purchases.get_purchase("nope")
+        client.auto_buy.get_purchase("nope")
     assert ei.value.detail == "Purchase not found"
     assert not isinstance(ei.value, RateLimitError)
 
@@ -126,8 +126,8 @@ def test_logout_revokes_and_clears(server):
 
 def test_health_unauthenticated_and_empty_bodies(server):
     server.on("GET", "/health", lambda r: json_response({"status": "healthy"}))
-    server.on("DELETE", "/api/purchases/p1", lambda r: __import__("httpx").Response(204))
+    server.on("DELETE", "/api/v2/purchases/p1", lambda r: __import__("httpx").Response(204))
     with AutoBuyClient("http://api.test", transport=server.transport, tokens=TOKENS) as client:
         assert client.system.health_check()["status"] == "healthy"
         assert "authorization" not in server.calls[0].headers
-        assert client.purchases.delete_purchase("p1") is None
+        assert client.auto_buy.cancel_purchase("p1") is None

@@ -24,26 +24,19 @@ from .types import (
     IntegrationInfo,
     KeyVerifyResponse,
     KycOverride,
-    LimitOrderCreate,
     LoginRequest,
     LogoutRequest,
-    OpportunitiesResponse,
     PerformanceResponse,
     PlatformStats,
     PreferencesPayload,
     PreferencesResponse,
     ProfileUpdateRequest,
-    PurchaseCreate,
     PurchaseCreateRequest,
     PurchaseCreatedOut,
     PurchaseDetailOut,
     PurchaseOut,
-    PurchaseResponse,
-    PurchaseUpdate,
     PurchaseUpdateRequest,
     QuickStats,
-    RebalanceCreate,
-    RebalancePlan,
     RecurringResponse,
     RefreshRequest,
     RegisterRequest,
@@ -271,68 +264,6 @@ class AsyncExchangeApi:
     async def delete_key(self, key_id: str) -> Any:
         """Delete Key — ``DELETE /api/exchange/keys/{key_id}``."""
         return await self._http.request("DELETE", "/api/exchange/keys/" + _q(key_id), auth=True)
-
-
-class PurchasesApi:
-    """`purchases` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def list_purchases(self) -> List[PurchaseResponse]:
-        """List Purchases — ``GET /api/purchases/``."""
-        return self._http.request("GET", "/api/purchases/", auth=True)
-
-    def create_purchase(self, body: PurchaseCreate) -> PurchaseResponse:
-        """Create Purchase — ``POST /api/purchases/``."""
-        return self._http.request("POST", "/api/purchases/", auth=True, body=body)
-
-    def get_purchase(self, purchase_id: str) -> PurchaseResponse:
-        """Get Purchase — ``GET /api/purchases/{purchase_id}``."""
-        return self._http.request("GET", "/api/purchases/" + _q(purchase_id), auth=True)
-
-    def update_purchase(self, purchase_id: str, body: PurchaseUpdate) -> PurchaseResponse:
-        """Update Purchase — ``PUT /api/purchases/{purchase_id}``."""
-        return self._http.request("PUT", "/api/purchases/" + _q(purchase_id), auth=True, body=body)
-
-    def delete_purchase(self, purchase_id: str) -> Any:
-        """Delete Purchase — ``DELETE /api/purchases/{purchase_id}``."""
-        return self._http.request("DELETE", "/api/purchases/" + _q(purchase_id), auth=True)
-
-    def toggle_purchase(self, purchase_id: str) -> PurchaseResponse:
-        """Toggle Purchase — ``PATCH /api/purchases/{purchase_id}/toggle``."""
-        return self._http.request("PATCH", "/api/purchases/" + _q(purchase_id) + "/toggle", auth=True)
-
-
-class AsyncPurchasesApi:
-    """`purchases` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def list_purchases(self) -> List[PurchaseResponse]:
-        """List Purchases — ``GET /api/purchases/``."""
-        return await self._http.request("GET", "/api/purchases/", auth=True)
-
-    async def create_purchase(self, body: PurchaseCreate) -> PurchaseResponse:
-        """Create Purchase — ``POST /api/purchases/``."""
-        return await self._http.request("POST", "/api/purchases/", auth=True, body=body)
-
-    async def get_purchase(self, purchase_id: str) -> PurchaseResponse:
-        """Get Purchase — ``GET /api/purchases/{purchase_id}``."""
-        return await self._http.request("GET", "/api/purchases/" + _q(purchase_id), auth=True)
-
-    async def update_purchase(self, purchase_id: str, body: PurchaseUpdate) -> PurchaseResponse:
-        """Update Purchase — ``PUT /api/purchases/{purchase_id}``."""
-        return await self._http.request("PUT", "/api/purchases/" + _q(purchase_id), auth=True, body=body)
-
-    async def delete_purchase(self, purchase_id: str) -> Any:
-        """Delete Purchase — ``DELETE /api/purchases/{purchase_id}``."""
-        return await self._http.request("DELETE", "/api/purchases/" + _q(purchase_id), auth=True)
-
-    async def toggle_purchase(self, purchase_id: str) -> PurchaseResponse:
-        """Toggle Purchase — ``PATCH /api/purchases/{purchase_id}/toggle``."""
-        return await self._http.request("PATCH", "/api/purchases/" + _q(purchase_id) + "/toggle", auth=True)
 
 
 class TransactionsApi:
@@ -667,44 +598,6 @@ class AsyncAdminApi:
         return await self._http.request("POST", "/api/admin/scheduler/resume", auth=True)
 
 
-class AdvancedApi:
-    """`advanced` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def create_limit_order(self, body: LimitOrderCreate) -> PurchaseResponse:
-        """Create Limit Order — ``POST /api/advanced/limit-order``."""
-        return self._http.request("POST", "/api/advanced/limit-order", auth=True, body=body)
-
-    def create_rebalance_plan(self, body: RebalanceCreate) -> RebalancePlan:
-        """Create Rebalance Plan — ``POST /api/advanced/rebalance``."""
-        return self._http.request("POST", "/api/advanced/rebalance", auth=True, body=body)
-
-    def opportunities(self) -> OpportunitiesResponse:
-        """Opportunities — ``GET /api/advanced/opportunities``."""
-        return self._http.request("GET", "/api/advanced/opportunities", auth=True)
-
-
-class AsyncAdvancedApi:
-    """`advanced` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def create_limit_order(self, body: LimitOrderCreate) -> PurchaseResponse:
-        """Create Limit Order — ``POST /api/advanced/limit-order``."""
-        return await self._http.request("POST", "/api/advanced/limit-order", auth=True, body=body)
-
-    async def create_rebalance_plan(self, body: RebalanceCreate) -> RebalancePlan:
-        """Create Rebalance Plan — ``POST /api/advanced/rebalance``."""
-        return await self._http.request("POST", "/api/advanced/rebalance", auth=True, body=body)
-
-    async def opportunities(self) -> OpportunitiesResponse:
-        """Opportunities — ``GET /api/advanced/opportunities``."""
-        return await self._http.request("GET", "/api/advanced/opportunities", auth=True)
-
-
 class AnalyticsApi:
     """`analytics` endpoints."""
 
@@ -973,14 +866,12 @@ class Api:
         self.auth = AuthApi(http)
         self.user = UserApi(http)
         self.exchange = ExchangeApi(http)
-        self.purchases = PurchasesApi(http)
         self.transactions = TransactionsApi(http)
         self.dashboard = DashboardApi(http)
         self.integrations = IntegrationsApi(http)
         self.reports = ReportsApi(http)
         self.notifications = NotificationsApi(http)
         self.admin = AdminApi(http)
-        self.advanced = AdvancedApi(http)
         self.analytics = AnalyticsApi(http)
         self.kyc = KycApi(http)
         self.webhooks = WebhooksApi(http)
@@ -997,14 +888,12 @@ class AsyncApi:
         self.auth = AsyncAuthApi(http)
         self.user = AsyncUserApi(http)
         self.exchange = AsyncExchangeApi(http)
-        self.purchases = AsyncPurchasesApi(http)
         self.transactions = AsyncTransactionsApi(http)
         self.dashboard = AsyncDashboardApi(http)
         self.integrations = AsyncIntegrationsApi(http)
         self.reports = AsyncReportsApi(http)
         self.notifications = AsyncNotificationsApi(http)
         self.admin = AsyncAdminApi(http)
-        self.advanced = AsyncAdvancedApi(http)
         self.analytics = AsyncAnalyticsApi(http)
         self.kyc = AsyncKycApi(http)
         self.webhooks = AsyncWebhooksApi(http)

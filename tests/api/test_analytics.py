@@ -3,7 +3,7 @@ import pytest
 
 import api.routes.analytics as an_mod
 import api.services.market_data as md_mod
-from api.models import Purchase, RecurringPurchase, Transaction, utcnow
+from api.models import Purchase, utcnow
 from tests.api.conftest import auth_headers, make_autobuy_purchase, make_history
 
 PRICES = {"BTC": 60000.0, "ETH": 2500.0}
@@ -52,9 +52,6 @@ async def seeded(db, user, binance_key):
         Purchase(user_id=user.id, crypto_symbol="SOL", amount_usd=500, frequency="one_time",
                  purchase_type="autobuy", wallet_address="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
                  blockchain_network="mainnet", next_execution=utcnow()),  # one-time: 0 / month
-        # legacy schedule: no longer part of the projection
-        RecurringPurchase(user_id=user.id, crypto="XRP", amount_usdt=999,
-                          frequency="daily", next_purchase_date=utcnow()),
     ])
     await db.commit()
     return user
@@ -109,7 +106,7 @@ async def test_comparison_and_diversification(seeded, market):
 async def test_recurring_projection(seeded, market):
     async with client() as c:
         r = (await c.get("/api/analytics/recurring", headers=auth_headers(seeded))).json()
-    assert {s["crypto"] for s in r["schedules"]} == {"BTC", "ETH", "SOL"}  # paused excluded, legacy XRP ignored
+    assert {s["crypto"] for s in r["schedules"]} == {"BTC", "ETH", "SOL"}  # paused excluded
     assert {s["purchase_type"] for s in r["schedules"]} == {"autobuy", "dca"}
     by = {s["crypto"]: s for s in r["schedules"]}
     assert by["SOL"]["monthly_usdt"] == 0.0, "one-time purchases add nothing to the recurring projection"

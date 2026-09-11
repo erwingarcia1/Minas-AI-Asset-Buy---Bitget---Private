@@ -36,7 +36,7 @@ await client.login("me@example.com", "Str0ng!Passw0rd");
 const me = await client.me();            // UserProfile
 
 // 3. Schedule a recurring buy (requires verified KYC + a verified exchange key)
-const purchase = await client.purchases.createPurchase({
+const purchase = await client.autoBuy.createPurchase({
   crypto: "BTC",
   amount_usdt: 50,
   frequency: "weekly",                    // daily | weekly | biweekly | monthly
@@ -48,7 +48,7 @@ const stats = await client.dashboard.quickStats();
 
 // 5. Error handling
 try {
-  await client.purchases.getPurchase("does-not-exist");
+  await client.autoBuy.getPurchase("does-not-exist");
 } catch (e) {
   if (e instanceof RateLimitError) console.log(`slow down, retry in ${e.retryAfter}s`);
   else if (e instanceof ApiError) console.log(e.status, e.detail);
@@ -73,11 +73,10 @@ Every API module is exposed as a property with one method per endpoint
 | `client.auth` | register, login, verify, refresh, logout, changePassword |
 | `client.user` | getProfile, updateProfile, getUserById |
 | `client.exchange` | listKeys, addOrUpdateKey, verifyKey, deleteKey |
-| `client.purchases` | listPurchases, createPurchase, getPurchase, updatePurchase, deletePurchase, togglePurchase |
 | `client.transactions` | listTransactions, transactionStats, transactionsByCrypto, transactionsByStatus, getTransaction |
 | `client.dashboard` | dashboard, quickStats, analyticsTimeline |
 | `client.analytics` / `client.reports` | performance, comparison, recurring, volatility / taxSummary, exportPdf |
-| `client.integrations` / `client.notifications` / `client.advanced` / `client.kyc` / `client.admin` | see `src/api.ts` |
+| `client.integrations` / `client.notifications` / `client.kyc` / `client.admin` | see `src/api.ts` |
 
 ### Low-level access
 

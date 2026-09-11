@@ -78,13 +78,19 @@ async def test_verify_invalid_key(db, user, binance_key, monkeypatch, client):
     assert "allowlist" in body["detail"]
 
 
-async def test_executor_refuses_unverified_key(db, user, purchase, binance_key, monkeypatch):
-    from api.services import purchase_service as ps_mod
-    from api.services.purchase_service import PurchaseService
-    from tests.api.test_purchase_service import FakeBinance
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+async def test_executor_refuses_unverified_key(db, user, binance_key):
+    """The Auto-Buy executor never trades on a key the user has not verified."""
+    from datetime import timedelta
+    from sqlalchemy import select
+    from api.models import PurchaseTransaction, utcnow
+    from api.tasks import purchase_scheduler as ps
+    from tests.api.conftest import make_autobuy_purchase
+    from tests.test_purchase_events import RichGateway
     binance_key.verified = False
     await db.commit()
-    tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "failed"
-    assert "not verified" in tx.error_message
+    p = await make_autobuy_purchase(db, user, key=binance_key, next_execution=utcnow() - timedelta(minutes=1))
+    gw = RichGateway()
+    counts = await ps.execute_due_purchases(db, gateway=gw, dry_run=True)
+    assert counts["failed"] == 1 and not hasattr(gw, "calls")
+    tx = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id))).scalar_one()
+    assert tx.status == "failed" and "not verified" in tx.error_message

@@ -89,7 +89,7 @@ builds and tests the app on every change under `frontend/`.
 | `APP_BASE_URL` | ✔ (https) | Only base for links in emails; localhost refused in production |
 | `RESEND_REPLY_TO`, `SUPPORT_EMAIL`, `APP_NAME`, `LOG_RESET_LINKS` | optional | Reply-To (falls back to `SUPPORT_EMAIL`), footer address, product name, dev-only link logging (must be 0 in prod) |
 | `SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`, `SUMSUB_WEBHOOK_SECRET` | for KYC | placeholders are treated as unset |
-| `RATE_LIMIT_ENABLED`, `MAX_BODY_BYTES`, `SCHEDULER_POLL_SECONDS`, `LOG_LEVEL` | optional | sensible defaults |
+| `RATE_LIMIT_ENABLED`, `MAX_BODY_BYTES`, `LOG_LEVEL` | optional | sensible defaults |
 
 ## Email (Resend)
 

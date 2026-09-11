@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import RecurringPurchase, Transaction, User
+from api.models import User
 from api.routes.user import get_current_user
 import api.services.market_data as market_mod
 
@@ -179,15 +179,11 @@ async def volatility(
     suggestion: higher volatility rewards smaller, more frequent buys."""
     from api.models import Purchase
     cryptos = {c for c, _, _ in await _holdings(db, current_user.id)}
-    # scheduled coins: active Auto-Buy purchases (both types) plus any legacy schedules still enabled
+    # scheduled coins: active Auto-Buy purchases (both types)
     cryptos |= {p.crypto_symbol for p in (await db.execute(
         select(Purchase).where(
             Purchase.user_id == current_user.id,
             Purchase.status == "active"))).scalars().all()}
-    cryptos |= {p.crypto for p in (await db.execute(
-        select(RecurringPurchase).where(
-            RecurringPurchase.user_id == current_user.id,
-            RecurringPurchase.enabled.is_(True)))).scalars().all()}
     entries = []
     for crypto in sorted(cryptos):
         vol = await market_mod.market_data.get_volatility_30d(crypto)

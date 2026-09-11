@@ -29,12 +29,13 @@ class APIKeyResponse(TypedDict):
 
 
 class ActivePurchase(TypedDict):
-    """ActivePurchase."""
+    """An active Auto-Buy purchase (either type). Field names are kept from the original schedule shape so existing clients keep working: ``crypto`` is the purchase's crypto_symbol, ``amount_usdt`` its amount_usd and ``next_purchase_date`` its next_execution."""
     id: str
     crypto: str
     amount_usdt: float
     frequency: str
-    next_purchase_date: str
+    next_purchase_date: NotRequired[Optional[str]]
+    purchase_type: NotRequired[str]
 
 
 class AdminTransactionList(TypedDict):
@@ -204,14 +205,6 @@ class KycOverride(TypedDict):
     note: str
 
 
-class LimitOrderCreate(TypedDict):
-    """LimitOrderCreate."""
-    crypto: str
-    amount_usdt: float
-    limit_price: float
-    expiry_days: NotRequired[int]
-
-
 class LoginRequest(TypedDict):
     """LoginRequest."""
     email: str
@@ -231,20 +224,6 @@ class NotificationRow(TypedDict):
     subject: str
     status: str
     created_at: str
-
-
-class OpportunitiesResponse(TypedDict):
-    """OpportunitiesResponse."""
-    price_available: bool
-    opportunities: List[Opportunity]
-
-
-class Opportunity(TypedDict):
-    """Opportunity."""
-    crypto: str
-    kind: str
-    detail: str
-    suggested_next_period_usdt: NotRequired[Optional[float]]
 
 
 class PerformanceResponse(TypedDict):
@@ -297,15 +276,6 @@ class PreferencesResponse(TypedDict):
 class ProfileUpdateRequest(TypedDict):
     """ProfileUpdateRequest."""
     email: NotRequired[Optional[str]]
-
-
-class PurchaseCreate(TypedDict):
-    """PurchaseCreate."""
-    crypto: str
-    exchange: NotRequired[str]
-    amount_usdt: float
-    frequency: str
-    withdrawal_address: NotRequired[Optional[str]]
 
 
 class PurchaseCreateRequest(TypedDict):
@@ -370,29 +340,6 @@ class PurchaseOut(TypedDict):
     latest_transaction: NotRequired[Optional[TransactionOut]]
 
 
-class PurchaseResponse(TypedDict):
-    """PurchaseResponse."""
-    id: str
-    crypto: str
-    exchange: NotRequired[str]
-    amount_usdt: float
-    frequency: str
-    next_purchase_date: str
-    withdrawal_address: NotRequired[Optional[str]]
-    enabled: bool
-    created_at: str
-    updated_at: str
-
-
-class PurchaseUpdate(TypedDict):
-    """PurchaseUpdate."""
-    crypto: NotRequired[Optional[str]]
-    amount_usdt: NotRequired[Optional[float]]
-    frequency: NotRequired[Optional[str]]
-    withdrawal_address: NotRequired[Optional[str]]
-    enabled: NotRequired[Optional[bool]]
-
-
 class PurchaseUpdateRequest(TypedDict):
     """PurchaseUpdateRequest."""
     status: NotRequired[Optional[str]]
@@ -408,34 +355,13 @@ class QuickStats(TypedDict):
     kyc_status: str
 
 
-class RebalanceCreate(TypedDict):
-    """RebalanceCreate."""
-    target_allocations: Dict[str, float]
-    amount_usdt: float
-    frequency: str
-
-
-class RebalancePlan(TypedDict):
-    """RebalancePlan."""
-    frequency: str
-    total_per_period_usdt: float
-    entries: List[RebalancePlanEntry]
-
-
-class RebalancePlanEntry(TypedDict):
-    """RebalancePlanEntry."""
-    crypto: str
-    target_pct: float
-    amount_usdt: float
-    purchase_id: str
-
-
 class RecurringProjection(TypedDict):
     """RecurringProjection."""
     crypto: str
     frequency: str
     amount_usdt: float
     monthly_usdt: float
+    purchase_type: NotRequired[str]
 
 
 class RecurringResponse(TypedDict):
@@ -443,6 +369,7 @@ class RecurringResponse(TypedDict):
     schedules: List[RecurringProjection]
     expected_monthly_usdt: float
     projected_annual_usdt: float
+    note: NotRequired[str]
 
 
 class RefreshRequest(TypedDict):
@@ -539,19 +466,30 @@ class TransactionOut(TypedDict):
 
 
 class TransactionResponse(TypedDict):
-    """TransactionResponse."""
+    """One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id`` keep their historical names for existing clients; ``order_id`` and the withdrawal fields are the new, explicit ones."""
     id: str
-    recurring_purchase_id: NotRequired[Optional[str]]
+    purchase_id: str
     crypto: str
+    purchase_type: str
+    tx_type: str
     amount_crypto: float
     cost_usdt: float
-    binance_order_id: NotRequired[Optional[str]]
     exchange_rate: NotRequired[Optional[float]]
+    exchange: NotRequired[Optional[str]]
+    order_id: NotRequired[Optional[str]]
+    binance_order_id: NotRequired[Optional[str]]
+    fee: NotRequired[Optional[float]]
+    fee_currency: NotRequired[Optional[str]]
+    withdrawal_id: NotRequired[Optional[str]]
+    wallet_address: NotRequired[Optional[str]]
+    blockchain_network: NotRequired[Optional[str]]
+    withdrawal_fee: NotRequired[Optional[float]]
+    withdrawal_fee_currency: NotRequired[Optional[str]]
+    tx_hash: NotRequired[Optional[str]]
     executed_at: NotRequired[Optional[str]]
     status: str
     error_message: NotRequired[Optional[str]]
     created_at: str
-    updated_at: str
 
 
 class TransactionStats(TypedDict):
@@ -570,7 +508,8 @@ class UpcomingPurchase(TypedDict):
     crypto: str
     amount_usdt: float
     frequency: str
-    next_purchase_date: str
+    next_purchase_date: NotRequired[Optional[str]]
+    purchase_type: NotRequired[str]
 
 
 class UserOut(TypedDict):

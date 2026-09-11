@@ -13,7 +13,7 @@
 
 ### Phase 2: Automation ✅ COMPLETE (Sprints 1–2)
 - [x] Purchase execution on Binance (reusing the battle-tested legacy client; due-date idempotency)
-- [x] APScheduler recurring automation (advisory-lock replica safety, no catch-up sprees, 1h failure retry)
+- [x] ~~APScheduler recurring automation~~ retired 2026-09-11: the Auto-Buy `execute_purchases` job (5-minute interval, advisory lock, Redis pause switch, 3 attempts per purchase) is the only executor
 - [x] Email notifications (Resend, fire-and-forget) + KYC via Sumsub (self-serve verification hole closed)
 - [x] Exchange key verification gating the executor
 - [x] Validation hardening (amount bounds, crypto allow-list, per-chain addresses, password policy)
@@ -34,7 +34,7 @@
 - [x] Advanced analytics: live P&L, diversification, spend projections, volatility-based DCA guidance
 
 ### Phase 5: Enterprise Features ✅ COMPLETE (Sprints 5–6)
-- [x] Advanced purchases: limit orders (fail-closed price gates, expiry), DCA bands, one-time buys, spend-neutral volatility-adaptive DCA, rebalancing plans with buy-only drift detection
+- [x] ~~Advanced purchases (limit orders, DCA bands, rebalancing plans)~~ dropped with the legacy system on 2026-09-11; one-time buys live on as the Auto-Buy `one_time` frequency
 - [x] Mobile app implemented (auth, dashboard, purchases, activity, settings; offline cache + queued sync)
 - [x] Admin dashboard: RBAC, stats, user management (suspend/delete/KYC-override with audit), transaction audit + CSV, live alerts, scheduler pause/resume
 - [x] Notifications: Twilio SMS + FCM push (credential-gated), preferences, quiet hours with critical override, audit history

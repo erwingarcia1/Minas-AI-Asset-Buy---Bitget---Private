@@ -5,11 +5,9 @@ import pytest
 from sqlalchemy import select
 
 import api.services.webhook_service as wh_mod
-from api.models import RecurringPurchase, WebhookEndpoint, utcnow
-from api.services import purchase_service as ps_mod
+from api.models import WebhookEndpoint, utcnow
 from api.services.webhook_service import deliver_one, sign
-from tests.api.conftest import auth_headers
-from tests.api.test_purchase_service import FakeBinance
+from tests.api.conftest import auth_headers, make_autobuy_purchase
 
 
 def client():
@@ -37,37 +35,28 @@ class VenueRecorder:
 
 
 async def test_executor_routes_by_purchase_exchange(db, user, monkeypatch):
+    """The Auto-Buy gateway builds the client for the purchase's exchange account:
+    OKX venue, OKX symbol format, decrypted passphrase."""
+    from datetime import timedelta
     from api.routes.exchange import encrypt_value
     from api.models import APIKey
-    from api.services.purchase_service import PurchaseService
-    monkeypatch.setattr(ps_mod, "BinanceClient", VenueRecorder)
+    from api.tasks import purchase_scheduler as ps
+    monkeypatch.setattr(ps, "ExchangeClient", VenueRecorder, raising=False)
+    import api.services.binance_client as bc
+    monkeypatch.setattr(bc, "ExchangeClient", VenueRecorder)
     VenueRecorder.calls = []
-    db.add(APIKey(user_id=user.id, exchange="okx",
-                  encrypted_api_key=encrypt_value("okx-key-0000000000"),
-                  encrypted_api_secret=encrypt_value("okx-sec-0000000000"),
-                  encrypted_passphrase=encrypt_value("okx-passphrase"),
-                  verified=True))
-    p = RecurringPurchase(user_id=user.id, crypto="BTC", exchange="okx",
-                          amount_usdt=100, frequency="weekly",
-                          next_purchase_date=utcnow())
-    db.add(p)
+    key = APIKey(user_id=user.id, exchange="okx",
+                 encrypted_api_key=encrypt_value("okx-key-0000000000"),
+                 encrypted_api_secret=encrypt_value("okx-sec-0000000000"),
+                 encrypted_passphrase=encrypt_value("okx-passphrase"),
+                 verified=True)
+    db.add(key)
     await db.commit()
-    tx = await PurchaseService(db).execute_purchase(user.id, p.id)
-    assert tx.status == "completed"
-    assert VenueRecorder.calls == [("okx", "BTC-USDT", "okx-passphrase")], \
-        "OKX venue, OKX symbol format, decrypted passphrase"
-
-
-async def test_missing_venue_key_fails_cleanly(db, user, binance_key, monkeypatch):
-    from api.services.purchase_service import PurchaseService
-    monkeypatch.setattr(ps_mod, "BinanceClient", VenueRecorder)
-    p = RecurringPurchase(user_id=user.id, crypto="BTC", exchange="bybit",
-                          amount_usdt=50, frequency="weekly",
-                          next_purchase_date=utcnow())
-    db.add(p)
-    await db.commit()
-    tx = await PurchaseService(db).execute_purchase(user.id, p.id)
-    assert tx.status == "failed" and "no bybit API key" in tx.error_message
+    await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100, key=key, purchase_type="dca",
+                                next_execution=utcnow() - timedelta(minutes=1))
+    counts = await ps.execute_due_purchases(db, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    assert counts["executed"] == 1
+    assert VenueRecorder.calls == [("okx", "BTC-USDT", "okx-passphrase")]
 
 
 async def test_okx_key_requires_passphrase(db, user):
@@ -80,18 +69,6 @@ async def test_okx_key_requires_passphrase(db, user):
                           json={"exchange": "okx", "api_key": "x" * 20,
                                 "api_secret": "y" * 20, "passphrase": "p" * 10})
         assert ok.status_code == 201
-
-
-async def test_purchase_create_validates_exchange(db, user):
-    async with client() as c:
-        bad = await c.post("/api/purchases/", headers=auth_headers(user),
-                           json={"crypto": "BTC", "amount_usdt": 50,
-                                 "frequency": "weekly", "exchange": "kraken"})
-        assert bad.status_code == 422
-        ok = await c.post("/api/purchases/", headers=auth_headers(user),
-                          json={"crypto": "BTC", "amount_usdt": 50,
-                                "frequency": "weekly", "exchange": "bitget"})
-        assert ok.status_code == 201 and ok.json()["exchange"] == "bitget"
 
 
 # ---------------------------------------------------------------- webhooks
@@ -158,17 +135,20 @@ async def test_webhook_delivery_retries_5xx_not_4xx(db, user, capture_delivery):
     assert len(delivered) == 1, "client errors are not retried"
 
 
-async def test_purchase_flow_fires_webhooks(db, user, purchase, binance_key,
-                                            capture_delivery, monkeypatch):
+async def test_purchase_flow_fires_webhooks(db, user, binance_key, capture_delivery):
     delivered, _ = capture_delivery
-    from api.services.purchase_service import PurchaseService
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+    from datetime import timedelta
+    from api.tasks import purchase_scheduler as ps
+    from tests.test_purchase_events import RichGateway
     db.add(WebhookEndpoint(user_id=user.id, url="https://example.com/h", secret="s"))
     await db.commit()
-    tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "completed"
+    await make_autobuy_purchase(db, user, key=binance_key, next_execution=utcnow() - timedelta(minutes=1))
+    counts = await ps.execute_due_purchases(db, gateway=RichGateway(), dry_run=True)
+    assert counts["executed"] == 1
     events = [json.loads(r.content)["event"] for r in delivered]
-    assert "purchase.completed" in events
+    assert events == ["purchase.buy_executed", "purchase.withdrawal_sent"]
+    body = json.loads(delivered[-1].content)["data"]
+    assert body["order_id"] == "ORD-1" and body["withdrawal_id"] == "WD-1" and body["dry_run"] is True
 
 
 async def test_integrations_listing(db, user, binance_key):

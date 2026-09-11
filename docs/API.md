@@ -30,9 +30,10 @@ KEY=$(curl -s $BASE/api/exchange/keys -H "$AUTH" -H 'content-type: application/j
   -d '{"exchange":"binance","api_key":"<key>","api_secret":"<secret>"}')
 curl -s -X POST $BASE/api/exchange/keys/$(echo $KEY | jq -r .id)/verify -H "$AUTH"
 
-# 5. Schedule $100 of BTC weekly
-curl -s $BASE/api/purchases/ -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"crypto":"BTC","amount_usdt":100,"frequency":"weekly"}'
+# 5. Buy $100 of BTC weekly and send it to your wallet (Auto-Buy)
+curl -s $BASE/api/v2/purchases -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"crypto_symbol":"BTC","amount_usd":100,"frequency":"weekly","purchase_type":"autobuy",
+       "wallet_address":"bc1q...","blockchain_network":"mainnet","exchange_account_id":"'$(echo $KEY | jq -r .id)'"}'
 
 # 6. Watch it happen
 curl -s $BASE/api/transactions/ -H "$AUTH"
@@ -62,7 +63,6 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 | email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
 | webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
 | exchange (`/api/exchange`) | `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` |
-| purchases (`/api/purchases`) | `POST/GET /` · `GET/PUT/DELETE /{id}` · `PATCH /{id}/toggle` |
 | transactions (`/api/transactions`) | `GET /` · `/{id}` · `/crypto/{crypto}` · `/status/{status}` · `/stats/summary` — every Auto-Buy execution attempt (purchase_transactions): fill price, cost, fees, exchange, order id, and for withdrawals the address, network, fee and tx hash. `status` is pending \| completed \| failed |
 | dashboard (`/api/dashboard`) | `GET /` (active/upcoming = the user's active Auto-Buy purchases, both types; holdings and averages from purchase_transactions) · `/stats` · `/analytics/timeline?days=N` |
 | service | `GET /health` (`schedulers`: pause switch + per-scheduler running/paused, last run, last result, consecutive failures for both the legacy recurring tick and the Auto-Buy job) · `GET /metrics` (Prometheus; keep private) |

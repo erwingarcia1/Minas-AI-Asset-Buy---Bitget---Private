@@ -125,13 +125,19 @@ async def test_password_change_invalidates_old_tokens(db):
             await db.commit()
 
 
-async def test_no_secrets_in_logs(db, user, purchase, binance_key, monkeypatch, caplog):
-    from api.services import purchase_service as ps_mod
-    from api.services.purchase_service import PurchaseService
-    from tests.api.test_purchase_service import FakeBinance
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+async def test_no_secrets_in_logs(db, user, binance_key, monkeypatch, caplog):
+    """A full Auto-Buy execution through the real gateway (exchange stubbed) never logs key material."""
+    from datetime import timedelta
+    from api.models import utcnow
+    from api.services import binance_client as bc
+    from api.tasks import purchase_scheduler as ps
+    from tests.api.conftest import make_autobuy_purchase
+    from tests.test_purchase_scheduler import FakeLegacy
+    monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
+    await make_autobuy_purchase(db, user, key=binance_key, purchase_type="dca",
+                                next_execution=utcnow() - timedelta(minutes=1))
     with caplog.at_level(logging.DEBUG):
-        tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "completed"
+        counts = await ps.execute_due_purchases(db, gateway=ps.ExchangeClientGateway(), dry_run=True)
+    assert counts["executed"] == 1
     assert "test-api-key-000001" not in caplog.text, "plaintext API key leaked into logs"
     assert "test-api-secret-01" not in caplog.text

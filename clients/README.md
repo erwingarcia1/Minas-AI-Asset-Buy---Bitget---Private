@@ -11,7 +11,7 @@ committed OpenAPI spec (`clients/openapi.json`).
 
 Every client provides:
 
-- **Generated types** for all 61 request/response schemas and **one method per endpoint** (65 operations across 16 resource groups: `auth`, `user`, `exchange`, `purchases`, `transactions`, `dashboard`, `analytics`, `reports`, `integrations`, `notifications`, `advanced`, `kyc`, `admin`, ...).
+- **Generated types** for all 71 request/response schemas and **one method per endpoint** (71 operations across 16 resource groups: `auth`, `user`, `exchange`, `v2` (Auto-Buy purchases), `wallets`, `transactions`, `dashboard`, `analytics`, `reports`, `integrations`, `notifications`, `kyc`, `admin`, ...).
 - **Auth helpers**: `register`, `login` (stores tokens), `logout` (revokes), `refreshTokens`, plus transparent single-flight refresh on 401 and an `onTokensChanged` hook for persistence.
 - **Typed errors**: `ApiError`, `AuthenticationError`, `RateLimitError` (with `retryAfter`), `ValidationError` (with per-field `errors`).
 - **Examples** (`examples/basic.*`): register → login → create purchase → list transactions → dashboard stats → refresh → logout.

@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 
-from api.models import Purchase, RecurringPurchase, utcnow
+from api.models import Purchase, utcnow
 from tests.api.conftest import auth_headers, make_autobuy_purchase, make_history
 
 
@@ -30,9 +30,6 @@ async def rich_user(db, user, binance_key):
         Purchase(user_id=user.id, crypto_symbol="DOGE", amount_usd=15, frequency="monthly",
                  purchase_type="dca", wallet_address="DOGEwallet000000000000000000000000",
                  blockchain_network="mainnet", next_execution=utcnow() + timedelta(days=60)),
-        # legacy schedule: must no longer surface on the dashboard
-        RecurringPurchase(user_id=user.id, crypto="LTC", amount_usdt=40,
-                          frequency="weekly", next_purchase_date=utcnow() + timedelta(days=1)),
     ])
     await db.commit()
     return user
@@ -55,7 +52,6 @@ async def test_active_vs_upcoming(client, rich_user):
     upcoming = {p["crypto"] for p in d["upcoming_purchases"]}
     assert active == {"ETH", "DOGE"}, "paused purchases are not active; both autobuy and dca count"
     assert upcoming == {"ETH"}, "only purchases due within 30 days are upcoming"
-    assert "LTC" not in active, "legacy recurring_purchases rows are ignored"
     types = {p["crypto"]: p["purchase_type"] for p in d["active_purchases"]}
     assert types == {"ETH": "autobuy", "DOGE": "dca"}
     assert {p["amount_usdt"] for p in d["active_purchases"]} == {50.0, 15.0}

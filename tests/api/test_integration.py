@@ -8,10 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from api.database import AsyncSessionLocal
-from api.models import APIKey, RecurringPurchase, Transaction, User
-from api.services import purchase_service as ps_mod
-from api.services.recurring_scheduler import RecurringScheduler
-from tests.api.test_purchase_service import FakeBinance
+from api.models import APIKey, Purchase, PurchaseTransaction, User
 
 PW = "Str0ng!passw0rd"
 
@@ -88,27 +85,29 @@ async def test_full_journey_to_executed_purchase(db, monkeypatch):
         await cleanup(db, email)
 
 
-async def test_user_delete_cascades_everything(db, user, purchase, binance_key):
-    tx = Transaction(user_id=user.id, recurring_purchase_id=purchase.id, crypto="BTC",
-                     amount_crypto=0.001, cost_usdt=50.0, status="completed")
-    db.add(tx)
-    await db.commit()
-    ids = (user.id, purchase.id, binance_key.id, tx.id)
+async def test_user_delete_cascades_everything(db, user, binance_key):
+    from tests.api.conftest import make_autobuy_purchase, make_history
+    p = await make_autobuy_purchase(db, user, key=binance_key)
+    tx = await make_history(db, user, purchase=p, amount_crypto=0.001, cost_usd=50.0)
+    ids = (user.id, p.id, binance_key.id, tx.id)
     await db.delete(user)
     await db.commit()
     assert (await db.execute(select(User).where(User.id == ids[0]))).scalar_one_or_none() is None
-    assert (await db.execute(select(RecurringPurchase).where(
-        RecurringPurchase.id == ids[1]))).scalar_one_or_none() is None
+    assert (await db.execute(select(Purchase).where(Purchase.id == ids[1]))).scalar_one_or_none() is None
     assert (await db.execute(select(APIKey).where(APIKey.id == ids[2]))).scalar_one_or_none() is None
-    assert (await db.execute(select(Transaction).where(
-        Transaction.id == ids[3]))).scalar_one_or_none() is None
+    assert (await db.execute(select(PurchaseTransaction).where(
+        PurchaseTransaction.id == ids[3]))).scalar_one_or_none() is None
 
 
-async def test_concurrent_users_are_isolated(db, monkeypatch):
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+async def test_concurrent_users_are_isolated(db):
+    """One executor run serves every user's due purchase; each attempt lands on
+    its own purchase with its own amount, and a second concurrent run finds
+    the run lock held and does nothing."""
     from api.models import utcnow
     from api.routes.exchange import encrypt_value
-    from api.services.purchase_service import PurchaseService
+    from api.tasks import purchase_scheduler as ps
+    from tests.api.conftest import make_autobuy_purchase
+    from tests.test_purchase_events import RichGateway
 
     users = []
     for i in range(2):
@@ -116,25 +115,27 @@ async def test_concurrent_users_are_isolated(db, monkeypatch):
                  password_hash="x", kyc_status="verified")
         db.add(u)
         await db.flush()
-        db.add(APIKey(user_id=u.id, exchange="binance",
-                      encrypted_api_key=encrypt_value(f"key-user-{i}-000000"),
-                      encrypted_api_secret=encrypt_value(f"sec-user-{i}-000000"),
-                      verified=True))
-        p = RecurringPurchase(user_id=u.id, crypto="BTC", amount_usdt=100 + i,
-                              frequency="weekly", next_purchase_date=utcnow())
-        db.add(p)
+        key = APIKey(user_id=u.id, exchange="binance",
+                     encrypted_api_key=encrypt_value(f"key-user-{i}-000000"),
+                     encrypted_api_secret=encrypt_value(f"sec-user-{i}-000000"),
+                     verified=True)
+        db.add(key)
+        await db.commit()
+        p = await make_autobuy_purchase(db, u, amount_usd=100 + i, key=key, purchase_type="dca",
+                                        next_execution=utcnow())
         users.append((u, p))
-    await db.commit()
 
-    async def run(u, p):
+    async def run():
         async with AsyncSessionLocal() as s:
-            return await PurchaseService(s).execute_purchase(u.id, p.id, dry_run=True)
+            return await ps.execute_due_purchases(s, gateway=RichGateway(), dry_run=True)
 
     try:
-        tx_a, tx_b = await asyncio.gather(run(*users[0]), run(*users[1]))
-        assert tx_a.user_id == users[0][0].id and tx_b.user_id == users[1][0].id
-        assert tx_a.cost_usdt == 100.0 and tx_b.cost_usdt == 101.0
-        assert tx_a.id != tx_b.id
+        a, b = await asyncio.gather(run(), run())
+        assert sorted([a["executed"], b["executed"]]) == [0, 2], "one run does the work, the other is lock-skipped"
+        for u, p in users:
+            tx = (await db.execute(select(PurchaseTransaction).where(
+                PurchaseTransaction.purchase_id == p.id))).scalar_one()
+            assert tx.status == "success" and tx.cost_usd == p.amount_usd
     finally:
         for u, _ in users:
             fresh = (await db.execute(select(User).where(User.id == u.id))).scalar_one_or_none()

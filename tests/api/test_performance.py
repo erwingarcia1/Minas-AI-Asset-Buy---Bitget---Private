@@ -10,10 +10,10 @@ import time
 import uuid
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, select, text
 
 from api.database import AsyncSessionLocal
-from api.models import RecurringPurchase, Transaction, User, utcnow
+from api.models import User, utcnow
 from tests.api.conftest import auth_headers
 
 perf = pytest.mark.skipif(not os.getenv("RUN_PERF"), reason="set RUN_PERF=1 to run")
@@ -73,45 +73,47 @@ async def test_dashboard_latency_under_concurrency(db, user):
 
 
 @perf
-async def test_scheduler_handles_1000_due_purchases(db, monkeypatch):
-    """A backlog of 1000 due schedules executes exactly once each, no dupes."""
+async def test_scheduler_handles_1000_due_purchases(db):
+    """A backlog of 1000 due Auto-Buy purchases executes exactly once each, no dupes."""
     from api.routes.exchange import encrypt_value
-    from api.models import APIKey
-    from api.services import purchase_service as ps_mod
-    from api.services.recurring_scheduler import RecurringScheduler
-    from tests.api.test_purchase_service import FakeBinance
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+    from api.models import APIKey, Purchase, PurchaseTransaction
+    from api.tasks import purchase_scheduler as ps
+    from tests.test_purchase_events import RichGateway
 
     u = User(email=f"bulk-{uuid.uuid4().hex[:8]}@example.com",
              password_hash="x", kyc_status="verified")
     db.add(u)
     await db.flush()
-    db.add(APIKey(user_id=u.id, exchange="binance",
-                  encrypted_api_key=encrypt_value("bulk-key-0000000000"),
-                  encrypted_api_secret=encrypt_value("bulk-sec-0000000000"),
-                  verified=True))
+    key = APIKey(user_id=u.id, exchange="binance",
+                 encrypted_api_key=encrypt_value("bulk-key-0000000000"),
+                 encrypted_api_secret=encrypt_value("bulk-sec-0000000000"),
+                 verified=True)
+    db.add(key)
+    await db.flush()
     cryptos = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LTC"]
     for i in range(1000):
-        db.add(RecurringPurchase(user_id=u.id, crypto=cryptos[i % len(cryptos)],
-                                 amount_usdt=10 + i, frequency="weekly",
-                                 next_purchase_date=utcnow()))
+        db.add(Purchase(user_id=u.id, exchange_account_id=key.id, crypto_symbol=cryptos[i % len(cryptos)],
+                        amount_usd=10 + i, frequency="weekly", purchase_type="dca",
+                        wallet_address="0x52908400098527886E0F7030069857D2E4169EE7", blockchain_network="mainnet",
+                        status="active", next_execution=utcnow()))
     await db.commit()
 
     t0 = time.perf_counter()
-    processed = await RecurringScheduler(dry_run=True).tick()
+    gw = RichGateway()
+    executed = 0
+    for _ in range(20):  # each run takes at most BATCH_LIMIT rows
+        counts = await ps.execute_due_purchases(db, gateway=gw, dry_run=True)
+        executed += counts["executed"]
+        if counts["executed"] == 0:
+            break
     elapsed = time.perf_counter() - t0
-    print(f"\nscheduler tick over 1000 due purchases: {elapsed:.1f}s")
     try:
-        assert processed == 1000
-        count = (await db.execute(
-            select(Transaction).where(Transaction.user_id == u.id))).scalars().all()
-        assert len(count) == 1000, "each due purchase must produce exactly one transaction"
-        still_due = (await db.execute(select(RecurringPurchase).where(
-            RecurringPurchase.user_id == u.id,
-            RecurringPurchase.next_purchase_date <= utcnow()))).scalars().all()
-        assert still_due == [], "every schedule must have advanced"
+        assert executed == 1000
+        n = (await db.execute(select(func.count(PurchaseTransaction.id))
+                              .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
+                              .where(Purchase.user_id == u.id))).scalar_one()
+        assert n == 1000, "every purchase executed exactly once"
+        assert elapsed < 120, f"1000 executions took {elapsed:.1f}s"
     finally:
-        fresh = (await db.execute(select(User).where(User.id == u.id))).scalar_one_or_none()
-        if fresh:
-            await db.delete(fresh)
-            await db.commit()
+        await db.delete(u)
+        await db.commit()

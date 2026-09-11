@@ -38,7 +38,7 @@ await client.login("me@example.com", "Str0ng!Passw0rd");
 const me = await client.me();
 
 // 3. Schedule a recurring buy (requires verified KYC + a verified exchange key)
-const purchase = await client.purchases.createPurchase({
+const purchase = await client.autoBuy.createPurchase({
   crypto: "BTC", amount_usdt: 50, frequency: "weekly",
 });
 
@@ -48,7 +48,7 @@ const stats = await client.dashboard.quickStats();
 
 // 5. Errors
 try {
-  await client.purchases.getPurchase("does-not-exist");
+  await client.autoBuy.getPurchase("does-not-exist");
 } catch (e) {
   if (e instanceof RateLimitError) console.log(`retry in ${e.retryAfter}s`);
   else if (e instanceof ApiError) console.log(e.status, e.detail);
@@ -63,7 +63,7 @@ Restore a session with `new AutoBuyClient({ baseUrl, tokens })` or `client.setTo
 
 `client.auth`, `client.user`, `client.exchange`, `client.purchases`,
 `client.transactions`, `client.dashboard`, `client.analytics`, `client.reports`,
-`client.integrations`, `client.notifications`, `client.advanced`, `client.kyc`,
+`client.integrations`, `client.notifications`, `client.kyc`,
 `client.admin` — one method per endpoint, see `src/api.d.ts`.
 
 Anything else: `client.transport.request(method, path, { body, query, auth })`.

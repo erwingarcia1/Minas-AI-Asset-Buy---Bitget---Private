@@ -309,14 +309,3 @@ def test_build_scheduler_sets_grace_and_listener():
     assert job is not None and job.misfire_grace_time == 120 and job.max_instances == 1 and job.coalesce
     assert job.trigger.interval.total_seconds() == 300
     assert any(cb is ps.job_event_listener and (mask & EVENT_JOB_MISSED) for cb, mask in sched._listeners)
-
-
-async def test_recurring_tick_has_grace():
-    from api.services.recurring_scheduler import RecurringScheduler
-    rs = RecurringScheduler(poll_seconds=60)
-    rs.start()
-    try:
-        tick = [j for j in rs._scheduler.get_jobs() if j.name.endswith("tick")][0]
-        assert tick.misfire_grace_time == 60
-    finally:
-        rs.stop()

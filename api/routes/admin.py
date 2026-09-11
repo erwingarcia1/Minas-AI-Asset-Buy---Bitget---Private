@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import Purchase, RecurringPurchase, User
+from api.models import Purchase, User
 from api.routes.user import UTCModel, get_current_user
 
 logger = logging.getLogger("autobuy.admin")
@@ -238,12 +238,17 @@ async def force_retry(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Make a schedule due immediately (next scheduler tick executes it)."""
-    p = (await db.execute(select(RecurringPurchase).where(
-        RecurringPurchase.id == purchase_id))).scalar_one_or_none()
+    """Make an Auto-Buy purchase due immediately (the next execute_purchases
+    run picks it up). A failed purchase is re-armed: status back to active and
+    the attempt counter reset."""
+    p = (await db.execute(select(Purchase).where(Purchase.id == purchase_id))).scalar_one_or_none()
     if p is None:
         raise HTTPException(status_code=404, detail="Purchase not found")
-    p.next_purchase_date = datetime.now(timezone.utc)
+    if p.status in ("cancelled", "completed"):
+        raise HTTPException(status_code=409, detail=f"purchase is {p.status}")
+    p.status = "active"
+    p.failure_count = 0
+    p.next_execution = datetime.now(timezone.utc)
     await db.commit()
     audit(admin, "purchase_force_retry", purchase_id=str(purchase_id))
 
@@ -275,14 +280,10 @@ def _severity_for_failures(fails: Optional[int]) -> str:
 @router.get("/alerts", response_model=List[AlertItem])
 async def alerts(admin: User = Depends(require_admin),
                  db: AsyncSession = Depends(get_db)):
-    """Live evaluation of the docs/ALERTING.md conditions the app can see,
-    for BOTH schedulers: the legacy recurring tick (``scheduler_*``) and the
-    Auto-Buy execute_purchases job (``autobuy_*``). Heartbeats come from Redis,
-    so they describe whichever worker actually ran, not the one answering."""
+    """Live evaluation of the docs/ALERTING.md conditions the app can see for
+    the Auto-Buy execute_purchases job. Heartbeats come from Redis, so they
+    describe whichever worker actually ran, not the one answering."""
     from api.services import scheduler_state
-    from api.services.metrics import (
-        active_purchases_total, scheduler_consecutive_failures)
-    from api.services.recurring_scheduler import scheduler
     from api.tasks.purchase_scheduler import INTERVAL_MINUTES, MISFIRE_GRACE_SECONDS
 
     now = datetime.now(timezone.utc)
@@ -295,34 +296,13 @@ async def alerts(admin: User = Depends(require_admin),
             name="schedulers_paused",
             severity="warning" if pause["paused"] else "ok",
             value="paused" if pause["paused"] else "running",
-            detail=("Admin pause switch for both schedulers"
+            detail=("Admin pause switch for the Auto-Buy job"
                     + (f"; paused by {pause['by']} since {pause['since']}" if pause["paused"] else ""))))
     except scheduler_state.PauseStateUnavailable:
         pause = {"paused": None}
         items.append(AlertItem(
             name="schedulers_paused", severity="critical", value="unknown",
-            detail="Redis unreadable: both schedulers fail closed and skip every run until it is back"))
-
-    # -- legacy recurring scheduler --
-    rec = await scheduler_state.status("recurring")
-    fails = rec["consecutive_failures"]
-    if fails is None:
-        fails = int(scheduler_consecutive_failures._value.get())
-    items.append(AlertItem(
-        name="scheduler_consecutive_failures",
-        severity=_severity_for_failures(fails),
-        value=str(fails),
-        detail="Legacy recurring scheduler: consecutive failed purchase executions (critical at 5)"))
-
-    last = _parse_iso(rec["last_run_at"]) or scheduler.last_tick_at
-    stalled = (last is None or now - last > timedelta(minutes=5))
-    items.append(AlertItem(
-        name="scheduler_tick",
-        severity=("critical" if scheduler.running and stalled and last is not None
-                  else "warning" if not scheduler.running or last is None else "ok"),
-        value=last.isoformat() if last else "never",
-        detail=("Legacy recurring scheduler: last tick (critical if silent >5m while running)"
-                + (f"; last result {rec['last_result']}" if rec["last_result"] else ""))))
+            detail="Redis unreadable: the Auto-Buy job fails closed and skips every run until it is back"))
 
     # -- Auto-Buy execute_purchases job --
     ab = await scheduler_state.status("autobuy")
@@ -360,10 +340,6 @@ async def alerts(admin: User = Depends(require_admin),
         severity="warning" if failed_24h > 10 else "ok",
         value=str(failed_24h), detail="Auto-Buy job: failed execution attempts in the last 24h"))
 
-    active = int(active_purchases_total._value.get())
-    items.append(AlertItem(
-        name="active_purchases", severity="ok", value=str(active),
-        detail="Legacy recurring scheduler: enabled schedules at last tick"))
     return items
 
 

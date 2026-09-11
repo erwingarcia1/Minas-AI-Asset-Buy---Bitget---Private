@@ -36,7 +36,7 @@ client.login("me@example.com", "Str0ng!Passw0rd")
 me = client.me()                                   # UserProfile (TypedDict)
 
 # 3. Schedule a recurring buy (requires verified KYC + a verified exchange key)
-purchase = client.purchases.create_purchase({
+purchase = client.auto_buy.create_purchase({
     "crypto": "BTC",
     "amount_usdt": 50,
     "frequency": "weekly",                         # daily | weekly | biweekly | monthly
@@ -48,7 +48,7 @@ stats = client.dashboard.quick_stats()
 
 # 5. Errors
 try:
-    client.purchases.get_purchase("does-not-exist")
+    client.auto_buy.get_purchase("does-not-exist")
 except RateLimitError as e:
     print("retry in", e.retry_after, "s")
 except ApiError as e:
@@ -73,7 +73,7 @@ Restore a session with `AutoBuyClient(url, tokens=saved)` or `client.set_tokens(
 
 `client.auth`, `client.user`, `client.exchange`, `client.purchases`,
 `client.transactions`, `client.dashboard`, `client.analytics`, `client.reports`,
-`client.integrations`, `client.notifications`, `client.advanced`, `client.kyc`,
+`client.integrations`, `client.notifications`, `client.kyc`,
 `client.admin` — one method per endpoint (snake_case of the API handler name),
 see `autobuy_client/api.py`. Request bodies are plain dicts typed as the
 matching `TypedDict` from `autobuy_client.types`.

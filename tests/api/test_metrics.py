@@ -53,15 +53,18 @@ async def test_metrics_and_health_not_self_counted():
                         {"path": "/health"}) is None
 
 
-async def test_transaction_metric_recorded(db, user, purchase, binance_key, monkeypatch):
-    from api.services import purchase_service as ps_mod
-    from api.services.purchase_service import PurchaseService
-    from tests.api.test_purchase_service import FakeBinance
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+async def test_transaction_metric_recorded(db, user, binance_key):
+    from datetime import timedelta
+    from api.models import utcnow
+    from api.tasks import purchase_scheduler as ps
+    from tests.api.conftest import make_autobuy_purchase
+    from tests.test_purchase_events import RichGateway
+    await make_autobuy_purchase(db, user, key=binance_key, next_execution=utcnow() - timedelta(minutes=1))
     before = m.transactions_total.labels("completed", "BTC")._value.get()
-    tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "completed"
+    counts = await ps.execute_due_purchases(db, gateway=RichGateway(), dry_run=True)
+    assert counts["executed"] == 1
     assert m.transactions_total.labels("completed", "BTC")._value.get() == before + 1
+    assert m.active_purchases_total._value.get() >= 1
 
 
 def test_binance_call_timer_counts_errors():
@@ -76,21 +79,33 @@ def test_binance_call_timer_counts_errors():
     assert m.binance_api_calls_total.labels("get_price", "error")._value.get() == before_err + 1
 
 
-async def test_consecutive_failure_alert_fires(db, user, purchase, binance_key, monkeypatch, caplog):
-    """Simulated outage: repeated failures raise the gauge and emit CRITICAL."""
+async def test_consecutive_failure_alert_fires(db, user, binance_key, monkeypatch, caplog):
+    """Simulated outage: five Auto-Buy runs that fail every due purchase raise
+    the gauge to 5, emit CRITICAL and page Slack."""
     import logging
-    from api.services import purchase_service as ps_mod
-    from api.services.recurring_scheduler import RecurringScheduler
-    from tests.api.test_purchase_service import FailingBinance
-    from datetime import datetime, timedelta, timezone
-    monkeypatch.setattr(ps_mod, "BinanceClient", FailingBinance)
-    sched = RecurringScheduler(dry_run=True)
-    with caplog.at_level(logging.CRITICAL, logger="autobuy.scheduler"):
+    from datetime import timedelta
+    from api.models import utcnow
+    from api.services import scheduler_state, slack_service
+    from api.tasks import purchase_scheduler as ps
+    from tests.api.conftest import make_autobuy_purchase
+    from tests.test_purchase_events import BuyFails
+    await scheduler_state.bump_failures("autobuy", ok=True)   # start from 0
+    slack = []
+
+    async def fake_slack(text):
+        slack.append(text)
+        return True
+    monkeypatch.setattr(slack_service, "send_slack", fake_slack)
+    p = await make_autobuy_purchase(db, user, key=binance_key, next_execution=utcnow() - timedelta(minutes=1))
+    with caplog.at_level(logging.CRITICAL, logger="autobuy.tasks.purchases"):
         for _ in range(5):
-            purchase.next_purchase_date = datetime.now(timezone.utc) - timedelta(minutes=1)
+            p.status, p.failure_count, p.next_execution = "active", 0, utcnow() - timedelta(minutes=1)
             await db.commit()
-            assert await sched.tick() == 1
-    assert sched.consecutive_failures == 5
+            counts = await ps.execute_due_purchases(db, gateway=BuyFails(), dry_run=True)
+            assert counts["failed"] == 1
+    assert await scheduler_state.consecutive_failures("autobuy") == 5
     assert m.scheduler_consecutive_failures._value.get() == 5
     assert any("ALERT" in rec.message for rec in caplog.records), \
         "5 consecutive failures must emit a CRITICAL alert log"
+    assert any("5 consecutive" in t for t in slack)
+    await scheduler_state.bump_failures("autobuy", ok=True)

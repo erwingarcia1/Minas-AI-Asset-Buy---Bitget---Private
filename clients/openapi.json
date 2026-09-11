@@ -4,8 +4,7 @@
     "title": "AutoBuy Crypto API",
     "description": "Automated cryptocurrency purchasing platform: schedule recurring USDT buys (daily/weekly/biweekly/monthly), executed on Binance with KYC gating, encrypted key storage, and full transaction history.\n\nAll protected endpoints expect `Authorization: Bearer <access token>`. Validation failures return **422**; rate limits return **429** with `Retry-After`. Full guides: `docs/API.md`, `docs/DEPLOYMENT.md`.",
     "contact": {
-      "name": "Minas AutoBuy support",
-      "email": "support@minastech.ca"
+      "name": "Minas AutoBuy support"
     },
     "license": {
       "name": "MIT"
@@ -26,7 +25,7 @@
     "/health": {
       "get": {
         "summary": "Health Check",
-        "description": "Health check endpoint for monitoring.",
+        "description": "Health check endpoint for monitoring.\n\n``schedulers`` reports the admin pause switch and the Auto-Buy\nexecute_purchases job from the Redis heartbeat, so the values are the same\nwhichever worker answers: running / paused, last run time, last result\n(``ok`` | ``failed`` | ``error`` | ``skipped_paused``), last counts and the\nconsecutive-failure count.",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
@@ -717,284 +716,13 @@
         }
       }
     },
-    "/api/purchases/": {
-      "get": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "List Purchases",
-        "description": "List all of the authenticated user's recurring purchases.",
-        "operationId": "list_purchases_api_purchases__get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PurchaseResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Purchases Api Purchases  Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Create Purchase",
-        "description": "Create a recurring purchase; the first buy is scheduled for tomorrow.",
-        "operationId": "create_purchase_api_purchases__post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PurchaseCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PurchaseResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/purchases/{purchase_id}": {
-      "get": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Get Purchase",
-        "description": "Get one recurring purchase by id.",
-        "operationId": "get_purchase_api_purchases__purchase_id__get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "purchase_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Purchase Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PurchaseResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Update Purchase",
-        "description": "Update fields of a recurring purchase.",
-        "operationId": "update_purchase_api_purchases__purchase_id__put",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "purchase_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Purchase Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PurchaseUpdate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PurchaseResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Delete Purchase",
-        "description": "Delete a recurring purchase.",
-        "operationId": "delete_purchase_api_purchases__purchase_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "purchase_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Purchase Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/purchases/{purchase_id}/toggle": {
-      "patch": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Toggle Purchase",
-        "description": "Flip a recurring purchase between enabled and disabled.",
-        "operationId": "toggle_purchase_api_purchases__purchase_id__toggle_patch",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "purchase_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Purchase Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PurchaseResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/transactions/": {
       "get": {
         "tags": [
           "transactions"
         ],
         "summary": "List Transactions",
-        "description": "List the authenticated user's transactions, newest first, paginated.",
+        "description": "List the authenticated user's execution attempts, newest first, paginated.",
         "operationId": "list_transactions_api_transactions__get",
         "security": [
           {
@@ -1072,7 +800,7 @@
           "transactions"
         ],
         "summary": "Transaction Stats",
-        "description": "Aggregate statistics over the user's transactions.",
+        "description": "Aggregate statistics over the user's attempts (invested = successful buys).",
         "operationId": "transaction_stats_api_transactions_stats_summary_get",
         "responses": {
           "200": {
@@ -1099,7 +827,7 @@
           "transactions"
         ],
         "summary": "Transactions By Crypto",
-        "description": "List the user's transactions for one cryptocurrency.",
+        "description": "List the user's attempts for one cryptocurrency.",
         "operationId": "transactions_by_crypto_api_transactions_crypto__crypto__get",
         "security": [
           {
@@ -1174,7 +902,7 @@
           "transactions"
         ],
         "summary": "Transactions By Status",
-        "description": "List the user's transactions with a given status.",
+        "description": "List the user's attempts with a given status.",
         "operationId": "transactions_by_status_api_transactions_status__tx_status__get",
         "security": [
           {
@@ -1249,7 +977,7 @@
           "transactions"
         ],
         "summary": "Get Transaction",
-        "description": "Get one transaction by id.",
+        "description": "Get one attempt by id.",
         "operationId": "get_transaction_api_transactions__transaction_id__get",
         "security": [
           {
@@ -1298,7 +1026,7 @@
           "dashboard"
         ],
         "summary": "Dashboard",
-        "description": "Main dashboard: holdings, active schedules, upcoming buys, monthly average.",
+        "description": "Main dashboard: holdings, active Auto-Buy purchases (both ``autobuy``\nand ``dca`` types), the ones due within 30 days, and the monthly average.",
         "operationId": "dashboard_api_dashboard__get",
         "responses": {
           "200": {
@@ -1352,7 +1080,7 @@
           "dashboard"
         ],
         "summary": "Analytics Timeline",
-        "description": "Daily transaction totals for the last `days` days (zero-filled).",
+        "description": "Daily successful-buy totals for the last `days` days (zero-filled).",
         "operationId": "analytics_timeline_api_dashboard_analytics_timeline_get",
         "security": [
           {
@@ -2198,7 +1926,7 @@
           "user"
         ],
         "summary": "All Transactions",
-        "description": "Cross-user transaction audit log, newest first.",
+        "description": "Every user's Auto-Buy execution attempts (purchase_transactions), newest\nfirst; filter by status (pending | completed | failed) and/or user.",
         "operationId": "all_transactions_api_admin_transactions_get",
         "security": [
           {
@@ -2293,7 +2021,7 @@
           "user"
         ],
         "summary": "Force Retry",
-        "description": "Make a schedule due immediately (next scheduler tick executes it).",
+        "description": "Make an Auto-Buy purchase due immediately (the next execute_purchases\nrun picks it up). A failed purchase is re-armed: status back to active and\nthe attempt counter reset.",
         "operationId": "force_retry_api_admin_purchases__purchase_id__force_retry_post",
         "security": [
           {
@@ -2335,7 +2063,7 @@
           "user"
         ],
         "summary": "Alerts",
-        "description": "Live evaluation of the docs/ALERTING.md conditions the app can see.",
+        "description": "Live evaluation of the docs/ALERTING.md conditions the app can see for\nthe Auto-Buy execute_purchases job. Heartbeats come from Redis, so they\ndescribe whichever worker actually ran, not the one answering.",
         "operationId": "alerts_api_admin_alerts_get",
         "responses": {
           "200": {
@@ -2366,7 +2094,7 @@
           "user"
         ],
         "summary": "Pause Scheduler",
-        "description": "Emergency stop: no purchases execute until resumed (or restart).",
+        "description": "Emergency stop for BOTH schedulers (legacy recurring tick and the\nAuto-Buy execute_purchases job) in every worker. Sets a switch in Redis\nthat each run checks first; it survives API restarts until resumed.\nWhile paused, runs log that they were skipped and report\n``skipped_paused`` in /health.",
         "operationId": "pause_scheduler_api_admin_scheduler_pause_post",
         "responses": {
           "204": {
@@ -2386,132 +2114,11 @@
           "user"
         ],
         "summary": "Resume Scheduler",
-        "description": "Restart the paused scheduler.",
+        "description": "Clear the pause switch; both schedulers execute again from their next run.",
         "operationId": "resume_scheduler_api_admin_scheduler_resume_post",
         "responses": {
           "204": {
             "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/advanced/limit-order": {
-      "post": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Create Limit Order",
-        "description": "One-shot buy that executes only once the price is at or below\n`limit_price`; checked hourly, expires unexecuted after `expiry_days`.",
-        "operationId": "create_limit_order_api_advanced_limit_order_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LimitOrderCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PurchaseResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/advanced/rebalance": {
-      "post": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Create Rebalance Plan",
-        "description": "Split a per-period budget across target allocations as a set of\nrebalancing schedules. Per-coin slices below the 10 USDT venue minimum\nare rejected outright rather than silently dropped.",
-        "operationId": "create_rebalance_plan_api_advanced_rebalance_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RebalanceCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RebalancePlan"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/advanced/opportunities": {
-      "get": {
-        "tags": [
-          "purchases"
-        ],
-        "summary": "Opportunities",
-        "description": "Buy-only rebalancing drift analysis: compares current market-value\nweights to the active plan's targets and suggests skewing the next\nperiod's budget toward underweights. Never suggests selling.",
-        "operationId": "opportunities_api_advanced_opportunities_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpportunitiesResponse"
-                }
-              }
-            }
           }
         },
         "security": [
@@ -2581,7 +2188,7 @@
           "dashboard"
         ],
         "summary": "Recurring",
-        "description": "Spend projections from the enabled schedules.",
+        "description": "Spend projection from the user's active Auto-Buy purchases (both\n``autobuy`` and ``dca`` types). One-time purchases contribute nothing to\nthe recurring monthly figure. Estimates only.",
         "operationId": "recurring_api_analytics_recurring_get",
         "responses": {
           "200": {
@@ -3490,9 +3097,21 @@
             "title": "Frequency"
           },
           "next_purchase_date": {
-            "type": "string",
-            "format": "date-time",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Next Purchase Date"
+          },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type",
+            "default": "autobuy"
           }
         },
         "type": "object",
@@ -3500,10 +3119,10 @@
           "id",
           "crypto",
           "amount_usdt",
-          "frequency",
-          "next_purchase_date"
+          "frequency"
         ],
-        "title": "ActivePurchase"
+        "title": "ActivePurchase",
+        "description": "An active Auto-Buy purchase (either type). Field names are kept from the\noriginal schedule shape so existing clients keep working: ``crypto`` is\nthe purchase's crypto_symbol, ``amount_usdt`` its amount_usd and\n``next_purchase_date`` its next_execution."
       },
       "AdminTransactionList": {
         "properties": {
@@ -4155,39 +3774,6 @@
         ],
         "title": "KycOverride"
       },
-      "LimitOrderCreate": {
-        "properties": {
-          "crypto": {
-            "type": "string",
-            "title": "Crypto"
-          },
-          "amount_usdt": {
-            "type": "number",
-            "maximum": 1000000.0,
-            "minimum": 10.0,
-            "title": "Amount Usdt"
-          },
-          "limit_price": {
-            "type": "number",
-            "exclusiveMinimum": 0.0,
-            "title": "Limit Price"
-          },
-          "expiry_days": {
-            "type": "integer",
-            "maximum": 365.0,
-            "minimum": 1.0,
-            "title": "Expiry Days",
-            "default": 30
-          }
-        },
-        "type": "object",
-        "required": [
-          "crypto",
-          "amount_usdt",
-          "limit_price"
-        ],
-        "title": "LimitOrderCreate"
-      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -4259,61 +3845,6 @@
           "created_at"
         ],
         "title": "NotificationRow"
-      },
-      "OpportunitiesResponse": {
-        "properties": {
-          "price_available": {
-            "type": "boolean",
-            "title": "Price Available"
-          },
-          "opportunities": {
-            "items": {
-              "$ref": "#/components/schemas/Opportunity"
-            },
-            "type": "array",
-            "title": "Opportunities"
-          }
-        },
-        "type": "object",
-        "required": [
-          "price_available",
-          "opportunities"
-        ],
-        "title": "OpportunitiesResponse"
-      },
-      "Opportunity": {
-        "properties": {
-          "crypto": {
-            "type": "string",
-            "title": "Crypto"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail"
-          },
-          "suggested_next_period_usdt": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Suggested Next Period Usdt"
-          }
-        },
-        "type": "object",
-        "required": [
-          "crypto",
-          "kind",
-          "detail"
-        ],
-        "title": "Opportunity"
       },
       "PerformanceResponse": {
         "properties": {
@@ -4604,50 +4135,6 @@
         },
         "type": "object",
         "title": "ProfileUpdateRequest"
-      },
-      "PurchaseCreate": {
-        "properties": {
-          "crypto": {
-            "type": "string",
-            "maxLength": 10,
-            "minLength": 2,
-            "title": "Crypto"
-          },
-          "exchange": {
-            "type": "string",
-            "title": "Exchange",
-            "default": "binance"
-          },
-          "amount_usdt": {
-            "type": "number",
-            "maximum": 1000000.0,
-            "minimum": 10.0,
-            "title": "Amount Usdt"
-          },
-          "frequency": {
-            "type": "string",
-            "title": "Frequency"
-          },
-          "withdrawal_address": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Withdrawal Address"
-          }
-        },
-        "type": "object",
-        "required": [
-          "crypto",
-          "amount_usdt",
-          "frequency"
-        ],
-        "title": "PurchaseCreate"
       },
       "PurchaseCreateRequest": {
         "properties": {
@@ -5003,140 +4490,6 @@
         ],
         "title": "PurchaseOut"
       },
-      "PurchaseResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "crypto": {
-            "type": "string",
-            "title": "Crypto"
-          },
-          "exchange": {
-            "type": "string",
-            "title": "Exchange",
-            "default": "binance"
-          },
-          "amount_usdt": {
-            "type": "number",
-            "title": "Amount Usdt"
-          },
-          "frequency": {
-            "type": "string",
-            "title": "Frequency"
-          },
-          "next_purchase_date": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Next Purchase Date"
-          },
-          "withdrawal_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Withdrawal Address"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "crypto",
-          "amount_usdt",
-          "frequency",
-          "next_purchase_date",
-          "enabled",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "PurchaseResponse"
-      },
-      "PurchaseUpdate": {
-        "properties": {
-          "crypto": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 10,
-                "minLength": 2
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Crypto"
-          },
-          "amount_usdt": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1000000.0,
-                "minimum": 10.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amount Usdt"
-          },
-          "frequency": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Frequency"
-          },
-          "withdrawal_address": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Withdrawal Address"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          }
-        },
-        "type": "object",
-        "title": "PurchaseUpdate"
-      },
       "PurchaseUpdateRequest": {
         "properties": {
           "status": {
@@ -5206,88 +4559,6 @@
         ],
         "title": "QuickStats"
       },
-      "RebalanceCreate": {
-        "properties": {
-          "target_allocations": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "type": "object",
-            "title": "Target Allocations"
-          },
-          "amount_usdt": {
-            "type": "number",
-            "maximum": 1000000.0,
-            "minimum": 10.0,
-            "title": "Amount Usdt"
-          },
-          "frequency": {
-            "type": "string",
-            "title": "Frequency"
-          }
-        },
-        "type": "object",
-        "required": [
-          "target_allocations",
-          "amount_usdt",
-          "frequency"
-        ],
-        "title": "RebalanceCreate"
-      },
-      "RebalancePlan": {
-        "properties": {
-          "frequency": {
-            "type": "string",
-            "title": "Frequency"
-          },
-          "total_per_period_usdt": {
-            "type": "number",
-            "title": "Total Per Period Usdt"
-          },
-          "entries": {
-            "items": {
-              "$ref": "#/components/schemas/RebalancePlanEntry"
-            },
-            "type": "array",
-            "title": "Entries"
-          }
-        },
-        "type": "object",
-        "required": [
-          "frequency",
-          "total_per_period_usdt",
-          "entries"
-        ],
-        "title": "RebalancePlan"
-      },
-      "RebalancePlanEntry": {
-        "properties": {
-          "crypto": {
-            "type": "string",
-            "title": "Crypto"
-          },
-          "target_pct": {
-            "type": "number",
-            "title": "Target Pct"
-          },
-          "amount_usdt": {
-            "type": "number",
-            "title": "Amount Usdt"
-          },
-          "purchase_id": {
-            "type": "string",
-            "title": "Purchase Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "crypto",
-          "target_pct",
-          "amount_usdt",
-          "purchase_id"
-        ],
-        "title": "RebalancePlanEntry"
-      },
       "RecurringProjection": {
         "properties": {
           "crypto": {
@@ -5305,6 +4576,11 @@
           "monthly_usdt": {
             "type": "number",
             "title": "Monthly Usdt"
+          },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type",
+            "default": "autobuy"
           }
         },
         "type": "object",
@@ -5332,6 +4608,11 @@
           "projected_annual_usdt": {
             "type": "number",
             "title": "Projected Annual Usdt"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": "Estimates only, not financial advice; past performance doesn't guarantee future results."
           }
         },
         "type": "object",
@@ -5735,21 +5016,22 @@
             "format": "uuid",
             "title": "Id"
           },
-          "recurring_purchase_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recurring Purchase Id"
+          "purchase_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Purchase Id"
           },
           "crypto": {
             "type": "string",
             "title": "Crypto"
+          },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type"
+          },
+          "tx_type": {
+            "type": "string",
+            "title": "Tx Type"
           },
           "amount_crypto": {
             "type": "number",
@@ -5758,6 +5040,39 @@
           "cost_usdt": {
             "type": "number",
             "title": "Cost Usdt"
+          },
+          "exchange_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Rate"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
           },
           "binance_order_id": {
             "anyOf": [
@@ -5770,7 +5085,7 @@
             ],
             "title": "Binance Order Id"
           },
-          "exchange_rate": {
+          "fee": {
             "anyOf": [
               {
                 "type": "number"
@@ -5779,7 +5094,84 @@
                 "type": "null"
               }
             ],
-            "title": "Exchange Rate"
+            "title": "Fee"
+          },
+          "fee_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee Currency"
+          },
+          "withdrawal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Id"
+          },
+          "wallet_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Address"
+          },
+          "blockchain_network": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockchain Network"
+          },
+          "withdrawal_fee": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Fee"
+          },
+          "withdrawal_fee_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Fee Currency"
+          },
+          "tx_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Hash"
           },
           "executed_at": {
             "anyOf": [
@@ -5812,24 +5204,22 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
           }
         },
         "type": "object",
         "required": [
           "id",
+          "purchase_id",
           "crypto",
+          "purchase_type",
+          "tx_type",
           "amount_crypto",
           "cost_usdt",
           "status",
-          "created_at",
-          "updated_at"
+          "created_at"
         ],
-        "title": "TransactionResponse"
+        "title": "TransactionResponse",
+        "description": "One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id``\nkeep their historical names for existing clients; ``order_id`` and the\nwithdrawal fields are the new, explicit ones."
       },
       "TransactionStats": {
         "properties": {
@@ -5889,9 +5279,21 @@
             "title": "Frequency"
           },
           "next_purchase_date": {
-            "type": "string",
-            "format": "date-time",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Next Purchase Date"
+          },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type",
+            "default": "autobuy"
           }
         },
         "type": "object",
@@ -5899,8 +5301,7 @@
           "id",
           "crypto",
           "amount_usdt",
-          "frequency",
-          "next_purchase_date"
+          "frequency"
         ],
         "title": "UpcomingPurchase"
       },
@@ -6360,10 +5761,6 @@
     {
       "name": "exchange",
       "description": "Exchange API keys: encrypted at rest, masked on read, verified against Binance."
-    },
-    {
-      "name": "purchases",
-      "description": "Recurring purchase schedules (DCA). Amounts in USDT; executed by the scheduler."
     },
     {
       "name": "transactions",

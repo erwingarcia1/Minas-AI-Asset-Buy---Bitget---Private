@@ -1,9 +1,6 @@
 import pytest
 
-from api.services import purchase_service as ps_mod
 from api.services.email_service import EmailService, email_service
-from api.services.purchase_service import PurchaseService
-from tests.api.test_purchase_service import FakeBinance
 
 
 class CapturingEmail(EmailService):
@@ -24,37 +21,48 @@ class ExplodingEmail(EmailService):
 
 @pytest.fixture
 def capture(monkeypatch):
+    import api.services.email_service as es_mod
     svc = CapturingEmail()
-    monkeypatch.setattr(ps_mod, "email_service", svc)
+    monkeypatch.setattr(es_mod, "email_service", svc)
     return svc
 
 
-async def test_completed_purchase_email(db, user, purchase, binance_key, monkeypatch, capture):
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
-    tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "completed"
-    assert len(capture.sent) == 1
-    mail = capture.sent[0]
+async def _run(db, user, key, gateway, **purchase):
+    from datetime import timedelta
+    from api.models import utcnow
+    from api.tasks import purchase_scheduler as ps
+    from tests.api.conftest import make_autobuy_purchase
+    await make_autobuy_purchase(db, user, key=key, next_execution=utcnow() - timedelta(minutes=1), **purchase)
+    return await ps.execute_due_purchases(db, gateway=gateway, dry_run=True)
+
+
+async def test_completed_purchase_email(db, user, binance_key, capture):
+    from tests.test_purchase_events import RichGateway
+    counts = await _run(db, user, binance_key, RichGateway(), purchase_type="dca", amount_usd=100)
+    assert counts["executed"] == 1
+    mails = [m for m in capture.sent if m["template"] == "purchase"]
+    assert len(mails) == 1
+    mail = mails[0]
     assert mail["to"] == user.email
-    assert mail["subject"].startswith("✓ Purchase complete")
-    assert "BTC" in mail["subject"] and "50000.00" in mail["text"]
-    assert tx.binance_order_id in mail["text"]
+    assert mail["subject"].startswith("[DRY RUN] ✓ Purchase complete") and "BTC" in mail["subject"]
+    assert "50000.00" in mail["text"] and "ORD-1" in mail["text"] and "held on the exchange" in mail["text"]
 
 
-async def test_failed_purchase_email(db, user, purchase, capture):
-    # no API key on file -> failed tx -> failure email
-    tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "failed"
-    mail = capture.sent[0]
-    assert mail["subject"].startswith("✗ Purchase failed")
-    assert "no binance API key" in mail["text"]
+async def test_failed_purchase_email(db, user, binance_key, capture):
+    from tests.test_purchase_events import BuyFails
+    counts = await _run(db, user, binance_key, BuyFails())
+    assert counts["failed"] == 1
+    mail = [m for m in capture.sent if m["template"] == "purchase"][0]
+    assert mail["subject"].startswith("[DRY RUN] ✗ Purchase failed")
+    assert "MIN_NOTIONAL" in mail["text"] and "Attempt 1/3" in mail["text"]
 
 
-async def test_email_failure_never_breaks_purchase(db, user, purchase, binance_key, monkeypatch):
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
-    monkeypatch.setattr(ps_mod, "email_service", ExplodingEmail())
-    tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "completed", "email outage must not fail the purchase"
+async def test_email_failure_never_breaks_purchase(db, user, binance_key, monkeypatch):
+    import api.services.email_service as es_mod
+    from tests.test_purchase_events import RichGateway
+    monkeypatch.setattr(es_mod, "email_service", ExplodingEmail())
+    counts = await _run(db, user, binance_key, RichGateway())
+    assert counts["executed"] == 1, "email outage must not fail the purchase"
 
 
 async def test_kyc_emails():

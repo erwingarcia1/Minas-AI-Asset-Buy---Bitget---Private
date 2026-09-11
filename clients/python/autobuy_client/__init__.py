@@ -4,7 +4,9 @@
 
     client = AutoBuyClient("http://localhost:8000")
     client.login("me@example.com", "Str0ng!Passw0rd")
-    purchase = client.purchases.create_purchase({"crypto": "BTC", "amount_usdt": 50, "frequency": "weekly"})
+    purchase = client.auto_buy.create_purchase({"crypto_symbol": "BTC", "amount_usd": 50, "frequency": "weekly",
+                                               "wallet_address": "bc1q...", "blockchain_network": "mainnet",
+                                               "exchange_account_id": "<api key id>", "purchase_type": "autobuy"})
 
 An ``AsyncAutoBuyClient`` with the same surface is available for asyncio code.
 Resource groups and types are generated from the API's OpenAPI spec.
@@ -19,9 +21,9 @@ from . import types
 from ._http import AsyncTransport, SyncTransport, TokenPair, TokensCallback
 from .api import Api, AsyncApi
 from .errors import ApiError, AuthenticationError, AutoBuyError, RateLimitError, ValidationError
-from .types import PurchaseCreate, PurchaseResponse, TokenResponse, UserOut, UserProfile
+from .types import PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse, UserOut, UserProfile
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 __all__ = [
     "AutoBuyClient", "AsyncAutoBuyClient", "Api", "AsyncApi", "types",
     "ApiError", "AuthenticationError", "AutoBuyError", "RateLimitError", "ValidationError",
@@ -42,14 +44,12 @@ class AutoBuyClient:
         self.auth = api.auth
         self.user = api.user
         self.exchange = api.exchange
-        self.purchases = api.purchases
         self.transactions = api.transactions
         self.dashboard = api.dashboard
         self.integrations = api.integrations
         self.reports = api.reports
         self.notifications = api.notifications
         self.admin = api.admin
-        self.advanced = api.advanced
         self.analytics = api.analytics
         self.kyc = api.kyc
         self.webhooks = api.webhooks
@@ -105,9 +105,9 @@ class AutoBuyClient:
         """``GET /api/user/profile`` — the authenticated user."""
         return self.user.get_profile()
 
-    def create_purchase(self, body: PurchaseCreate) -> PurchaseResponse:
-        """Convenience wrapper around ``purchases.create_purchase``."""
-        return self.purchases.create_purchase(body)
+    def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
+        """Convenience wrapper around ``auto_buy.create_purchase`` (``POST /api/v2/purchases``)."""
+        return self.auto_buy.create_purchase(body)
 
 
 class AsyncAutoBuyClient:
@@ -123,14 +123,12 @@ class AsyncAutoBuyClient:
         self.auth = api.auth
         self.user = api.user
         self.exchange = api.exchange
-        self.purchases = api.purchases
         self.transactions = api.transactions
         self.dashboard = api.dashboard
         self.integrations = api.integrations
         self.reports = api.reports
         self.notifications = api.notifications
         self.admin = api.admin
-        self.advanced = api.advanced
         self.analytics = api.analytics
         self.kyc = api.kyc
         self.webhooks = api.webhooks
@@ -177,5 +175,5 @@ class AsyncAutoBuyClient:
     async def me(self) -> UserProfile:
         return await self.user.get_profile()
 
-    async def create_purchase(self, body: PurchaseCreate) -> PurchaseResponse:
-        return await self.purchases.create_purchase(body)
+    async def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
+        return await self.auto_buy.create_purchase(body)

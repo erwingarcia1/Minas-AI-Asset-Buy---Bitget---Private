@@ -3,7 +3,7 @@
  *
  *   const client = new AutoBuyClient({ baseUrl: "http://localhost:8000" });
  *   await client.login("me@example.com", "Str0ng!Passw0rd");
- *   const purchase = await client.purchases.createPurchase({ crypto: "BTC", amount_usdt: 50, frequency: "weekly" });
+ *   const purchase = await client.autoBuy.createPurchase({ crypto_symbol: "BTC", amount_usd: 50, frequency: "weekly", wallet_address: "bc1q...", blockchain_network: "mainnet", exchange_account_id: "<api key id>", purchase_type: "autobuy" });
  */
 import { buildApi } from "./api.js";
 import { FetchTransport } from "./http.js";
@@ -21,14 +21,12 @@ export class AutoBuyClient {
     this.auth = api.auth;
     this.user = api.user;
     this.exchange = api.exchange;
-    this.purchases = api.purchases;
     this.transactions = api.transactions;
     this.dashboard = api.dashboard;
     this.integrations = api.integrations;
     this.reports = api.reports;
     this.notifications = api.notifications;
     this.admin = api.admin;
-    this.advanced = api.advanced;
     this.analytics = api.analytics;
     this.kyc = api.kyc;
     this.webhooks = api.webhooks;
@@ -90,12 +88,12 @@ export class AutoBuyClient {
   }
 
   /**
-   * Convenience wrapper around `purchases.createPurchase`.
+   * Convenience wrapper around `autoBuy.createPurchase` (`POST /api/v2/purchases`).
    * @param {import('./types.js').PurchaseCreate} body
    * @returns {Promise<import('./types.js').PurchaseResponse>}
    */
   createPurchase(body) {
-    return this.purchases.createPurchase(body);
+    return this.autoBuy.createPurchase(body);
   }
 }
 

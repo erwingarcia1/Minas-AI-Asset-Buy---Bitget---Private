@@ -1,6 +1,5 @@
 import pytest
 
-from api.models import Transaction
 from tests.api.conftest import make_autobuy_purchase, make_history
 from api.services import email_campaigns as camp
 from api.services.email_templates import TEMPLATES, render
@@ -62,18 +61,6 @@ async def test_milestone_crossing(db, user, binance_key, monkeypatch):
     quiet = await make_history(db, user, purchase=p, amount_crypto=0.001, cost_usd=50.0)
     await camp.on_buy_executed(db, user, quiet, p)
     assert len(capture.sent) == 1
-
-
-async def test_legacy_after_purchase_completed_still_works_for_the_legacy_executor(db, user, purchase, monkeypatch):
-    capture = CapturingEmail()
-    monkeypatch.setattr(camp, "email_service", capture)
-    tx = Transaction(user_id=user.id, recurring_purchase_id=purchase.id, crypto="BTC",
-                     amount_crypto=0.001, cost_usdt=100.0, exchange_rate=50000.0,
-                     binance_order_id="1", status="completed")
-    db.add(tx)
-    await db.commit()
-    await camp.after_purchase_completed(db, user, tx)
-    assert len(capture.sent) == 1 and "first automated purchase" in capture.sent[0]["subject"]
 
 
 async def test_welcome_sent_on_register(db, monkeypatch):

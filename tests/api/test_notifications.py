@@ -122,23 +122,24 @@ async def test_preferences_routes_and_validation(db, user, channels, monkeypatch
         assert hist["total"] >= 3
 
 
-async def test_large_purchase_is_critical_sms(db, user, purchase, binance_key,
-                                              channels, monkeypatch):
+async def test_large_purchase_is_critical_sms(db, user, binance_key, channels, monkeypatch):
     class NightDT(datetime):
         @classmethod
         def now(cls, tz=None):
             return datetime(2026, 9, 1, 23, 30, tzinfo=timezone.utc)
     monkeypatch.setattr(nf_mod, "datetime", NightDT)
-    from api.services import purchase_service as ps_mod
-    from api.services.purchase_service import PurchaseService
-    from tests.api.test_purchase_service import FakeBinance
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+    from datetime import timedelta
+    from api.models import utcnow
+    from api.tasks import purchase_scheduler as ps
+    from tests.api.conftest import make_autobuy_purchase
+    from tests.test_purchase_events import RichGateway
     user.phone_number = "+14155550123"
     user.notification_preferences = Preferences(sms_enabled=True).to_json()
-    purchase.amount_usdt = 1500.0  # over the large-transaction threshold
     await db.commit()
-    tx = await PurchaseService(db).execute_purchase(user.id, purchase.id)
-    assert tx.status == "completed"
+    await make_autobuy_purchase(db, user, key=binance_key, amount_usd=1500.0,   # over the large-transaction threshold
+                                purchase_type="dca", next_execution=utcnow() - timedelta(minutes=1))
+    counts = await ps.execute_due_purchases(db, gateway=RichGateway(), dry_run=True)
+    assert counts["executed"] == 1
     sms = [s for s in channels.sent if s[0] == "sms"]
     assert sms, "large transactions page through quiet hours"
-    assert "1500.00 USDT" in sms[0][2]
+    assert "1500.00 USD" in sms[0][2]

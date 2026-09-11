@@ -18,12 +18,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     print("✓ Database initialized")
     if settings.scheduler_enabled:
-        from api.services.recurring_scheduler import scheduler
-        scheduler.poll_seconds = settings.scheduler_poll_seconds
-        scheduler.dry_run = settings.autobuy_dry_run
-        scheduler.start()
-        print(f"✓ Scheduler started (dry_run={settings.autobuy_dry_run})")
-        # Auto-Buy purchases (buy + withdraw to wallet): APScheduler, every 5 minutes
+        # Auto-Buy purchases: APScheduler, every 5 minutes (+ weekly digest cron)
         import logging as _logging
         import os as _os
         from api.tasks.purchase_scheduler import build_scheduler
@@ -32,16 +27,16 @@ async def lifespan(app: FastAPI):
         job = app.state.autobuy_scheduler.get_job("execute_purchases")
         _logging.getLogger("autobuy.tasks.purchases").info(
             "Auto-Buy purchase scheduler started (pid=%s, every 5 minutes, first run %s, "
-            "misfire_grace_time=%ss)", _os.getpid(), job.next_run_time, job.misfire_grace_time)
-        print("✓ Auto-Buy purchase scheduler started (every 5 minutes)")
+            "misfire_grace_time=%ss, dry_run=%s)", _os.getpid(), job.next_run_time, job.misfire_grace_time,
+            settings.autobuy_dry_run)
+        print(f"✓ Auto-Buy purchase scheduler started (every 5 minutes, dry_run={settings.autobuy_dry_run})")
     yield
     # Shutdown
     if settings.scheduler_enabled:
-        from api.services.recurring_scheduler import scheduler
-        scheduler.stop()
         autobuy = getattr(app.state, "autobuy_scheduler", None)
         if autobuy is not None:
             autobuy.shutdown(wait=False)
+            app.state.autobuy_scheduler = None
     await close_db()
     print("✓ Database closed")
 
@@ -50,7 +45,6 @@ OPENAPI_TAGS = [
     {"name": "user", "description": "Profile management. `kyc_status` is read-only here — it is owned by the KYC flow."},
     {"name": "kyc", "description": "Sumsub identity verification: widget token, status sync, review webhook."},
     {"name": "exchange", "description": "Exchange API keys: encrypted at rest, masked on read, verified against Binance."},
-    {"name": "purchases", "description": "Recurring purchase schedules (DCA). Amounts in USDT; executed by the scheduler."},
     {"name": "transactions", "description": "Execution history with pagination, filters, and aggregate statistics."},
     {"name": "dashboard", "description": "Holdings, upcoming purchases, and investment analytics."},
     {"name": "webhooks", "description": "Inbound provider callbacks."},
@@ -111,47 +105,29 @@ app.add_middleware(
 async def health_check(request: Request):
     """Health check endpoint for monitoring.
 
-    ``scheduler`` is the legacy recurring tick as seen by this worker (kept
-    for existing monitors). ``schedulers`` reports both schedulers from the
-    Redis heartbeats, so the values are the same whichever worker answers:
-    the admin pause switch, and per scheduler running/paused, last run time,
-    last result (``ok`` | ``failed`` | ``error`` | ``skipped_paused``) and the
+    ``schedulers`` reports the admin pause switch and the Auto-Buy
+    execute_purchases job from the Redis heartbeat, so the values are the same
+    whichever worker answers: running / paused, last run time, last result
+    (``ok`` | ``failed`` | ``error`` | ``skipped_paused``), last counts and the
     consecutive-failure count.
     """
     from api.services import scheduler_state
-    from api.services.recurring_scheduler import scheduler
     from api.tasks.purchase_scheduler import INTERVAL_MINUTES
     try:
         pause = await scheduler_state.pause_info()
     except scheduler_state.PauseStateUnavailable:
         pause = {"paused": None, "since": None, "by": None}
-    recurring = await scheduler_state.status("recurring")
     autobuy = await scheduler_state.status("autobuy")
     autobuy_sched = getattr(request.app.state, "autobuy_scheduler", None)
     return {
         "status": "healthy",
         "environment": settings.api_env,
         "version": "1.0.0",
-        "scheduler": {
-            "running": scheduler.running,
-            "dry_run": scheduler.dry_run,
-            "last_tick_at": scheduler.last_tick_at.isoformat() if scheduler.last_tick_at else None,
-        },
+        "dry_run": settings.autobuy_dry_run,
         "schedulers": {
-            "paused": pause["paused"],           # None = Redis unreadable (both fail closed)
+            "paused": pause["paused"],           # None = Redis unreadable (the job fails closed)
             "paused_since": pause["since"],
             "paused_by": pause["by"],
-            "recurring": {
-                "running": scheduler.running,
-                "paused": pause["paused"],
-                "dry_run": scheduler.dry_run,
-                "poll_seconds": scheduler.poll_seconds,
-                "last_run_at": recurring["last_run_at"]
-                    or (scheduler.last_tick_at.isoformat() if scheduler.last_tick_at else None),
-                "last_result": recurring["last_result"],
-                "last_detail": recurring["last_detail"],
-                "consecutive_failures": recurring["consecutive_failures"],
-            },
             "autobuy": {
                 "running": bool(autobuy_sched is not None and autobuy_sched.running),
                 "paused": pause["paused"],
@@ -186,12 +162,11 @@ async def root():
         "openapi_schema": "/openapi.json"
     }
 
-from api.routes import auth, dashboard, exchange, purchases, transactions, user
+from api.routes import auth, dashboard, exchange, transactions, user
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(user.router, prefix="/api/user", tags=["user"])
 app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
-app.include_router(purchases.router, prefix="/api/purchases", tags=["purchases"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 from api.routes import integrations
@@ -202,8 +177,6 @@ from api.routes import notifications
 app.include_router(notifications.router, prefix="/api/notifications", tags=["user"])
 from api.routes import admin
 app.include_router(admin.router, prefix="/api/admin", tags=["user"])
-from api.routes import advanced
-app.include_router(advanced.router, prefix="/api/advanced", tags=["purchases"])
 from api.routes import analytics
 app.include_router(analytics.router, prefix="/api/analytics", tags=["dashboard"])
 from api.routes import kyc

@@ -103,6 +103,8 @@ export const auth = {
 };
 
 export const dashboard = { get: () => cachedGet<Dashboard>("/api/dashboard/") };
+// NOT SUPPORTED: /api/purchases (legacy schedules) was retired on 2026-09-11; see mobile/README.md.
+// Rebuild against /api/v2/purchases (exchange account + wallet + network required).
 export const purchases = { list: () => cachedGet<RecurringPurchase[]>("/api/purchases/") };
 export const transactions = {
   list: (limit = 50) => cachedGet<TransactionList>(`/api/transactions/?limit=${limit}`),

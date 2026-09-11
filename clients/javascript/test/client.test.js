@@ -57,14 +57,16 @@ test("register -> login -> profile attaches bearer token", async () => {
 });
 
 test("create purchase sends JSON body and parses typed response", async () => {
-  const srv = mockServer().on("POST", "/api/purchases/", ({ body }) =>
-    json({ id: "p1", ...body, is_active: true, next_purchase_date: "2026-09-15T00:00:00Z", created_at: "x", exchange: "binance" }, 201));
+  const srv = mockServer().on("POST", "/api/v2/purchases", () =>
+    json({ purchase_id: "p1", status: "active", next_execution: "2026-09-15T00:00:00Z" }, 201));
   const client = new AutoBuyClient({ baseUrl: "http://api.test", fetch: srv.fetch, tokens: TOKENS });
-  const p = await client.purchases.createPurchase({ crypto: "BTC", amount_usdt: 50, frequency: "weekly" });
-  assert.equal(p.id, "p1");
-  assert.equal(p.crypto, "BTC");
+  const body = { crypto_symbol: "BTC", amount_usd: 50, frequency: "weekly", wallet_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+                 blockchain_network: "mainnet", exchange_account_id: "k1", purchase_type: "autobuy" };
+  const p = await client.autoBuy.createPurchase(body);
+  assert.equal(p.purchase_id, "p1");
+  assert.equal(p.status, "active");
   assert.equal(srv.calls[0].headers["content-type"], "application/json");
-  assert.deepEqual(srv.calls[0].body, { crypto: "BTC", amount_usdt: 50, frequency: "weekly" });
+  assert.deepEqual(srv.calls[0].body, body);
 });
 
 test("list transactions encodes query params and skips undefined", async () => {
@@ -123,19 +125,20 @@ test("429 raises RateLimitError with retryAfter", async () => {
 });
 
 test("422 raises ValidationError with field errors", async () => {
-  const srv = mockServer().on("POST", "/api/purchases/", () =>
-    json({ detail: [{ loc: ["body", "amount_usdt"], msg: "ensure this value is >= 10", type: "value_error" }] }, 422));
+  const srv = mockServer().on("POST", "/api/v2/purchases", () =>
+    json({ detail: [{ loc: ["body", "amount_usd"], msg: "ensure this value is >= 10", type: "value_error" }] }, 422));
   const client = new AutoBuyClient({ baseUrl: "http://api.test", fetch: srv.fetch, tokens: TOKENS });
   await assert.rejects(
-    client.createPurchase({ crypto: "BTC", amount_usdt: 1, frequency: "weekly" }),
-    (e) => e instanceof ValidationError && e.errors[0].loc[1] === "amount_usdt",
+    client.createPurchase({ crypto_symbol: "BTC", amount_usd: 1, frequency: "weekly", wallet_address: "x",
+                            blockchain_network: "mainnet", exchange_account_id: "k1", purchase_type: "autobuy" }),
+    (e) => e instanceof ValidationError && e.errors[0].loc[1] === "amount_usd",
   );
 });
 
 test("other errors raise ApiError with detail", async () => {
-  const srv = mockServer().on("GET", "/api/purchases/nope", () => json({ detail: "Purchase not found" }, 404));
+  const srv = mockServer().on("GET", "/api/v2/purchases/nope", () => json({ detail: "Purchase not found" }, 404));
   const client = new AutoBuyClient({ baseUrl: "http://api.test", fetch: srv.fetch, tokens: TOKENS });
-  await assert.rejects(client.purchases.getPurchase("nope"), (e) => e instanceof ApiError && e.detail === "Purchase not found" && !(e instanceof RateLimitError));
+  await assert.rejects(client.autoBuy.getPurchase("nope"), (e) => e instanceof ApiError && e.detail === "Purchase not found" && !(e instanceof RateLimitError));
 });
 
 test("logout revokes the refresh token and clears state", async () => {
@@ -149,10 +152,10 @@ test("logout revokes the refresh token and clears state", async () => {
 test("health check is unauthenticated and 204/empty bodies resolve to undefined", async () => {
   const srv = mockServer()
     .on("GET", "/health", () => json({ status: "healthy" }))
-    .on("DELETE", "/api/purchases/p1", () => new Response(null, { status: 204 }));
+    .on("DELETE", "/api/v2/purchases/p1", () => new Response(null, { status: 204 }));
   const client = new AutoBuyClient({ baseUrl: "http://api.test", fetch: srv.fetch, tokens: TOKENS });
   const h = await client.system.healthCheck();
   assert.equal(h.status, "healthy");
   assert.equal(srv.calls[0].headers.authorization, undefined);
-  assert.equal(await client.purchases.deletePurchase("p1"), undefined);
+  assert.equal(await client.autoBuy.cancelPurchase("p1"), undefined);
 });

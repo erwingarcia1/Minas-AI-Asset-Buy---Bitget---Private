@@ -30,7 +30,7 @@ from calendar import monthrange
 from datetime import datetime, timedelta
 from typing import Optional, Protocol
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import NullPool
@@ -190,6 +190,8 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
     try:
         if account is None:
             raise ExecutionError("exchange account no longer exists")
+        if not account.verified:
+            raise ExecutionError(f"{account.exchange} API key not verified — verify it under Exchange settings")
         result = await asyncio.to_thread(gateway.execute, account, purchase, dry_run)
         record_fill(result)
         tx.status = "success"
@@ -286,6 +288,9 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
             logger.info("auto-buy run skipped: another worker holds the run lock (pid=%s)", os.getpid())
             return counts
         try:
+            from api.services.metrics import active_purchases_total
+            active_purchases_total.set((await db.execute(
+                select(func.count(Purchase.id)).where(Purchase.status == "active"))).scalar_one())
             q_start = time.perf_counter()
             due = await find_due_purchases(db, now)
             logger.info("auto-buy run: %d due purchase(s) found in %.0f ms (db connect + query)",
@@ -313,8 +318,31 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
     # the lock reports; a run with failures and no success counts as failed).
     ok = not (counts["failed"] and not counts["executed"])
     await scheduler_state.record_run("autobuy", "ok" if ok else "failed", counts=counts)
-    await scheduler_state.bump_failures("autobuy", ok)
+    await _register_run_result(ok, started)
     return counts
+
+
+FAILURE_ALERT_THRESHOLD = 5
+
+
+async def _register_run_result(ok: bool, started: float) -> None:
+    """Consecutive-failure counter (Redis + Prometheus gauge) and the CRITICAL
+    alert (log + Slack) when it reaches FAILURE_ALERT_THRESHOLD."""
+    from api.services import scheduler_state
+    from api.services.metrics import scheduler_consecutive_failures, scheduler_job_duration_seconds
+    scheduler_job_duration_seconds.labels("execute_purchases").observe(time.perf_counter() - started)
+    fails = await scheduler_state.bump_failures("autobuy", ok)
+    if fails >= 0:
+        scheduler_consecutive_failures.set(fails)
+    if fails == FAILURE_ALERT_THRESHOLD:
+        logger.critical("ALERT: %d consecutive Auto-Buy runs failed every due purchase -- check exchange "
+                        "connectivity, key validity, balances and withdrawal permissions", fails)
+        try:
+            from api.services.slack_service import send_slack
+            await send_slack(f":rotating_light: AutoBuy: {fails} consecutive execute_purchases runs failed "
+                             "every due purchase — see the runbook (docs/ALERTING.md)")
+        except Exception:
+            logger.exception("slack alert failed")
 
 
 async def _run_once() -> dict:

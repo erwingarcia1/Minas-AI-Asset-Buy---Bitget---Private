@@ -17,16 +17,19 @@ class RichGateway:
 
     def __init__(self, fail_withdrawal=False):
         self.fail_withdrawal = fail_withdrawal
+        self.n = 0   # ids are ORD-1/WD-1 for the first fill, ORD-2/WD-2 for the next... (exchange_tx_id is unique)
 
     def execute(self, account, purchase, dry_run):
-        fill = {"order_id": "ORD-1", "amount_executed": purchase.amount_usd / 50_000, "fill_price": 50_000.0,
+        self.n += 1
+        oid, wid = f"ORD-{self.n}", f"WD-{self.n}"
+        fill = {"order_id": oid, "amount_executed": purchase.amount_usd / 50_000, "fill_price": 50_000.0,
                 "cost_usd": purchase.amount_usd, "fee": None, "fee_currency": None}
         if purchase.purchase_type == "dca":
-            return {**fill, "exchange_tx_id": "ORD-1", "tx_type": "accumulation", "withdrawal_id": None,
+            return {**fill, "exchange_tx_id": oid, "tx_type": "accumulation", "withdrawal_id": None,
                     "withdrawal_fee": None, "withdrawal_fee_currency": None, "tx_hash": None}
         if self.fail_withdrawal:
             raise ps.ExecutionError("WITHDRAW_UNSUPPORTED: exchange said no", stage="withdraw", fill=fill)
-        return {**fill, "exchange_tx_id": "WD-1", "tx_type": "withdrawal", "withdrawal_id": "WD-1",
+        return {**fill, "exchange_tx_id": wid, "tx_type": "withdrawal", "withdrawal_id": wid,
                 "withdrawal_fee": 0.0001, "withdrawal_fee_currency": "BTC", "tx_hash": "0xhash"}
 
 

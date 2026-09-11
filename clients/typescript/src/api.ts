@@ -21,26 +21,19 @@ import type {
   IntegrationInfo,
   KeyVerifyResponse,
   KycOverride,
-  LimitOrderCreate,
   LoginRequest,
   LogoutRequest,
-  OpportunitiesResponse,
   PerformanceResponse,
   PlatformStats,
   PreferencesPayload,
   PreferencesResponse,
   ProfileUpdateRequest,
-  PurchaseCreate,
   PurchaseCreateRequest,
   PurchaseCreatedOut,
   PurchaseDetailOut,
   PurchaseOut,
-  PurchaseResponse,
-  PurchaseUpdate,
   PurchaseUpdateRequest,
   QuickStats,
-  RebalanceCreate,
-  RebalancePlan,
   RecurringResponse,
   RefreshRequest,
   RegisterRequest,
@@ -179,42 +172,6 @@ export class ExchangeApi {
   /** Delete Key — `DELETE /api/exchange/keys/{key_id}` */
   deleteKey(keyId: string): Promise<unknown> {
     return this.http.request<unknown>("DELETE", "/api/exchange/keys/" + encodeURIComponent(String(keyId)), { auth: true });
-  }
-
-}
-
-/** `purchases` endpoints. */
-export class PurchasesApi {
-  constructor(private readonly http: HttpTransport) {}
-
-  /** List Purchases — `GET /api/purchases/` */
-  listPurchases(): Promise<PurchaseResponse[]> {
-    return this.http.request<PurchaseResponse[]>("GET", "/api/purchases/", { auth: true });
-  }
-
-  /** Create Purchase — `POST /api/purchases/` */
-  createPurchase(body: PurchaseCreate): Promise<PurchaseResponse> {
-    return this.http.request<PurchaseResponse>("POST", "/api/purchases/", { body, auth: true });
-  }
-
-  /** Get Purchase — `GET /api/purchases/{purchase_id}` */
-  getPurchase(purchaseId: string): Promise<PurchaseResponse> {
-    return this.http.request<PurchaseResponse>("GET", "/api/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
-  }
-
-  /** Update Purchase — `PUT /api/purchases/{purchase_id}` */
-  updatePurchase(purchaseId: string, body: PurchaseUpdate): Promise<PurchaseResponse> {
-    return this.http.request<PurchaseResponse>("PUT", "/api/purchases/" + encodeURIComponent(String(purchaseId)), { body, auth: true });
-  }
-
-  /** Delete Purchase — `DELETE /api/purchases/{purchase_id}` */
-  deletePurchase(purchaseId: string): Promise<unknown> {
-    return this.http.request<unknown>("DELETE", "/api/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
-  }
-
-  /** Toggle Purchase — `PATCH /api/purchases/{purchase_id}/toggle` */
-  togglePurchase(purchaseId: string): Promise<PurchaseResponse> {
-    return this.http.request<PurchaseResponse>("PATCH", "/api/purchases/" + encodeURIComponent(String(purchaseId)) + "/toggle", { auth: true });
   }
 
 }
@@ -410,27 +367,6 @@ export class AdminApi {
 
 }
 
-/** `advanced` endpoints. */
-export class AdvancedApi {
-  constructor(private readonly http: HttpTransport) {}
-
-  /** Create Limit Order — `POST /api/advanced/limit-order` */
-  createLimitOrder(body: LimitOrderCreate): Promise<PurchaseResponse> {
-    return this.http.request<PurchaseResponse>("POST", "/api/advanced/limit-order", { body, auth: true });
-  }
-
-  /** Create Rebalance Plan — `POST /api/advanced/rebalance` */
-  createRebalancePlan(body: RebalanceCreate): Promise<RebalancePlan> {
-    return this.http.request<RebalancePlan>("POST", "/api/advanced/rebalance", { body, auth: true });
-  }
-
-  /** Opportunities — `GET /api/advanced/opportunities` */
-  opportunities(): Promise<OpportunitiesResponse> {
-    return this.http.request<OpportunitiesResponse>("GET", "/api/advanced/opportunities", { auth: true });
-  }
-
-}
-
 /** `analytics` endpoints. */
 export class AnalyticsApi {
   constructor(private readonly http: HttpTransport) {}
@@ -584,14 +520,12 @@ export function buildApi(http: HttpTransport) {
     auth: new AuthApi(http),
     user: new UserApi(http),
     exchange: new ExchangeApi(http),
-    purchases: new PurchasesApi(http),
     transactions: new TransactionsApi(http),
     dashboard: new DashboardApi(http),
     integrations: new IntegrationsApi(http),
     reports: new ReportsApi(http),
     notifications: new NotificationsApi(http),
     admin: new AdminApi(http),
-    advanced: new AdvancedApi(http),
     analytics: new AnalyticsApi(http),
     kyc: new KycApi(http),
     webhooks: new WebhooksApi(http),

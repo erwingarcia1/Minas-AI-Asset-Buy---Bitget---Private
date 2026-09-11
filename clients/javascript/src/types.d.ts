@@ -18,12 +18,14 @@ export interface APIKeyResponse {
   updated_at: string;
 }
 
+/** An active Auto-Buy purchase (either type). Field names are kept from the original schedule shape so existing clients keep working: ``crypto`` is the purchase's crypto_symbol, ``amount_usdt`` its amount_usd and ``next_purchase_date`` its next_execution. */
 export interface ActivePurchase {
   id: string;
   crypto: string;
   amount_usdt: number;
   frequency: string;
-  next_purchase_date: string;
+  next_purchase_date?: string | null;
+  purchase_type?: string;
 }
 
 export interface AdminTransactionList {
@@ -170,13 +172,6 @@ export interface KycOverride {
   note: string;
 }
 
-export interface LimitOrderCreate {
-  crypto: string;
-  amount_usdt: number;
-  limit_price: number;
-  expiry_days?: number;
-}
-
 export interface LoginRequest {
   email: string;
   password: string;
@@ -193,18 +188,6 @@ export interface NotificationRow {
   subject: string;
   status: string;
   created_at: string;
-}
-
-export interface OpportunitiesResponse {
-  price_available: boolean;
-  opportunities: Opportunity[];
-}
-
-export interface Opportunity {
-  crypto: string;
-  kind: string;
-  detail: string;
-  suggested_next_period_usdt?: number | null;
 }
 
 export interface PerformanceResponse {
@@ -252,14 +235,6 @@ export interface PreferencesResponse {
 
 export interface ProfileUpdateRequest {
   email?: string | null;
-}
-
-export interface PurchaseCreate {
-  crypto: string;
-  exchange?: string;
-  amount_usdt: number;
-  frequency: string;
-  withdrawal_address?: string | null;
 }
 
 export interface PurchaseCreateRequest {
@@ -320,27 +295,6 @@ export interface PurchaseOut {
   latest_transaction?: TransactionOut | null;
 }
 
-export interface PurchaseResponse {
-  id: string;
-  crypto: string;
-  exchange?: string;
-  amount_usdt: number;
-  frequency: string;
-  next_purchase_date: string;
-  withdrawal_address?: string | null;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PurchaseUpdate {
-  crypto?: string | null;
-  amount_usdt?: number | null;
-  frequency?: string | null;
-  withdrawal_address?: string | null;
-  enabled?: boolean | null;
-}
-
 export interface PurchaseUpdateRequest {
   status?: string | null;
   amount_usd?: number | null;
@@ -354,36 +308,19 @@ export interface QuickStats {
   kyc_status: string;
 }
 
-export interface RebalanceCreate {
-  target_allocations: Record<string, number>;
-  amount_usdt: number;
-  frequency: string;
-}
-
-export interface RebalancePlan {
-  frequency: string;
-  total_per_period_usdt: number;
-  entries: RebalancePlanEntry[];
-}
-
-export interface RebalancePlanEntry {
-  crypto: string;
-  target_pct: number;
-  amount_usdt: number;
-  purchase_id: string;
-}
-
 export interface RecurringProjection {
   crypto: string;
   frequency: string;
   amount_usdt: number;
   monthly_usdt: number;
+  purchase_type?: string;
 }
 
 export interface RecurringResponse {
   schedules: RecurringProjection[];
   expected_monthly_usdt: number;
   projected_annual_usdt: number;
+  note?: string;
 }
 
 export interface RefreshRequest {
@@ -466,19 +403,31 @@ export interface TransactionOut {
   created_at: string;
 }
 
+/** One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id`` keep their historical names for existing clients; ``order_id`` and the withdrawal fields are the new, explicit ones. */
 export interface TransactionResponse {
   id: string;
-  recurring_purchase_id?: string | null;
+  purchase_id: string;
   crypto: string;
+  purchase_type: string;
+  tx_type: string;
   amount_crypto: number;
   cost_usdt: number;
-  binance_order_id?: string | null;
   exchange_rate?: number | null;
+  exchange?: string | null;
+  order_id?: string | null;
+  binance_order_id?: string | null;
+  fee?: number | null;
+  fee_currency?: string | null;
+  withdrawal_id?: string | null;
+  wallet_address?: string | null;
+  blockchain_network?: string | null;
+  withdrawal_fee?: number | null;
+  withdrawal_fee_currency?: string | null;
+  tx_hash?: string | null;
   executed_at?: string | null;
   status: string;
   error_message?: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 export interface TransactionStats {
@@ -495,7 +444,8 @@ export interface UpcomingPurchase {
   crypto: string;
   amount_usdt: number;
   frequency: string;
-  next_purchase_date: string;
+  next_purchase_date?: string | null;
+  purchase_type?: string;
 }
 
 export interface UserOut {

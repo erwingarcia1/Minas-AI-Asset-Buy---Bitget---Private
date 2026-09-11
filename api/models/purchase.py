@@ -1,8 +1,9 @@
 """Auto-Buy purchases with on-chain delivery: wallets, purchases, per-attempt transactions.
 
-Distinct from the exchange-custody DCA schedules in ``RecurringPurchase`` /
-``Transaction``: an Auto-Buy purchase buys on the chosen exchange account and
-withdraws the coins to a validated wallet address on a declared network.
+An Auto-Buy purchase buys on the chosen exchange account and either withdraws
+the coins to a validated wallet on a declared network (``autobuy``) or keeps
+them on the exchange (``dca``). ``purchase_transactions`` is the platform's
+only execution history.
 """
 import uuid
 

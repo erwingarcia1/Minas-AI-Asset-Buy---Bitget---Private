@@ -21,15 +21,16 @@ async def test_lifespan_and_service_endpoints(monkeypatch):
     from api.main import app
     monkeypatch.setattr(settings, "scheduler_enabled", True)
     async with LifespanManager(app):
-        from api.services.recurring_scheduler import scheduler
-        assert scheduler.running
+        assert app.state.autobuy_scheduler.running
+        assert app.state.autobuy_scheduler.get_job("execute_purchases") is not None
+        assert app.state.autobuy_scheduler.get_job("weekly_digest") is not None
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                      base_url="http://test") as c:
             h = (await c.get("/health")).json()
-            assert h["status"] == "healthy" and h["scheduler"]["running"] is True
+            assert h["status"] == "healthy" and h["schedulers"]["autobuy"]["running"] is True
             root = (await c.get("/")).json()
             assert root["docs"] == "/docs"
-    assert not scheduler.running, "shutdown must stop the scheduler"
+    assert app.state.autobuy_scheduler is None, "shutdown must stop the scheduler"
 
 
 async def test_init_db_skipped_in_production(monkeypatch):
@@ -201,19 +202,6 @@ async def test_list_and_delete_own_key(client, db, user, binance_key):
         assert len(keys) == 1 and keys[0]["api_key_masked"].count(".") == 3
         assert (await c.delete(f"/api/exchange/keys/{binance_key.id}", headers=H)).status_code == 204
         assert (await c.get("/api/exchange/keys", headers=H)).json() == []
-
-
-# ---------------------------------------------------------------- purchases list/get
-
-async def test_purchase_list_and_get(client, user, purchase):
-    H = auth_headers(user)
-    async with client as c:
-        listed = (await c.get("/api/purchases/", headers=H)).json()
-        assert len(listed) == 1 and listed[0]["id"] == str(purchase.id)
-        got = (await c.get(f"/api/purchases/{purchase.id}", headers=H)).json()
-        assert got["crypto"] == "BTC"
-        empty = await c.put(f"/api/purchases/{purchase.id}", headers=H, json={})
-        assert empty.status_code == 400
 
 
 # ---------------------------------------------------------------- misc branches

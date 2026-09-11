@@ -11,7 +11,7 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from api.database import AsyncSessionLocal, engine, Base
-from api.models import APIKey, Purchase, PurchaseTransaction, RecurringPurchase, Transaction, User, utcnow
+from api.models import APIKey, Purchase, PurchaseTransaction, User, utcnow
 from api.routes.exchange import encrypt_value
 
 
@@ -35,15 +35,6 @@ async def user(db):
     if fresh is not None:
         await db.delete(fresh)
         await db.commit()
-
-
-@pytest_asyncio.fixture
-async def purchase(db, user):
-    p = RecurringPurchase(user_id=user.id, crypto="BTC", amount_usdt=100.0,
-                          frequency="weekly", next_purchase_date=utcnow())
-    db.add(p)
-    await db.commit()
-    return p
 
 
 @pytest_asyncio.fixture

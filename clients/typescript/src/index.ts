@@ -3,11 +3,11 @@
  *
  *   const client = new AutoBuyClient({ baseUrl: "http://localhost:8000" });
  *   await client.login("me@example.com", "Str0ng!Passw0rd");
- *   const purchase = await client.purchases.createPurchase({ crypto: "BTC", amount_usdt: 50, frequency: "weekly" });
+ *   const purchase = await client.autoBuy.createPurchase({ crypto_symbol: "BTC", amount_usd: 50, frequency: "weekly", wallet_address: "bc1q...", blockchain_network: "mainnet", exchange_account_id: "<api key id>", purchase_type: "autobuy" });
  */
 import { buildApi, type Api } from "./api.js";
 import { FetchTransport, type FetchTransportOptions, type TokenPair } from "./http.js";
-import type { PurchaseCreate, PurchaseResponse, TokenResponse, UserOut, UserProfile } from "./types.js";
+import type { PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse, UserOut, UserProfile } from "./types.js";
 
 export * from "./types.js";
 export * from "./api.js";
@@ -33,14 +33,12 @@ export class AutoBuyClient {
   get auth() { return this.api.auth; }
   get user() { return this.api.user; }
   get exchange() { return this.api.exchange; }
-  get purchases() { return this.api.purchases; }
   get transactions() { return this.api.transactions; }
   get dashboard() { return this.api.dashboard; }
   get integrations() { return this.api.integrations; }
   get reports() { return this.api.reports; }
   get notifications() { return this.api.notifications; }
   get admin() { return this.api.admin; }
-  get advanced() { return this.api.advanced; }
   get analytics() { return this.api.analytics; }
   get kyc() { return this.api.kyc; }
   get webhooks() { return this.api.webhooks; }
@@ -91,9 +89,9 @@ export class AutoBuyClient {
     return this.api.user.getProfile();
   }
 
-  /** Convenience wrapper around `purchases.createPurchase`. */
-  createPurchase(body: PurchaseCreate): Promise<PurchaseResponse> {
-    return this.api.purchases.createPurchase(body);
+  /** Convenience wrapper around `autoBuy.createPurchase` (`POST /api/v2/purchases`). */
+  createPurchase(body: PurchaseCreateRequest): Promise<PurchaseCreatedOut> {
+    return this.api.v2.createPurchase(body);
   }
 }
 
