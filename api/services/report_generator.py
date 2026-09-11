@@ -1,38 +1,49 @@
 """Report assembly: tax/acquisition summaries and performance metrics, with
-CSV and PDF renderers. The platform only BUYS, so realized gains are always
-zero today — the FIFO lot list exists so cost basis is audit-ready the day
-sells arrive. Everything computes from completed transactions."""
+CSV and PDF renderers, over the Auto-Buy history (purchase_transactions via
+:mod:`api.services.history`). The platform only BUYS, so realized gains are
+always zero today — the FIFO lot list exists so cost basis is audit-ready the
+day sells arrive. Everything computes from successful buys."""
 import csv
 import io
 import statistics
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from api.services import history
 
-from api.models import Transaction
+CSV_COLUMNS = [
+    "datetime_utc", "crypto", "quantity", "fill_price_usd", "usd_amount",
+    "fee", "fee_currency", "exchange", "order_id", "purchase_type", "tx_type",
+    "withdrawal_address", "network", "withdrawal_fee", "withdrawal_fee_currency", "tx_hash",
+    "method",
+]
+
+
+def _lot(r: history.HistoryRow) -> dict:
+    when = r.happened_at.astimezone(timezone.utc)
+    return {
+        "datetime_utc": when.strftime("%Y-%m-%d %H:%M:%S"),
+        "date": when.date().isoformat(),
+        "amount": r.amount_crypto,
+        "cost_usdt": r.cost_usd,
+        "price": r.exchange_rate or 0.0,
+        "fee": r.fee, "fee_currency": r.fee_currency,
+        "exchange": r.exchange, "order_id": r.order_id,
+        "purchase_type": r.purchase_type, "tx_type": r.tx_type,
+        "withdrawal_address": r.wallet_address, "network": r.blockchain_network,
+        "withdrawal_fee": r.withdrawal_fee, "withdrawal_fee_currency": r.withdrawal_fee_currency,
+        "tx_hash": r.tx_hash,
+    }
 
 
 async def tax_summary(db, user_id, year: int) -> dict:
     """Per-crypto acquisition summary for a calendar year (FIFO lot method)."""
     start = datetime(year, 1, 1, tzinfo=timezone.utc)
     end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
-    rows = (await db.execute(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.status == "completed",
-            Transaction.created_at >= start,
-            Transaction.created_at < end)
-        .order_by(Transaction.created_at))).scalars().all()
+    rows = await history.completed_rows(db, user_id, since=start, until=end)
 
     lots: dict[str, list] = {}
-    for t in rows:
-        lots.setdefault(t.crypto, []).append({
-            "date": t.created_at.date().isoformat(),
-            "amount": t.amount_crypto,
-            "cost_usdt": t.cost_usdt,
-            "price": (t.exchange_rate
-                      or (t.cost_usdt / t.amount_crypto if t.amount_crypto else 0)),
-        })
+    for r in rows:
+        lots.setdefault(r.crypto, []).append(_lot(r))
     holdings = []
     for crypto, lot_list in sorted(lots.items()):
         amount = sum(l["amount"] for l in lot_list)
@@ -47,26 +58,23 @@ async def tax_summary(db, user_id, year: int) -> dict:
         "year": year, "method": "FIFO",
         "realized_gains_usdt": 0.0,  # buy-only platform: no disposals yet
         "note": ("No disposals occurred through AutoBuy; all positions are "
-                 "unrealized. Lots are FIFO-ordered for future sales."),
+                 "unrealized. Lots are FIFO-ordered for future sales. "
+                 "Estimates only, not financial or tax advice."),
         "acquisitions": holdings,
         "total_acquired_usdt": round(sum(h["total_cost_usdt"] for h in holdings), 2),
     }
 
 
 async def performance(db, user_id, market) -> dict:
-    """ROI and risk metrics from completed history + live prices."""
-    rows = (await db.execute(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.status == "completed")
-        .order_by(Transaction.created_at))).scalars().all()
+    """ROI and risk metrics from successful buys + live prices."""
+    rows = await history.completed_rows(db, user_id)
     if not rows:
         return {"has_data": False}
 
-    invested = sum(t.cost_usdt for t in rows)
+    invested = sum(r.cost_usd for r in rows)
     amounts: dict[str, float] = {}
-    for t in rows:
-        amounts[t.crypto] = amounts.get(t.crypto, 0.0) + t.amount_crypto
+    for r in rows:
+        amounts[r.crypto] = amounts.get(r.crypto, 0.0) + r.amount_crypto
 
     value = 0.0
     priced = True
@@ -78,11 +86,11 @@ async def performance(db, user_id, market) -> dict:
         value += amount * price
 
     daily: dict[str, float] = {}
-    for t in rows:
-        key = t.created_at.date().isoformat()
-        daily[key] = daily.get(key, 0.0) + t.cost_usdt
+    for r in rows:
+        key = r.happened_at.date().isoformat()
+        daily[key] = daily.get(key, 0.0) + r.cost_usd
     best_day = max(daily, key=lambda d: daily[d])
-    first = rows[0].created_at
+    first = rows[0].happened_at
     years_held = max((datetime.now(timezone.utc) - first).days, 1) / 365.25
 
     out = {
@@ -94,8 +102,9 @@ async def performance(db, user_id, market) -> dict:
         "spend_volatility_pct": round(
             statistics.pstdev(daily.values()) / statistics.mean(daily.values()) * 100, 1)
             if len(daily) > 1 else 0.0,
+        "note": "Estimates only, not financial advice; past performance doesn't guarantee future results.",
     }
-    if priced:
+    if priced and invested:
         roi = (value - invested) / invested
         out.update({
             "current_value_usdt": round(value, 2),
@@ -105,16 +114,27 @@ async def performance(db, user_id, market) -> dict:
     return out
 
 
+def _fmt(value, digits: int) -> str:
+    return "" if value is None else f"{value:.{digits}f}"
+
+
 def tax_summary_csv(summary: dict) -> str:
+    """One row per successful buy with everything an accountant asks for."""
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["crypto", "acquired_date", "amount", "cost_usdt",
-                     "price_usdt", "method"])
+    writer.writerow(CSV_COLUMNS)
     for holding in summary["acquisitions"]:
         for lot in holding["lots"]:
-            writer.writerow([holding["crypto"], lot["date"],
-                             f"{lot['amount']:.8f}", f"{lot['cost_usdt']:.2f}",
-                             f"{lot['price']:.2f}", summary["method"]])
+            writer.writerow([
+                lot["datetime_utc"], holding["crypto"], f"{lot['amount']:.8f}",
+                _fmt(lot["price"], 2), f"{lot['cost_usdt']:.2f}",
+                _fmt(lot["fee"], 8), lot["fee_currency"] or "",
+                lot["exchange"] or "", lot["order_id"] or "",
+                lot["purchase_type"], lot["tx_type"],
+                lot["withdrawal_address"] or "", lot["network"] or "",
+                _fmt(lot["withdrawal_fee"], 8), lot["withdrawal_fee_currency"] or "",
+                lot["tx_hash"] or "", summary["method"],
+            ])
     return buf.getvalue()
 
 
@@ -138,7 +158,7 @@ def tax_summary_pdf(summary: dict, email: str) -> bytes:
                   styles["Normal"]),
         Spacer(1, 0.5 * cm),
     ]
-    data = [["Crypto", "Amount", "Cost (USDT)", "Avg price"]]
+    data = [["Crypto", "Amount", "Cost (USD)", "Avg price"]]
     for h in summary["acquisitions"]:
         data.append([h["crypto"], f"{h['total_amount']:.8f}",
                      f"{h['total_cost_usdt']:.2f}",
@@ -151,7 +171,22 @@ def tax_summary_pdf(summary: dict, email: str) -> bytes:
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
     ]))
-    story += [table, Spacer(1, 0.5 * cm),
-              Paragraph(summary["note"], styles["Italic"])]
+    story += [table, Spacer(1, 0.5 * cm)]
+    # per-lot detail: date, order, exchange, and the withdrawal when there was one
+    detail = [["Date (UTC)", "Crypto", "Qty", "Price", "USD", "Exchange", "Order", "Sent to"]]
+    for h in summary["acquisitions"]:
+        for lot in h["lots"]:
+            sent = f"{lot['withdrawal_address'][:10]}… ({lot['network']})" if lot["withdrawal_address"] else "held"
+            detail.append([lot["datetime_utc"], h["crypto"], f"{lot['amount']:.8f}", _fmt(lot["price"], 2),
+                           f"{lot['cost_usdt']:.2f}", lot["exchange"] or "", (lot["order_id"] or "")[:14], sent])
+    if len(detail) > 1:
+        lots_table = Table(detail, colWidths=[3.2 * cm, 1.4 * cm, 2.4 * cm, 2 * cm, 1.8 * cm, 1.8 * cm, 2.6 * cm, 3 * cm])
+        lots_table.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ]))
+        story += [lots_table, Spacer(1, 0.5 * cm)]
+    story.append(Paragraph(summary["note"], styles["Italic"]))
     doc.build(story)
     return buf.getvalue()

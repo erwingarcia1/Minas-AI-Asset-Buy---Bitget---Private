@@ -74,9 +74,6 @@ class RecurringScheduler:
         # pause) must still run; APScheduler's 1s default silently discards it.
         self._scheduler.add_job(self.tick, "interval", seconds=self.poll_seconds,
                                 max_instances=1, coalesce=True, misfire_grace_time=60)
-        from api.services.email_campaigns import send_weekly_summaries
-        self._scheduler.add_job(send_weekly_summaries, "cron",
-                                day_of_week="mon", hour=9, minute=0)
         self._scheduler.start()
         logger.info("scheduler started (poll=%ss, dry_run=%s)",
                     self.poll_seconds, self.dry_run)

@@ -42,8 +42,11 @@ async def test_dashboard_latency_under_concurrency(db, user):
     """100 concurrent dashboard+transaction reads; p95 must stay under 500ms."""
     import httpx
     from api.main import app
-    db.add_all([Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.001,
-                            cost_usdt=50.0, status="completed") for _ in range(200)])
+    from api.models import PurchaseTransaction
+    from tests.api.conftest import make_autobuy_purchase
+    p = await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=50.0)
+    db.add_all([PurchaseTransaction(purchase_id=p.id, status="success", amount_executed=0.001, cost_usd=50.0)
+                for _ in range(200)])
     await db.commit()
     H = auth_headers(user)
     timings = []

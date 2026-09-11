@@ -86,10 +86,20 @@ class PurchaseTransaction(Base):
     tx_type = Column(Enum(*TRANSACTION_TYPES, name="transaction_type"), nullable=False, default="withdrawal",
                      server_default="withdrawal")
     status = Column(String(20), nullable=False, default="pending")  # pending | success | failed
-    amount_executed = Column(Float, nullable=True)   # crypto amount delivered
-    fee = Column(Float, nullable=True)               # withdrawal fee in crypto units
+    amount_executed = Column(Float, nullable=True)   # crypto amount bought
+    fee = Column(Float, nullable=True)               # trading fee (see fee_currency)
     error_message = Column(String(500), nullable=True)
     executed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # Fill details (migration 013) — the single source of truth for history,
+    # dashboards, tax exports and notifications.
+    order_id = Column(String(128), nullable=True)            # exchange order id of the buy
+    fill_price = Column(Float, nullable=True)                # USDT per coin at fill
+    cost_usd = Column(Float, nullable=True)                  # quote actually spent
+    fee_currency = Column(String(10), nullable=True)
+    withdrawal_id = Column(String(128), nullable=True)       # autobuy: exchange withdrawal id
+    withdrawal_fee = Column(Float, nullable=True)
+    withdrawal_fee_currency = Column(String(10), nullable=True)
+    tx_hash = Column(String(128), nullable=True)             # on-chain hash once the exchange reports it
 
     purchase = relationship("Purchase", back_populates="transactions")

@@ -20,7 +20,7 @@ switch stored in Redis (`autobuy:schedulers:paused`), report a heartbeat there, 
 | Scheduler consecutive failures ≥ 5 | `scheduler_consecutive_failures >= 5` | critical | Binance down/keys invalid/balances empty — see CRITICAL log; executions retry hourly |
 | Binance errors > 10/h | `increase(binance_api_calls_total{result="error"}[1h]) > 10` | alert | Rate-limit ban or API change; check error_message on failed transactions |
 | Email failure ratio > 20% (1h) | `increase(emails_total{result="failed"}[1h]) / increase(emails_total[1h])` | alert | Resend outage or bad key; sends are fire-and-forget so trades are unaffected |
-| Active purchases = 0 | `active_purchases_total == 0` | warning | Legitimate if no users; otherwise scheduler may be stuck — check `/health` `last_tick_at` |
+| Active purchases = 0 | `active_purchases_total == 0` | warning | Legitimate if no users; otherwise scheduler may be stuck — check `/health` `schedulers` |
 | Scheduler tick stalled | `/health` `schedulers.recurring.last_run_at` older than 5m | critical | App wedged or lock never released — restart; the advisory lock frees on disconnect |
 | Auto-Buy run overdue | `/health` `schedulers.autobuy.last_run_at` older than 12m (2 intervals + misfire grace) while not paused; admin alert `autobuy_run` | critical | execute_purchases not running in any worker — check `autobuy.tasks.purchases` logs for DISCARDED/SKIPPED windows, restart |
 | Auto-Buy consecutive failures ≥ 5 | admin alert `autobuy_consecutive_failures` (`/health` `schedulers.autobuy.consecutive_failures`) | critical | Every due purchase failed on 5 runs in a row — exchange down, keys invalid, withdrawals blocked; see `last_error` on the purchases |
@@ -40,3 +40,5 @@ switch stored in Redis (`autobuy:schedulers:paused`), report a heartbeat there, 
    scheduling but simulate) and restart. Both are read at startup.
 5. **Database**: schema is Alembic-managed; never run `create_all` in
    production. `alembic current` shows the applied revision.
+
+`failed_transactions_24h` (admin alerts) counts failed Auto-Buy execution attempts in `purchase_transactions`.

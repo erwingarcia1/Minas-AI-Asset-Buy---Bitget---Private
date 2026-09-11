@@ -42,6 +42,36 @@ class EmailService:
                     f"{transaction.error_message}. We'll retry automatically in about an hour.")
         return await self._send(user_email, subject, f"<p>{text}</p>", text, template="purchase")
 
+    async def send_purchase_event_email(self, user_email: str, event) -> bool:
+        """One email per Auto-Buy attempt outcome (see purchase_events)."""
+        p, tx = event.purchase, event.tx
+        coin = p.crypto_symbol
+        amount = tx.amount_executed or 0.0
+        cost = tx.cost_usd if tx.cost_usd is not None else p.amount_usd
+        price = f" at {tx.fill_price:.2f}" if tx.fill_price else ""
+        prefix = "[DRY RUN] " if event.dry_run else ""
+        if event.type == "buy_executed":
+            subject = f"{prefix}✓ Purchase complete: {amount:.8f} {coin}"
+            text = (f"You bought {amount:.8f} {coin} for {cost:.2f} USD{price} on {event.exchange or 'your exchange'}. "
+                    f"The coins are held on the exchange (accumulate mode). Order: {tx.order_id or '-'}")
+        elif event.type == "withdrawal_sent":
+            subject = f"{prefix}✓ Purchase complete: {amount:.8f} {coin} sent to your wallet"
+            text = (f"You bought {amount:.8f} {coin} for {cost:.2f} USD{price} on {event.exchange or 'your exchange'} "
+                    f"and it was sent to {p.wallet_address} ({p.blockchain_network}). "
+                    f"Order: {tx.order_id or '-'} · Withdrawal: {tx.withdrawal_id or '-'}")
+        elif event.type == "withdrawal_failed":
+            subject = f"{prefix}✗ Withdrawal failed: {coin}"
+            text = (f"We bought {amount:.8f} {coin} for {cost:.2f} USD (order {tx.order_id or '-'}), but sending it to "
+                    f"{p.wallet_address} ({p.blockchain_network}) failed: {event.error}. The coins remain on "
+                    f"{event.exchange or 'the exchange'}. Attempt {event.attempt}/{event.max_attempts}.")
+        else:  # buy_failed
+            subject = f"{prefix}✗ Purchase failed: {coin}"
+            text = (f"We tried to buy {coin} for {p.amount_usd:.2f} USD on {event.exchange or 'your exchange'} "
+                    f"but it failed: {event.error}. Attempt {event.attempt}/{event.max_attempts}"
+                    + ("; we will retry on the next run." if event.attempt < event.max_attempts
+                       else "; the purchase is now marked failed."))
+        return await self._send(user_email, subject, f"<p>{text}</p>", text, template="purchase")
+
     async def send_kyc_notification(self, user_email: str, kyc_status: str) -> bool:
         if kyc_status == "verified":
             subject = "✓ Identity verified"

@@ -82,14 +82,27 @@ export interface Purchase {
 
 export type TransactionStatus = "pending" | "completed" | "failed";
 
+/** One Auto-Buy execution attempt (purchase_transactions is the single source of truth). */
 export interface Transaction {
   id: string;
-  recurring_purchase_id: string | null;
+  purchase_id: string;
   crypto: string;
+  purchase_type: PurchaseType;
+  tx_type: "withdrawal" | "accumulation";
   amount_crypto: number;
   cost_usdt: number;
-  binance_order_id: string | null;
   exchange_rate: number | null;
+  exchange: string | null;
+  order_id: string | null;
+  binance_order_id: string | null;   // = order_id (compatibility)
+  fee: number | null;
+  fee_currency: string | null;
+  withdrawal_id: string | null;
+  wallet_address: string | null;
+  blockchain_network: string | null;
+  withdrawal_fee: number | null;
+  withdrawal_fee_currency: string | null;
+  tx_hash: string | null;
   executed_at: string | null;
   status: TransactionStatus;
   error_message: string | null;

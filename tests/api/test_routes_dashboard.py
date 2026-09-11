@@ -2,21 +2,24 @@ from datetime import timedelta
 
 import pytest
 
-from api.models import Purchase, RecurringPurchase, Transaction, utcnow
-from tests.api.conftest import auth_headers
+from api.models import Purchase, RecurringPurchase, utcnow
+from tests.api.conftest import auth_headers, make_autobuy_purchase, make_history
 
 
 @pytest.fixture
-async def rich_user(db, user):
+async def rich_user(db, user, binance_key):
+    btc = await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100.0, key=binance_key,
+                                      status="completed", frequency="one_time", next_execution=None)
+    # history: successful buys count, failed ones do not
+    await make_history(db, user, purchase=btc, amount_crypto=0.001, cost_usd=100.0)
+    await make_history(db, user, purchase=btc, amount_crypto=0.003, cost_usd=200.0)
+    eth_hist = await make_autobuy_purchase(db, user, crypto="ETH", amount_usd=50.0, purchase_type="dca",
+                                           key=binance_key, status="completed", next_execution=None)
+    await make_history(db, user, purchase=eth_hist, amount_crypto=0.1, cost_usd=50.0)
+    sol_hist = await make_autobuy_purchase(db, user, crypto="SOL", amount_usd=999.0, key=binance_key,
+                                           status="failed", next_execution=None)
+    await make_history(db, user, purchase=sol_hist, amount_crypto=1.0, cost_usd=999.0, status="failed")
     db.add_all([
-        Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.001,
-                    cost_usdt=100.0, status="completed"),
-        Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.003,
-                    cost_usdt=200.0, status="completed"),
-        Transaction(user_id=user.id, crypto="ETH", amount_crypto=0.1,
-                    cost_usdt=50.0, status="completed"),
-        Transaction(user_id=user.id, crypto="SOL", amount_crypto=1.0,
-                    cost_usdt=999.0, status="failed"),
         # Auto-Buy purchases (the dashboard's source of schedules): both types count
         Purchase(user_id=user.id, crypto_symbol="ETH", amount_usd=50, frequency="weekly",
                  purchase_type="autobuy", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",

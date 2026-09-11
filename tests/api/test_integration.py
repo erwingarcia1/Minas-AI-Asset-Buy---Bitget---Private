@@ -29,7 +29,12 @@ async def cleanup(db, email):
 
 
 async def test_full_journey_to_executed_purchase(db, monkeypatch):
-    monkeypatch.setattr(ps_mod, "BinanceClient", FakeBinance)
+    """register -> login -> KYC -> exchange key -> Auto-Buy purchase -> executor run
+    -> history visible in the Transactions API and on the dashboard."""
+    from datetime import datetime, timedelta, timezone
+    from api.models import Purchase
+    from api.tasks import purchase_scheduler as ps
+    from tests.test_purchase_events import RichGateway
     email = f"journey-{uuid.uuid4().hex[:8]}@example.com"
     try:
         async with fresh_client() as c:
@@ -54,30 +59,31 @@ async def test_full_journey_to_executed_purchase(db, monkeypatch):
                 k.verified = True
                 await s.commit()
 
-            r = await c.post("/api/purchases/", headers=H,
-                             json={"crypto": "BTC", "amount_usdt": 100, "frequency": "weekly"})
-            assert r.status_code == 201
-            purchase_id = r.json()["id"]
+            r = await c.post("/api/v2/purchases", headers=H,
+                             json={"crypto_symbol": "BTC", "amount_usd": 100, "frequency": "weekly",
+                                   "wallet_address": "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+                                   "blockchain_network": "mainnet", "exchange_account_id": key_id,
+                                   "purchase_type": "autobuy"})
+            assert r.status_code == 201, r.text
+            purchase_id = uuid.UUID(r.json()["purchase_id"])
 
-            # make it due, then let the real scheduler tick execute it
+            # make it due, then run the executor (exchange stubbed, dry run)
+            now = datetime.now(timezone.utc)
             async with AsyncSessionLocal() as s:
-                p = (await s.execute(select(RecurringPurchase).where(
-                    RecurringPurchase.id == uuid.UUID(purchase_id)))).scalar_one()
-                from datetime import timedelta
-                original_due = p.next_purchase_date
-                p.next_purchase_date = original_due - timedelta(days=2)
+                p = (await s.execute(select(Purchase).where(Purchase.id == purchase_id))).scalar_one()
+                p.next_execution = now - timedelta(minutes=2)
                 await s.commit()
-            assert await RecurringScheduler(dry_run=True).tick() == 1
+                counts = await ps.execute_due_purchases(s, now=now, gateway=RichGateway(), dry_run=True)
+            assert counts["executed"] == 1
 
             txs = (await c.get("/api/transactions/", headers=H)).json()
             assert txs["total"] == 1 and txs["items"][0]["status"] == "completed"
+            assert txs["items"][0]["order_id"] == "ORD-1" and txs["items"][0]["withdrawal_id"] == "WD-1"
             d = (await c.get("/api/dashboard/", headers=H)).json()
-            assert d["holdings"][0]["crypto"] == "BTC"
+            assert d["holdings"][0]["crypto"] == "BTC" and d["holdings"][0]["total_cost_usdt"] == 100.0
             async with AsyncSessionLocal() as s:
-                p = (await s.execute(select(RecurringPurchase).where(
-                    RecurringPurchase.id == uuid.UUID(purchase_id)))).scalar_one()
-                from datetime import datetime, timezone
-                assert p.next_purchase_date > datetime.now(timezone.utc)
+                p = (await s.execute(select(Purchase).where(Purchase.id == purchase_id))).scalar_one()
+                assert p.next_execution > now
     finally:
         await cleanup(db, email)
 

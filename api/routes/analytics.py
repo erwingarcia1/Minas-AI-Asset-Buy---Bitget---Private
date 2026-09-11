@@ -44,13 +44,9 @@ class PerformanceResponse(BaseModel):
 
 
 async def _holdings(db, user_id):
-    rows = (await db.execute(
-        select(Transaction.crypto,
-               func.sum(Transaction.amount_crypto),
-               func.sum(Transaction.cost_usdt))
-        .where(Transaction.user_id == user_id, Transaction.status == "completed")
-        .group_by(Transaction.crypto))).all()
-    return [(r[0], float(r[1]), float(r[2])) for r in rows if float(r[1]) > 0]
+    """[(crypto, amount, invested_usd)] from successful Auto-Buy buys (purchase_transactions)."""
+    from api.services import history
+    return await history.holdings(db, user_id)
 
 
 @router.get("/performance", response_model=PerformanceResponse)

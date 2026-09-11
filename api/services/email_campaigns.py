@@ -60,39 +60,55 @@ async def after_purchase_completed(db, user: User, tx: Transaction) -> None:
                                   html, text, template="milestone")
 
 
-async def send_weekly_summaries() -> None:
-    """Monday-morning digest for every user with activity in the last 7 days."""
+async def on_buy_executed(db, user: User, tx, purchase) -> None:
+    """First-purchase congratulations and invested-amount milestones, computed
+    from purchase_transactions (the Auto-Buy history)."""
+    from api.services import history
+    count, total = await history.completed_count_and_total(db, user.id)
+    cost = float(tx.cost_usd if tx.cost_usd is not None else purchase.amount_usd)
+    if count == 1:
+        html, text = render(
+            "first_purchase", name=_name(user), crypto=purchase.crypto_symbol,
+            amount_crypto=f"{(tx.amount_executed or 0):.8f}",
+            cost_usdt=f"{cost:.2f}",
+            exchange_rate=f"{tx.fill_price:.2f}" if tx.fill_price else "market",
+            order_id=tx.order_id or "-")
+        await email_service._send(user.email, "🎉 Your first automated purchase",
+                                  html, text, template="first_purchase")
+        return
+    crossed = [m for m in MILESTONES_USDT if total >= m and total - cost < m]
+    if crossed:
+        milestone = f"{max(crossed):,}"
+        html, text = render("milestone", name=_name(user), milestone=milestone)
+        await email_service._send(user.email, f"🏆 {milestone} USDT invested",
+                                  html, text, template="milestone")
+
+
+async def send_weekly_summaries() -> int:
+    """Monday-morning digest for every user with Auto-Buy activity in the last
+    7 days. Returns how many digests were sent."""
+    from api.services import history
     since = datetime.now(timezone.utc) - timedelta(days=7)
+    sent = 0
     async with AsyncSessionLocal() as db:
-        user_ids = (await db.execute(
-            select(Transaction.user_id).where(Transaction.created_at >= since)
-            .group_by(Transaction.user_id))).scalars().all()
+        user_ids = await history.users_with_activity_since(db, since)
         for user_id in user_ids:
             user = (await db.execute(
                 select(User).where(User.id == user_id))).scalar_one_or_none()
             if user is None:
                 continue
-            rows_q = (await db.execute(
-                select(Transaction.crypto,
-                       func.sum(Transaction.amount_crypto),
-                       func.sum(Transaction.cost_usdt))
-                .where(Transaction.user_id == user_id,
-                       Transaction.created_at >= since,
-                       Transaction.status == "completed")
-                .group_by(Transaction.crypto))).all()
-            failed = (await db.execute(
-                select(func.count(Transaction.id)).where(
-                    Transaction.user_id == user_id,
-                    Transaction.created_at >= since,
-                    Transaction.status == "failed"))).scalar_one()
-            if not rows_q and not failed:
+            completed = await history.completed_rows(db, user_id, since=since)
+            failed = await history.count_failed_since(db, since, user_id=user_id)
+            if not completed and not failed:
                 continue
-            rows = [{"crypto": r[0], "amount": f"{float(r[1]):.8f}",
-                     "cost": f"{float(r[2]):.2f}"} for r in rows_q]
-            total = sum(float(r[2]) for r in rows_q)
+            grouped = history.group_by_crypto(completed)
+            rows = [{"crypto": c, "amount": f"{a:.8f}", "cost": f"{cost:.2f}"} for c, a, cost in grouped]
+            total = sum(cost for _, _, cost in grouped)
             html, text = render(
                 "purchase_summary", name=_name(user), rows=rows,
                 total_usdt=f"{total:.2f}", count=len(rows), failed=failed)
-            await email_service._send(user.email, f"Your week at {settings.app_name}",
-                                      html, text, template="purchase_summary")
-    logger.info("weekly summaries sent to %d user(s)", len(user_ids))
+            if await email_service._send(user.email, f"Your week at {settings.app_name}",
+                                         html, text, template="purchase_summary"):
+                sent += 1
+    logger.info("weekly summaries sent to %d user(s)", sent)
+    return sent

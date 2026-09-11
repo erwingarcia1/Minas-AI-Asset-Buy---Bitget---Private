@@ -1,22 +1,22 @@
-"""Transaction history and analytics."""
+"""Transaction history: every Auto-Buy execution attempt, read through the
+history service (purchase_transactions is the single source of truth)."""
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import Transaction, User
+from api.models import User
 from api.routes.user import UTCModel, get_current_user
-from fastapi import Request
+from api.services import history
 from api.services.rate_limit import limiter, user_or_ip_key
 
 router = APIRouter()
 
-VALID_STATUSES = {"pending", "completed", "failed"}
+VALID_STATUSES = set(history.API_STATUSES)
 
 
 def _validate_status(value: str) -> str:
@@ -34,18 +34,44 @@ def _validate_status(value: str) -> str:
 # --------------------------------------------------------------------------
 
 class TransactionResponse(UTCModel):
+    """One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id``
+    keep their historical names for existing clients; ``order_id`` and the
+    withdrawal fields are the new, explicit ones."""
     id: UUID
-    recurring_purchase_id: Optional[UUID] = None
+    purchase_id: UUID
     crypto: str
+    purchase_type: str                 # autobuy | dca
+    tx_type: str                       # withdrawal | accumulation
     amount_crypto: float
     cost_usdt: float
-    binance_order_id: Optional[str] = None
     exchange_rate: Optional[float] = None
+    exchange: Optional[str] = None
+    order_id: Optional[str] = None
+    binance_order_id: Optional[str] = None   # = order_id (compatibility)
+    fee: Optional[float] = None
+    fee_currency: Optional[str] = None
+    withdrawal_id: Optional[str] = None
+    wallet_address: Optional[str] = None
+    blockchain_network: Optional[str] = None
+    withdrawal_fee: Optional[float] = None
+    withdrawal_fee_currency: Optional[str] = None
+    tx_hash: Optional[str] = None
     executed_at: Optional[datetime] = None
-    status: str
+    status: str                        # pending | completed | failed
     error_message: Optional[str] = None
     created_at: datetime
-    updated_at: datetime
+
+    @classmethod
+    def from_row(cls, r: history.HistoryRow) -> "TransactionResponse":
+        return cls(id=r.id, purchase_id=r.purchase_id, crypto=r.crypto, purchase_type=r.purchase_type,
+                   tx_type=r.tx_type, amount_crypto=r.amount_crypto, cost_usdt=r.cost_usd,
+                   exchange_rate=r.exchange_rate, exchange=r.exchange, order_id=r.order_id,
+                   binance_order_id=r.order_id, fee=r.fee, fee_currency=r.fee_currency,
+                   withdrawal_id=r.withdrawal_id, wallet_address=r.wallet_address,
+                   blockchain_network=r.blockchain_network, withdrawal_fee=r.withdrawal_fee,
+                   withdrawal_fee_currency=r.withdrawal_fee_currency, tx_hash=r.tx_hash,
+                   executed_at=r.executed_at, status=r.status, error_message=r.error_message,
+                   created_at=r.created_at)
 
 
 class TransactionListResponse(BaseModel):
@@ -78,27 +104,11 @@ async def list_transactions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the authenticated user's transactions, newest first, paginated."""
-    filters = [Transaction.user_id == current_user.id]
-    if status_filter is not None:
-        filters.append(Transaction.status == _validate_status(status_filter))
-
-    total = (
-        await db.execute(select(func.count(Transaction.id)).where(*filters))
-    ).scalar_one()
-    result = await db.execute(
-        select(Transaction)
-        .where(*filters)
-        .order_by(Transaction.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    return TransactionListResponse(
-        items=[TransactionResponse.model_validate(t) for t in result.scalars().all()],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+    """List the authenticated user's execution attempts, newest first, paginated."""
+    status = _validate_status(status_filter) if status_filter is not None else None
+    rows, total = await history.list_rows(db, current_user.id, status=status, limit=limit, offset=offset)
+    return TransactionListResponse(items=[TransactionResponse.from_row(r) for r in rows],
+                                   total=total, limit=limit, offset=offset)
 
 
 @router.get("/stats/summary", response_model=TransactionStats)
@@ -106,28 +116,8 @@ async def transaction_stats(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Aggregate statistics over the user's transactions."""
-    completed = Transaction.status == "completed"
-    row = (
-        await db.execute(
-            select(
-                func.count(Transaction.id),
-                func.coalesce(func.sum(Transaction.cost_usdt).filter(completed), 0.0),
-                func.coalesce(func.avg(Transaction.cost_usdt).filter(completed), 0.0),
-                func.count(Transaction.id).filter(completed),
-                func.count(Transaction.id).filter(Transaction.status == "failed"),
-                func.count(Transaction.id).filter(Transaction.status == "pending"),
-            ).where(Transaction.user_id == current_user.id)
-        )
-    ).one()
-    return TransactionStats(
-        total_transactions=row[0],
-        total_invested_usdt=round(float(row[1]), 8),
-        average_purchase_usdt=round(float(row[2]), 8),
-        completed_count=row[3],
-        failed_count=row[4],
-        pending_count=row[5],
-    )
+    """Aggregate statistics over the user's attempts (invested = successful buys)."""
+    return TransactionStats(**await history.stats(db, current_user.id))
 
 
 @router.get("/crypto/{crypto}", response_model=List[TransactionResponse])
@@ -138,18 +128,9 @@ async def transactions_by_crypto(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the user's transactions for one cryptocurrency."""
-    result = await db.execute(
-        select(Transaction)
-        .where(
-            Transaction.user_id == current_user.id,
-            Transaction.crypto == crypto.strip().upper(),
-        )
-        .order_by(Transaction.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    return result.scalars().all()
+    """List the user's attempts for one cryptocurrency."""
+    rows, _ = await history.list_rows(db, current_user.id, crypto=crypto, limit=limit, offset=offset)
+    return [TransactionResponse.from_row(r) for r in rows]
 
 
 @router.get("/status/{tx_status}", response_model=List[TransactionResponse])
@@ -160,18 +141,10 @@ async def transactions_by_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the user's transactions with a given status."""
-    result = await db.execute(
-        select(Transaction)
-        .where(
-            Transaction.user_id == current_user.id,
-            Transaction.status == _validate_status(tx_status),
-        )
-        .order_by(Transaction.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    return result.scalars().all()
+    """List the user's attempts with a given status."""
+    rows, _ = await history.list_rows(db, current_user.id, status=_validate_status(tx_status),
+                                      limit=limit, offset=offset)
+    return [TransactionResponse.from_row(r) for r in rows]
 
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
@@ -180,14 +153,8 @@ async def get_transaction(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get one transaction by id."""
-    result = await db.execute(
-        select(Transaction).where(
-            Transaction.id == transaction_id,
-            Transaction.user_id == current_user.id,
-        )
-    )
-    transaction = result.scalar_one_or_none()
-    if transaction is None:
+    """Get one attempt by id."""
+    row = await history.get_row(db, current_user.id, transaction_id)
+    if row is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    return transaction
+    return TransactionResponse.from_row(row)

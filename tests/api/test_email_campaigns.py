@@ -1,6 +1,7 @@
 import pytest
 
 from api.models import Transaction
+from tests.api.conftest import make_autobuy_purchase, make_history
 from api.services import email_campaigns as camp
 from api.services.email_templates import TEMPLATES, render
 from tests.api.test_email_service import CapturingEmail
@@ -35,7 +36,35 @@ def test_unknown_template_rejected():
         render("phishing_special", name="x")
 
 
-async def test_first_purchase_email(db, user, purchase, monkeypatch):
+async def test_first_purchase_email(db, user, binance_key, monkeypatch):
+    capture = CapturingEmail()
+    monkeypatch.setattr(camp, "email_service", capture)
+    p = await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100.0, key=binance_key)
+    tx = await make_history(db, user, purchase=p, amount_crypto=0.001, cost_usd=100.0, fill_price=50000.0,
+                            order_id="ORD-1")
+    await camp.on_buy_executed(db, user, tx, p)
+    assert len(capture.sent) == 1
+    assert "first automated purchase" in capture.sent[0]["subject"]
+    assert "ORD-1" in capture.sent[0]["text"] and "50000.00" in capture.sent[0]["text"]
+
+
+async def test_milestone_crossing(db, user, binance_key, monkeypatch):
+    capture = CapturingEmail()
+    monkeypatch.setattr(camp, "email_service", capture)
+    p = await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100.0, key=binance_key)
+    await make_history(db, user, purchase=p, amount_crypto=0.01, cost_usd=950.0)
+    crossing = await make_history(db, user, purchase=p, amount_crypto=0.001, cost_usd=100.0)
+    await camp.on_buy_executed(db, user, crossing, p)  # 950 -> 1050 crosses 1k
+    assert len(capture.sent) == 1
+    assert "1,000 USDT invested" in capture.sent[0]["subject"]
+
+    # a further purchase that crosses nothing sends nothing
+    quiet = await make_history(db, user, purchase=p, amount_crypto=0.001, cost_usd=50.0)
+    await camp.on_buy_executed(db, user, quiet, p)
+    assert len(capture.sent) == 1
+
+
+async def test_legacy_after_purchase_completed_still_works_for_the_legacy_executor(db, user, purchase, monkeypatch):
     capture = CapturingEmail()
     monkeypatch.setattr(camp, "email_service", capture)
     tx = Transaction(user_id=user.id, recurring_purchase_id=purchase.id, crypto="BTC",
@@ -44,31 +73,7 @@ async def test_first_purchase_email(db, user, purchase, monkeypatch):
     db.add(tx)
     await db.commit()
     await camp.after_purchase_completed(db, user, tx)
-    assert len(capture.sent) == 1
-    assert "first automated purchase" in capture.sent[0]["subject"]
-
-
-async def test_milestone_crossing(db, user, purchase, monkeypatch):
-    capture = CapturingEmail()
-    monkeypatch.setattr(camp, "email_service", capture)
-    older = Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.01,
-                        cost_usdt=950.0, status="completed")
-    crossing = Transaction(user_id=user.id, recurring_purchase_id=purchase.id,
-                           crypto="BTC", amount_crypto=0.001, cost_usdt=100.0,
-                           status="completed")
-    db.add_all([older, crossing])
-    await db.commit()
-    await camp.after_purchase_completed(db, user, crossing)  # 950 -> 1050 crosses 1k
-    assert len(capture.sent) == 1
-    assert "1,000 USDT invested" in capture.sent[0]["subject"]
-
-    # a further purchase that crosses nothing sends nothing
-    quiet = Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.001,
-                        cost_usdt=50.0, status="completed")
-    db.add(quiet)
-    await db.commit()
-    await camp.after_purchase_completed(db, user, quiet)
-    assert len(capture.sent) == 1
+    assert len(capture.sent) == 1 and "first automated purchase" in capture.sent[0]["subject"]
 
 
 async def test_welcome_sent_on_register(db, monkeypatch):
@@ -95,19 +100,14 @@ async def test_welcome_sent_on_register(db, monkeypatch):
             await db.commit()
 
 
-async def test_weekly_summary(db, user, monkeypatch):
+async def test_weekly_summary(db, user, binance_key, monkeypatch):
     capture = CapturingEmail()
     monkeypatch.setattr(camp, "email_service", capture)
-    db.add_all([
-        Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.002,
-                    cost_usdt=200.0, status="completed"),
-        Transaction(user_id=user.id, crypto="ETH", amount_crypto=0.1,
-                    cost_usdt=150.0, status="completed"),
-        Transaction(user_id=user.id, crypto="SOL", amount_crypto=1.0,
-                    cost_usdt=999.0, status="failed"),
-    ])
-    await db.commit()
-    await camp.send_weekly_summaries()
+    await make_history(db, user, crypto="BTC", amount_crypto=0.002, cost_usd=200.0, key=binance_key)
+    await make_history(db, user, crypto="ETH", amount_crypto=0.1, cost_usd=150.0, key=binance_key, purchase_type="dca")
+    await make_history(db, user, crypto="SOL", amount_crypto=1.0, cost_usd=999.0, key=binance_key, status="failed")
+    sent = await camp.send_weekly_summaries()
+    assert sent >= 1
     mine = [m for m in capture.sent if m["to"] == user.email]
     assert len(mine) == 1
     body = mine[0]["text"]

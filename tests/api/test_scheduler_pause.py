@@ -192,7 +192,7 @@ async def test_alerts_cover_the_autobuy_job(db, user, binance_key, admin):
     assert by["schedulers_paused"]["severity"] == "ok" and by["schedulers_paused"]["value"] == "running"
     assert by["autobuy_run"]["severity"] == "warning" and "failed" in by["autobuy_run"]["detail"]
     assert by["autobuy_consecutive_failures"]["value"] == "1"
-    assert by["autobuy_failed_transactions_24h"]["value"] >= "1"
+    assert int(by["failed_transactions_24h"]["value"]) >= 1
 
     await scheduler_state.pause(str(admin.id))
     async with api() as c:

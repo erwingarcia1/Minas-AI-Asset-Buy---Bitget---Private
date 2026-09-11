@@ -1,12 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from sqlalchemy import update
 
 import api.services.market_data as md_mod
-from api.models import Transaction
-from tests.api.conftest import auth_headers
+from tests.api.conftest import auth_headers, make_autobuy_purchase, make_history
 from tests.api.test_analytics import FakeMarket
 
 
@@ -16,24 +14,20 @@ def client():
 
 
 @pytest.fixture
-async def history(db, user):
-    txs = [
-        Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.002,
-                    cost_usdt=100.0, exchange_rate=50000.0, status="completed"),
-        Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.001,
-                    cost_usdt=60.0, exchange_rate=60000.0, status="completed"),
-        Transaction(user_id=user.id, crypto="ETH", amount_crypto=0.1,
-                    cost_usdt=250.0, exchange_rate=2500.0, status="completed"),
-        Transaction(user_id=user.id, crypto="SOL", amount_crypto=9.9,
-                    cost_usdt=990.0, status="failed"),
-    ]
-    db.add_all(txs)
-    await db.commit()
-    # pin all rows into this calendar year deterministically
-    await db.execute(update(Transaction).where(Transaction.user_id == user.id)
-                     .values(created_at=datetime(datetime.now(timezone.utc).year, 3, 15,
-                                                 tzinfo=timezone.utc)))
-    await db.commit()
+async def history(db, user, binance_key):
+    year = datetime.now(timezone.utc).year
+    when = datetime(year, 3, 15, 10, 30, tzinfo=timezone.utc)   # pinned into this calendar year
+    btc = await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100.0, key=binance_key)
+    eth = await make_autobuy_purchase(db, user, crypto="ETH", amount_usd=250.0, purchase_type="dca", key=binance_key)
+    sol = await make_autobuy_purchase(db, user, crypto="SOL", amount_usd=990.0, key=binance_key)
+    await make_history(db, user, purchase=btc, amount_crypto=0.002, cost_usd=100.0, fill_price=50000.0,
+                       created_at=when, order_id="ORD-BTC-1", withdrawal_id="WD-1", withdrawal_fee=0.00005,
+                       withdrawal_fee_currency="BTC", tx_hash="0xbtc1", fee=0.1, fee_currency="USDT")
+    await make_history(db, user, purchase=btc, amount_crypto=0.001, cost_usd=60.0, fill_price=60000.0,
+                       created_at=when + timedelta(days=1), order_id="ORD-BTC-2")
+    await make_history(db, user, purchase=eth, amount_crypto=0.1, cost_usd=250.0, fill_price=2500.0,
+                       created_at=when, order_id="ORD-ETH-1")
+    await make_history(db, user, purchase=sol, amount_crypto=9.9, cost_usd=990.0, status="failed", created_at=when)
     return user
 
 
@@ -66,9 +60,19 @@ async def test_tax_csv_export(db, history):
                         headers=auth_headers(history))
     assert r.headers["content-type"].startswith("text/csv")
     lines = r.text.strip().splitlines()
-    assert lines[0] == "crypto,acquired_date,amount,cost_usdt,price_usdt,method"
-    assert len(lines) == 4  # 3 completed lots
-    assert any("BTC" in l and "50000.00" in l for l in lines)
+    assert lines[0] == ("datetime_utc,crypto,quantity,fill_price_usd,usd_amount,fee,fee_currency,exchange,order_id,"
+                        "purchase_type,tx_type,withdrawal_address,network,withdrawal_fee,withdrawal_fee_currency,"
+                        "tx_hash,method")
+    assert len(lines) == 4  # 3 successful buys; the failed one is excluded
+    btc1 = next(l for l in lines if "ORD-BTC-1" in l)
+    cells = btc1.split(",")
+    assert cells[0].startswith(f"{year}-03-15 10:30:00") and cells[1] == "BTC" and cells[2] == "0.00200000"
+    assert cells[3] == "50000.00" and cells[4] == "100.00" and cells[5] == "0.10000000" and cells[6] == "USDT"
+    assert cells[7] == "binance" and cells[9] == "autobuy" and cells[10] == "withdrawal"
+    assert cells[11] == "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq" and cells[12] == "mainnet"
+    assert cells[13] == "0.00005000" and cells[14] == "BTC" and cells[15] == "0xbtc1" and cells[16] == "FIFO"
+    eth = next(l for l in lines if "ORD-ETH-1" in l).split(",")
+    assert eth[10] == "accumulation" and eth[11] == "" and eth[12] == "", "held on exchange: no withdrawal columns"
 
 
 async def test_pdf_export(db, history):

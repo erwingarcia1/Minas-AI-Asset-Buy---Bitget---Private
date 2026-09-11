@@ -4,7 +4,7 @@ import pytest
 import api.routes.analytics as an_mod
 import api.services.market_data as md_mod
 from api.models import Purchase, RecurringPurchase, Transaction, utcnow
-from tests.api.conftest import auth_headers
+from tests.api.conftest import auth_headers, make_autobuy_purchase, make_history
 
 PRICES = {"BTC": 60000.0, "ETH": 2500.0}
 VOLS = {"BTC": 2.5, "ETH": 6.1}
@@ -27,16 +27,18 @@ def market(monkeypatch):
 
 
 @pytest.fixture
-async def seeded(db, user):
+async def seeded(db, user, binance_key):
+    # history (purchase_transactions): BTC 0.01 @ avg 50k -> +20% at 60k; ETH 0.1 @ 3000 -> -16.67% at 2500
+    await make_history(db, user, crypto="BTC", amount_crypto=0.01, cost_usd=500.0, key=binance_key,
+                       purchase=await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=500.0, key=binance_key,
+                                                            status="completed", next_execution=None))
+    await make_history(db, user, crypto="ETH", amount_crypto=0.1, cost_usd=300.0, key=binance_key,
+                       purchase=await make_autobuy_purchase(db, user, crypto="ETH", amount_usd=300.0, key=binance_key,
+                                                            status="completed", next_execution=None))
+    await make_history(db, user, crypto="SOL", amount_crypto=5, cost_usd=400.0, status="failed",  # must not count
+                       purchase=await make_autobuy_purchase(db, user, crypto="SOL", amount_usd=400.0, key=binance_key,
+                                                            status="failed", next_execution=None))
     db.add_all([
-        # BTC: 0.01 @ avg 50k -> +20% at 60k
-        Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.01,
-                    cost_usdt=500.0, status="completed"),
-        # ETH: 0.1 @ avg 3000 -> -16.67% at 2500
-        Transaction(user_id=user.id, crypto="ETH", amount_crypto=0.1,
-                    cost_usdt=300.0, status="completed"),
-        Transaction(user_id=user.id, crypto="SOL", amount_crypto=5,
-                    cost_usdt=400.0, status="failed"),  # must not count
         # Auto-Buy purchases drive the spend projection (both types)
         Purchase(user_id=user.id, crypto_symbol="BTC", amount_usd=100, frequency="weekly",
                  purchase_type="autobuy", wallet_address="bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",

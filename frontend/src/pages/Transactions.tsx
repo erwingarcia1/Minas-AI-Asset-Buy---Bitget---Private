@@ -35,10 +35,10 @@ export default function Transactions() {
           <div className="card overflow-x-auto p-0">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-slate-500"><tr>
-                <th className="px-4 py-2">Executed</th><th className="px-4 py-2">Asset</th><th className="px-4 py-2">Amount</th><th className="px-4 py-2">Cost</th><th className="px-4 py-2">Rate</th><th className="px-4 py-2">Status</th>
+                <th className="px-4 py-2">Executed</th><th className="px-4 py-2">Asset</th><th className="px-4 py-2">Amount</th><th className="px-4 py-2">Cost</th><th className="px-4 py-2">Rate</th><th className="px-4 py-2">Delivery</th><th className="px-4 py-2">Status</th>
               </tr></thead>
               <tbody>
-                {data.items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">No transactions.</td></tr>}
+                {data.items.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-500">No transactions.</td></tr>}
                 {data.items.map((t) => (
                   <tr key={t.id} className="border-t border-slate-100">
                     <td className="px-4 py-2">{fmtDate(t.executed_at ?? t.created_at)}</td>
@@ -46,6 +46,10 @@ export default function Transactions() {
                     <td className="px-4 py-2">{fmtCrypto(t.amount_crypto)}</td>
                     <td className="px-4 py-2">{fmtUsdt(t.cost_usdt)}</td>
                     <td className="px-4 py-2">{t.exchange_rate ? fmtUsdt(t.exchange_rate) : "—"}</td>
+                    <td className="px-4 py-2 text-xs">
+                      {t.tx_type === "withdrawal" ? <>Sent to <span className="font-mono" title={t.wallet_address ?? ""}>{(t.wallet_address ?? "").slice(0, 10)}…</span> ({t.blockchain_network})</> : "Held on exchange"}
+                      <div className="text-slate-400">{t.exchange ?? "—"}{t.order_id ? ` · order ${t.order_id}` : ""}{t.tx_hash ? ` · tx ${t.tx_hash.slice(0, 10)}…` : ""}</div>
+                    </td>
                     <td className="px-4 py-2"><StatusBadge status={t.status} />{t.error_message && <p className="mt-1 text-xs text-red-600">{t.error_message}</p>}</td>
                   </tr>
                 ))}

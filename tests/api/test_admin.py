@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from api.models import Transaction, User
-from tests.api.conftest import auth_headers
+from tests.api.conftest import auth_headers, make_autobuy_purchase, make_history
 
 PW = "Str0ng!passw0rd"
 
@@ -78,10 +78,8 @@ async def test_unauthenticated_gets_401_on_every_admin_route():
             assert r.status_code == 401, (method, path, r.status_code)
 
 
-async def test_stats_and_user_listing(db, admin, user, purchase):
-    db.add(Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.001,
-                       cost_usdt=123.0, status="completed"))
-    await db.commit()
+async def test_stats_and_user_listing(db, admin, user, purchase, binance_key):
+    await make_history(db, user, crypto="BTC", amount_crypto=0.001, cost_usd=123.0, key=binance_key)
     H = auth_headers(admin)
     async with client() as c:
         stats = (await c.get("/api/admin/stats", headers=H)).json()
@@ -149,9 +147,9 @@ async def test_kyc_override_requires_note(db, admin, user):
     assert user.kyc_status == "rejected"
 
 
-async def test_transactions_audit_and_force_retry(db, admin, user, purchase):
-    db.add(Transaction(user_id=user.id, crypto="BTC", amount_crypto=0.001,
-                       cost_usdt=50.0, status="failed", error_message="boom"))
+async def test_transactions_audit_and_force_retry(db, admin, user, purchase, binance_key):
+    await make_history(db, user, crypto="BTC", amount_crypto=0.001, cost_usd=50.0, status="failed",
+                       key=binance_key, error_message="boom")
     from datetime import timedelta
     purchase.next_purchase_date = purchase.next_purchase_date + timedelta(days=30)
     await db.commit()
@@ -175,6 +173,5 @@ async def test_alerts_snapshot(admin):
     names = {a["name"] for a in items}
     assert {"scheduler_consecutive_failures", "scheduler_tick",
             "failed_transactions_24h", "active_purchases",
-            "schedulers_paused", "autobuy_run", "autobuy_consecutive_failures",
-            "autobuy_failed_transactions_24h"} <= names
+            "schedulers_paused", "autobuy_run", "autobuy_consecutive_failures"} <= names
     assert all(a["severity"] in ("ok", "warning", "critical") for a in items)

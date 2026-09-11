@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import RecurringPurchase, Transaction, User
+from api.models import Purchase, RecurringPurchase, User
 from api.routes.user import UTCModel, get_current_user
 
 logger = logging.getLogger("autobuy.admin")
@@ -53,30 +53,21 @@ async def platform_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Platform-wide totals and 7-day trend inputs."""
+    from api.services import history
     now = datetime.now(timezone.utc)
     day_ago, week_ago = now - timedelta(days=1), now - timedelta(days=7)
-    completed = Transaction.status == "completed"
     row = (await db.execute(select(
         func.count(User.id),
         func.count(User.id).filter(User.kyc_status == "verified"),
         func.count(User.id).filter(User.suspended.is_(True)),
         func.count(User.id).filter(User.created_at >= week_ago),
     ))).one()
-    tx = (await db.execute(select(
-        func.coalesce(func.sum(Transaction.cost_usdt).filter(completed), 0.0),
-        func.count(Transaction.id),
-        func.count(Transaction.id).filter(Transaction.status == "failed",
-                                          Transaction.created_at >= day_ago),
-        func.coalesce(func.sum(Transaction.cost_usdt).filter(
-            completed, Transaction.created_at >= week_ago), 0.0),
-    ))).one()
-    active = (await db.execute(select(func.count(RecurringPurchase.id)).where(
-        RecurringPurchase.enabled.is_(True)))).scalar_one()
+    totals = await history.platform_totals(db, day_ago, week_ago)
+    active = (await db.execute(select(func.count(Purchase.id)).where(
+        Purchase.status == "active"))).scalar_one()
     return PlatformStats(
         total_users=row[0], verified_users=row[1], suspended_users=row[2],
-        signups_7d=row[3], total_invested_usdt=round(float(tx[0]), 2),
-        total_transactions=tx[1], failed_transactions_24h=tx[2],
-        volume_7d_usdt=round(float(tx[3]), 2), active_purchases=active)
+        signups_7d=row[3], active_purchases=active, **totals)
 
 
 # ------------------------------------------------------------------- users
@@ -109,16 +100,15 @@ async def list_users(
     if q:
         filters.append(User.email.ilike(f"%{q}%"))
     total = (await db.execute(select(func.count(User.id)).where(*filters))).scalar_one()
-    rows = (await db.execute(
-        select(User, func.coalesce(func.sum(Transaction.cost_usdt).filter(
-            Transaction.status == "completed"), 0.0))
-        .outerjoin(Transaction, Transaction.user_id == User.id)
-        .where(*filters).group_by(User.id)
-        .order_by(User.created_at.desc()).limit(limit).offset(offset))).all()
+    from api.services import history
+    users = (await db.execute(
+        select(User).where(*filters)
+        .order_by(User.created_at.desc()).limit(limit).offset(offset))).scalars().all()
+    invested = await history.invested_per_user(db)
     items = []
-    for user, invested in rows:
+    for user in users:
         row = AdminUserRow.model_validate(user)
-        row.invested_usdt = round(float(invested), 2)
+        row.invested_usdt = invested.get(user.id, 0.0)
         items.append(row)
     return AdminUserList(items=items, total=total)
 
@@ -229,20 +219,17 @@ async def all_transactions(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cross-user transaction audit log, newest first."""
-    filters = []
-    if status_filter:
-        filters.append(Transaction.status == status_filter)
-    if user_id:
-        filters.append(Transaction.user_id == user_id)
-    total = (await db.execute(
-        select(func.count(Transaction.id)).where(*filters))).scalar_one()
-    rows = (await db.execute(
-        select(Transaction).where(*filters)
-        .order_by(Transaction.created_at.desc()).limit(limit).offset(offset)
-    )).scalars().all()
+    """Every user's Auto-Buy execution attempts (purchase_transactions), newest
+    first; filter by status (pending | completed | failed) and/or user."""
+    from api.services import history
+    if status_filter is not None and status_filter not in history.API_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status_filter must be one of {history.API_STATUSES}")
+    rows, total = await history.list_rows(db, user_id, status=status_filter, limit=limit, offset=offset)
     return AdminTransactionList(
-        items=[AdminTransactionRow.model_validate(t) for t in rows], total=total)
+        items=[AdminTransactionRow(id=r.id, user_id=r.user_id, crypto=r.crypto, cost_usdt=r.cost_usd,
+                                   status=r.status, error_message=r.error_message, created_at=r.created_at)
+               for r in rows],
+        total=total)
 
 
 @router.post("/purchases/{purchase_id}/force-retry", status_code=204)
@@ -292,7 +279,6 @@ async def alerts(admin: User = Depends(require_admin),
     for BOTH schedulers: the legacy recurring tick (``scheduler_*``) and the
     Auto-Buy execute_purchases job (``autobuy_*``). Heartbeats come from Redis,
     so they describe whichever worker actually ran, not the one answering."""
-    from api.models import PurchaseTransaction
     from api.services import scheduler_state
     from api.services.metrics import (
         active_purchases_total, scheduler_consecutive_failures)
@@ -366,22 +352,13 @@ async def alerts(admin: User = Depends(require_admin),
                 + (f"; last result {ab['last_result']}" if ab["last_result"] else "")
                 + (f" {ab['last_counts']}" if ab["last_counts"] else ""))))
 
-    # -- execution failures in the last 24h, both systems --
-    day_ago = now - timedelta(days=1)
-    failed_24h = (await db.execute(select(func.count(Transaction.id)).where(
-        Transaction.status == "failed",
-        Transaction.created_at >= day_ago))).scalar_one()
+    # -- failed Auto-Buy execution attempts in the last 24h (purchase_transactions) --
+    from api.services import history
+    failed_24h = await history.count_failed_since(db, now - timedelta(days=1))
     items.append(AlertItem(
         name="failed_transactions_24h",
         severity="warning" if failed_24h > 10 else "ok",
-        value=str(failed_24h), detail="Legacy recurring scheduler: failed executions in the last 24h"))
-    ab_failed_24h = (await db.execute(select(func.count(PurchaseTransaction.id)).where(
-        PurchaseTransaction.status == "failed",
-        PurchaseTransaction.created_at >= day_ago))).scalar_one()
-    items.append(AlertItem(
-        name="autobuy_failed_transactions_24h",
-        severity="warning" if ab_failed_24h > 10 else "ok",
-        value=str(ab_failed_24h), detail="Auto-Buy job: failed execution attempts in the last 24h"))
+        value=str(failed_24h), detail="Auto-Buy job: failed execution attempts in the last 24h"))
 
     active = int(active_purchases_total._value.get())
     items.append(AlertItem(
