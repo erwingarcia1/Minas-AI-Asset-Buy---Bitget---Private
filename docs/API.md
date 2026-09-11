@@ -58,11 +58,12 @@ JWT bearer tokens. `POST /api/auth/login` returns an **access token**
 | auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password/validate` (`{token}` → 200 `{valid: true}` / 400 `{valid: false}`, does not consume the token) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
-| auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; any wallet is validated against the coin's chain + network, rejected if it is a known burn/unspendable address, and checked for exchange network support on autobuy) · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `DELETE /{id}` (cancel, history kept) |
-| wallets (`/api/wallets`) | `POST /` (format must match network; Bitcoin testnet/mainnet distinguished; Ethereum/Solana valid on both) · `GET /?blockchain_network=` · `DELETE /{id}` |
+| auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; `blockchain_network` is the exchange's chain name (`BTC`, `ERC20`, `TRC20`, `SOL`, `ArbitrumOne`, …; defaults to the coin's native chain); any wallet is validated against that chain's address format and rejected if it is a known burn/unspendable address; on Bitget the pair, minimum order, chain and (for autobuy) the minimum withdrawal are checked live, see "Bitget market data") · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `DELETE /{id}` (cancel, history kept) |
+| wallets (`/api/wallets`) | `POST /` (`blockchain_network` = exchange chain name; the address format must match the chain family: bitcoin mainnet only, EVM `0x…`, Solana base58, Tron `T…`) · `GET /?blockchain_network=` · `DELETE /{id}` |
 | email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
 | webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
-| exchange (`/api/exchange`) | `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` — one harmless authenticated call (account info on Binance/Bitget, a balance read on Bybit/OKX); the key records `verification_status` (pending \| verified \| failed), a readable `verification_error` (never credentials), `verified_at`, `last_checked_at` and `withdrawal_enabled` (warn the user; the executor still requires `verified`) |
+| market (`/api/v2/market`) | `GET /coins/{coin}?amount_usd=` — the coin's Bitget USDT pair (online, minimum order, taker fee) and every withdrawal chain with fee, minimum, precision, address family and, when `amount_usd` is given, the fee in USD, the estimated coins received and whether the amount clears the minimum withdrawal (`meets_minimum`) |
+| exchange (`/api/exchange`) | `GET /supported` (exchanges this deployment accepts keys for, from `SUPPORTED_EXCHANGES`, default `bitget`; other exchanges are rejected with 422 `exchange_not_supported`) · `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` — one harmless authenticated call (account info on Binance/Bitget, a balance read on Bybit/OKX); the key records `verification_status` (pending \| verified \| failed), a readable `verification_error` (never credentials), `verified_at`, `last_checked_at` and `withdrawal_enabled` (warn the user; the executor still requires `verified`) |
 | transactions (`/api/transactions`) | `GET /` · `/{id}` · `/crypto/{crypto}` · `/status/{status}` · `/stats/summary` — every Auto-Buy execution attempt (purchase_transactions): fill price, cost, fees, exchange, order id, and for withdrawals the address, network, fee and tx hash. `status` is pending \| completed \| failed |
 | dashboard (`/api/dashboard`) | `GET /` (active/upcoming = the user's active Auto-Buy purchases, both types; holdings and averages from purchase_transactions) · `/stats` · `/analytics/timeline?days=N` |
 | service | `GET /health` (`schedulers`: pause switch + per-scheduler running/paused, last run, last result, consecutive failures for both the legacy recurring tick and the Auto-Buy job) · `GET /metrics` (Prometheus; keep private) |
@@ -99,20 +100,47 @@ default 60/min. Login lockout: 5 failed attempts → 15 minutes.
 
 `/api/v2/purchases` buys `amount_usd` of a coin on one of the caller's
 exchange accounts in one of two modes selected by `purchase_type`: `autobuy`
-(default: each buy is withdrawn to `wallet_address` on the declared network)
-or `dca` (coins accumulate on the exchange; the wallet is kept on file for
-later withdrawals). Both modes require a validated wallet address and a
-network, share the same list, history and scheduler, and every execution
-attempt records its `tx_type` (`withdrawal` or `accumulation`). The boolean
-`withdraw_immediately` is accepted as a deprecated alias and echoed in
-responses. Supported coins and address chains: BTC (bitcoin), ETH/USDT/USDC
-(ethereum), SOL (solana). A background job runs every 5 minutes
+(default: each buy is withdrawn to `wallet_address` on `blockchain_network`)
+or `dca` (coins accumulate on the exchange; a wallet is optional and, if
+given, validated). `blockchain_network` is the exchange's own chain name as
+returned by `GET /api/v2/market/coins/{coin}`; it defaults to the coin's
+native chain (BTC → `BTC`, ETH/USDT/USDC → `ERC20`, SOL → `SOL`) and the
+address must match the chain's family (bitcoin mainnet, EVM, Solana, Tron).
+Both modes share the same list, history and scheduler, and every execution
+attempt records its `tx_type` (`buy`, and `withdrawal` as a separate row).
+The boolean `withdraw_immediately` is accepted as a deprecated alias and
+echoed in responses. A background job runs every 5 minutes
 (`api/tasks/purchase_scheduler.py`): only KYC-verified, non-suspended owners
 are processed; every attempt is recorded as a `purchase_transactions` row;
 success advances `next_execution` (daily +24h, weekly +7d, monthly same day
 next month, one-time completes); three consecutive failures mark the purchase
-`failed`. Buys and withdrawals are simulated while `AUTOBUY_DRY_RUN=1`; real
-withdrawals are implemented for Binance only.
+`failed`. Buys and withdrawals are simulated while `AUTOBUY_DRY_RUN=1`.
+Only exchanges listed in `SUPPORTED_EXCHANGES` (default `bitget`) accept
+keys; the Binance/Bybit/OKX code paths remain but are switched off.
+
+### Bitget market data
+
+`api/services/bitget_market.py` caches Bitget's public spot symbols
+(`GET /api/v2/spot/public/symbols`) and coin chains
+(`GET /api/v2/spot/public/coins`) in Redis for one hour
+(`bitget:market:symbol:{PAIR}`, `bitget:market:chains:{COIN}`). Field names
+were verified against the live endpoints on 2026-09-11: symbols carry
+`status`, `minTradeUSDT`, `maxMarketOrderValue`, `quantityPrecision`,
+`takerFeeRate`; chains carry `chain`, `withdrawable`, `withdrawFee`,
+`extraWithdrawFee` (fraction), `minWithdrawAmount`, `withdrawMinScale`,
+`needTag`, `contractAddress`, `browserUrl`. Purchase creation and the
+`PUT /{id}` mode switch validate against this data and answer 422 with
+`{error, details}` where `error` is one of `pair_not_available`,
+`pair_not_trading`, `below_minimum_order`, `above_maximum_order`,
+`chain_not_available`, `chain_not_withdrawable` or
+`below_minimum_withdrawal` (details include `minimum_usd`, the smallest
+amount that clears minimum + fee at the live ask), and 503
+`exchange_data_unavailable` when Bitget cannot be reached and nothing is
+cached (the purchase is not created). The executor re-checks the pair before
+buying and the chain before withdrawing; the withdrawal size is floored to
+`withdrawMinScale`. Bitget only sends API withdrawals to addresses saved in
+the user's Bitget address book, and withdraw-enabled keys must whitelist the
+server's IP; both are explained on the Settings page.
 
 ## Email (Resend)
 

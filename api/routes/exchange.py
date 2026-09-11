@@ -74,9 +74,10 @@ class APIKeyCreate(BaseModel):
     @classmethod
     def _supported(cls, value):
         value = value.lower()
-        if value not in SUPPORTED_EXCHANGES:
+        enabled = settings.supported_exchanges
+        if value not in SUPPORTED_EXCHANGES or value not in enabled:
             raise ValueError(
-                f"exchange must be one of: {', '.join(sorted(SUPPORTED_EXCHANGES))}"
+                f"exchange must be one of: {', '.join(enabled)}"
             )
         return value
 
@@ -113,6 +114,12 @@ def _to_response(key: APIKey) -> APIKeyResponse:
         created_at=key.created_at,
         updated_at=key.updated_at,
     )
+
+
+@router.get("/supported", response_model=List[str])
+async def supported_exchanges():
+    """Exchanges this deployment offers (SUPPORTED_EXCHANGES); keys for others are refused."""
+    return settings.supported_exchanges
 
 
 @router.post("/keys", response_model=APIKeyResponse, status_code=status.HTTP_201_CREATED)

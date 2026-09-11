@@ -1,4 +1,5 @@
 // Mirrors api/utils/exchange_networks.py.
+/** @deprecated legacy mainnet/testnet table; withdrawals use exchange chain names (see utils/chains.ts). */
 export const EXCHANGE_NETWORKS: Record<string, string[]> = {
   binance: ["mainnet", "testnet"],
   bitget: ["mainnet", "testnet"],

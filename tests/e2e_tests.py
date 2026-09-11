@@ -43,7 +43,7 @@ BTC_WALLET = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
 
 def purchase_body(key_id: str, **over) -> dict:
     body = {"crypto_symbol": "BTC", "amount_usd": 25.0, "frequency": "weekly", "wallet_address": BTC_WALLET,
-            "blockchain_network": "mainnet", "exchange_account_id": key_id, "purchase_type": "autobuy"}
+            "blockchain_network": "BTC", "exchange_account_id": key_id, "purchase_type": "autobuy"}
     body.update(over)
     return body
 
@@ -292,7 +292,7 @@ async def test_transactions_and_dashboard_stats(client, db, cleanup):
     assert item["id"] == tx["id"] and item["status"] == "completed" and item["cost_usdt"] == 25.0
     assert item["purchase_id"] == str(purchase_id) and item["exchange"] == "binance" and item["order_id"] == "DRY-e2e"
     wd = by_type["withdrawal"]
-    assert wd["wallet_address"] == BTC_WALLET and wd["blockchain_network"] == "mainnet" and wd["withdrawal_id"] == "DRY-WD-e2e"
+    assert wd["wallet_address"] == BTC_WALLET and wd["blockchain_network"] == "BTC" and wd["withdrawal_id"] == "DRY-WD-e2e"
     assert wd["cost_usdt"] == 0.0, "a withdrawal is not a purchase"
     assert (await client.get("/api/transactions/", params={"limit": 10, "offset": 5}, headers=auth)).json()["items"] == []
 

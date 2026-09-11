@@ -1,7 +1,7 @@
 import { api } from "./client";
 import type {
   AdminAlert, AdminStats, AdminTxRow, AdminUserRow, ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate,
-  AutoBuyPurchaseCreated, AutoBuyPurchaseUpdate, AutoBuyTransaction, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
+  AutoBuyPurchaseCreated, AutoBuyPurchaseUpdate, AutoBuyTransaction, CoinMarket, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
   PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
@@ -33,6 +33,7 @@ export const userAPI = {
   sendVerification: (email: string) =>
     data<EmailSentResponse>(api.post("/email/send-verification", { email })),
   exchangeKeys: () => data<ApiKey[]>(api.get("/exchange/keys")),
+  supportedExchanges: () => data<string[]>(api.get("/exchange/supported")),
   addExchangeKey: (body: { exchange: string; api_key: string; api_secret: string; passphrase?: string }) =>
     data<ApiKey>(api.post("/exchange/keys", body)),
   verifyExchangeKey: (id: string) => data<KeyVerifyResponse>(api.post(`/exchange/keys/${id}/verify`)),
@@ -119,4 +120,10 @@ export const adminAPI = {
   transactions: (params: { status_filter?: string; user_id?: string; limit?: number; offset?: number } = {}) =>
     data<{ items: AdminTxRow[]; total: number }>(api.get("/admin/transactions", { params })),
   alerts: () => data<AdminAlert[]>(api.get("/admin/alerts")),
+};
+
+/** Bitget market data for the purchase form: pair status and withdrawal chains with fee/minimum. */
+export const marketAPI = {
+  coin: (coin: string, amountUsd?: number) =>
+    data<CoinMarket>(api.get(`/v2/market/coins/${encodeURIComponent(coin)}`, { params: amountUsd ? { amount_usd: amountUsd } : undefined })),
 };

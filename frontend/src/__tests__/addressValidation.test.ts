@@ -48,3 +48,19 @@ describe("burn / placeholder denylist", () => {
     expect(addressVerdict("0x000000000000000000000000000000000000dEaD", "ETH", "mainnet")?.reason).toMatch(/burn/);
   });
 });
+
+describe("chain-based verdicts (exchange chain names)", () => {
+  it("checks the address format against the chain family and refuses testnet / unsupported chains", async () => {
+    const { addressVerdictForChain, familyForChain } = await import("@/utils/chains");
+    expect(familyForChain("ArbitrumOne")).toBe("ethereum");
+    expect(familyForChain("LIGHTNING")).toBeNull();
+    expect(addressVerdictForChain(BTC, "BTC")).toMatchObject({ ok: true });
+    expect(addressVerdictForChain(TESTNET, "BTC")?.reason).toMatch(/testnet/);
+    expect(addressVerdictForChain(ETH, "BEP20")).toMatchObject({ ok: true });
+    expect(addressVerdictForChain(BTC, "ERC20")?.reason).toMatch(/0x/);
+    expect(addressVerdictForChain(SOL, "SOL")).toMatchObject({ ok: true });
+    expect(addressVerdictForChain("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", "TRC20")).toMatchObject({ ok: true });
+    expect(addressVerdictForChain(ETH, "LIGHTNING")?.reason).toMatch(/not supported/);
+    expect(addressVerdictForChain("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "BTC")?.reason).toMatch(/burn/);
+  });
+});

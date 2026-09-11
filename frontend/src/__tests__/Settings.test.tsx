@@ -5,7 +5,8 @@ import Settings from "@/pages/Settings";
 
 vi.mock("@/api/endpoints", () => ({
   authAPI: { changePassword: vi.fn() },
-  userAPI: { exchangeKeys: vi.fn(), addExchangeKey: vi.fn(), verifyExchangeKey: vi.fn(), deleteExchangeKey: vi.fn(), sendVerification: vi.fn() },
+  userAPI: { exchangeKeys: vi.fn(), addExchangeKey: vi.fn(), verifyExchangeKey: vi.fn(), deleteExchangeKey: vi.fn(), sendVerification: vi.fn(),
+             supportedExchanges: vi.fn().mockResolvedValue(["bitget"]) },
   reportsAPI: { performance: vi.fn().mockResolvedValue({ has_data: false }) },
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
 }));
@@ -73,5 +74,19 @@ describe("Settings: unconfirmed withdrawal permission", () => {
     render(<MemoryRouter><Settings /></MemoryRouter>);
     await screen.findByTestId("exchange-key");
     expect(screen.getByRole("status")).toHaveTextContent(/could not be confirmed.*treat it as able to withdraw/);
+  });
+});
+
+describe("Settings: Bitget guidance", () => {
+  it("offers only the exchanges the deployment supports and explains the key permissions, IP whitelist and address book", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Exchange API keys");
+    await waitFor(() => expect(Array.from((screen.getByLabelText("Exchange") as HTMLSelectElement).options).map((o) => o.value)).toEqual(["bitget"]));
+    const g = screen.getByTestId("key-guidance");
+    expect(g).toHaveTextContent(/Read.*Spot trade.*Leave Withdraw off/);
+    expect(g).toHaveTextContent(/Whitelist our server's IP/);
+    expect(screen.getByTestId("server-ip-placeholder")).toHaveTextContent("our server IP will be shown here");
+    expect(g).toHaveTextContent(/Bitget address book/);
   });
 });

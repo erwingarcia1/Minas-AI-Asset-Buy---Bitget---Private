@@ -170,7 +170,9 @@ async def test_failed_then_retry_succeeds_and_clears_error(db, user, binance_key
     assert binance_key.verified_at is not None
 
 
-async def test_credential_change_resets_verification(db, user, binance_key, client):
+async def test_credential_change_resets_verification(db, user, binance_key, client, monkeypatch):
+    from api.config import settings
+    monkeypatch.setattr(settings, "supported_exchanges_csv", "bitget,binance")
     await verify(client, user, binance_key)
     async with client as c:
         r = await c.post("/api/exchange/keys", headers=auth(user),

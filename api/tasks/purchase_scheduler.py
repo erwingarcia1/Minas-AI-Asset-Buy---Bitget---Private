@@ -125,6 +125,11 @@ class ExchangeClientGateway:
 
     def place_buy(self, account, purchase, client_oid, dry_run):
         try:
+            if account.exchange == "bitget":
+                # pair exists, is online, order above Bitget's minimum — from the hour-cached symbol data
+                from api.services import bitget_market
+                bitget_market.check_symbol(purchase.crypto_symbol, purchase.amount_usd,
+                                           bitget_market.get_symbol_sync(purchase.crypto_symbol))
             client = _client_for(account)
             symbol = client.spot_symbol(purchase.crypto_symbol, "USDT")
             return client.place_buy(symbol, purchase.amount_usd, client_oid, dry_run=dry_run)
@@ -148,17 +153,45 @@ class ExchangeClientGateway:
             raise self._wrap(exc, "lookup") from exc
 
     def withdraw(self, account, purchase, amount, client_oid, dry_run):
+        """Send `amount` of the coin to the purchase's wallet on its chain.
+
+        Bitget: the chain's live fee/minimum/precision (hour-cached) decide the
+        withdrawal size — floored to the chain precision — and a size that does
+        not clear minimum + fee fails before anything is sent. Dry runs use the
+        same real data and never call the withdrawal endpoint.
+        """
         if not purchase.wallet_address:
             raise ExecutionError("no wallet address on an autobuy purchase", stage="withdraw")
+        chain = purchase.blockchain_network
+        fee = fee_currency = None
+        size = amount
         try:
+            if account.exchange == "bitget":
+                from api.services import bitget_market
+                entry = bitget_market.find_chain(bitget_market.get_chains_sync(purchase.crypto_symbol), chain)
+                if entry is None:
+                    raise ExecutionError(f"Bitget lists no chain {chain!r} for {purchase.crypto_symbol}",
+                                         stage="withdraw", code="CHAIN_NOT_AVAILABLE")
+                if not entry["withdrawable"]:
+                    raise ExecutionError(f"Bitget has {purchase.crypto_symbol} withdrawals on {chain} suspended",
+                                         stage="withdraw", code="CHAIN_NOT_WITHDRAWABLE")
+                factor = 10 ** int(entry["withdraw_min_scale"])
+                size = int(amount * factor) / factor
+                fee = (entry["withdraw_fee"] or 0.0) + size * (entry["extra_withdraw_fee_pct"] or 0.0)
+                fee_currency = purchase.crypto_symbol
+                if size < (entry["min_withdraw_amount"] or 0.0) + fee or size - fee <= 0:
+                    raise ExecutionError(
+                        f"{size:.8f} {purchase.crypto_symbol} is below Bitget's minimum withdrawal on {chain} "
+                        f"({entry['min_withdraw_amount']:g} + {fee:.8f} fee)", stage="withdraw", code="WITHDRAW_BELOW_MINIMUM")
             client = _client_for(account)
-            result = client.withdraw(purchase.crypto_symbol, purchase.wallet_address, amount,
-                                     network=WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol, purchase.blockchain_network),
+            result = client.withdraw(purchase.crypto_symbol, purchase.wallet_address, size,
+                                     network=chain if account.exchange == "bitget"
+                                     else WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol, chain),
                                      client_oid=client_oid, dry_run=dry_run)
         except Exception as exc:
             raise self._wrap(exc, "withdraw") from exc
-        return {"withdrawal_id": result["withdrawal_id"], "chain": purchase.blockchain_network,
-                "withdrawal_fee": result.get("fee"), "withdrawal_fee_currency": result.get("fee_currency"),
+        return {"withdrawal_id": result["withdrawal_id"], "chain": chain, "size": size,
+                "withdrawal_fee": result.get("fee", fee), "withdrawal_fee_currency": result.get("fee_currency", fee_currency),
                 "tx_hash": result.get("tx_hash"), "raw_status": "simulated" if dry_run else "submitted"}
 
 
@@ -439,6 +472,8 @@ async def _withdraw_after_buy(db: AsyncSession, purchase: Purchase, account: API
     try:
         result = await asyncio.to_thread(gateway.withdraw, account, purchase, amount, wd.client_oid, dry_run)
         wd.status = "success"
+        if result.get("size") is not None:
+            wd.amount_executed = result["size"]
         wd.withdrawal_id = result.get("withdrawal_id")
         wd.exchange_tx_id = wd.withdrawal_id
         wd.withdrawal_chain = result.get("chain") or wd.withdrawal_chain

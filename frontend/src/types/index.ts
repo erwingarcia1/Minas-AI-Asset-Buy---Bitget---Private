@@ -193,7 +193,41 @@ export interface ApiErrorBody {
 export type AutoBuyFrequency = "one_time" | "daily" | "weekly" | "monthly";
 export type AutoBuyStatus = "active" | "paused" | "completed" | "failed" | "cancelled" | "needs_review" | "withdrawal_failed" | "needs_info";
 export type PurchaseType = "autobuy" | "dca";   // autobuy: buy + withdraw to wallet; dca: buy + accumulate on exchange
-export type BlockchainNetwork = "mainnet" | "testnet";
+/** The exchange's chain name for a withdrawal (Bitget: "BTC", "ERC20", "SOL", "TRC20", ...). */
+export type BlockchainNetwork = string;
+export type ChainFamily = "bitcoin" | "ethereum" | "solana" | "tron";
+
+export interface ChainInfo {
+  chain: string;
+  family: ChainFamily | null;
+  family_label: string | null;
+  supported: boolean;            // this platform can validate addresses for it
+  withdrawable: boolean;
+  withdraw_fee: number;
+  extra_withdraw_fee_pct: number;
+  min_withdraw_amount: number;
+  withdraw_min_scale: number;
+  withdraw_confirm: number;
+  need_tag: boolean;
+  browser_url: string | null;
+  is_default: boolean;
+  fee_usd?: number | null;
+  min_purchase_usd?: number | null;
+  estimated_received?: number | null;
+  meets_minimum?: boolean | null;
+}
+
+export interface CoinMarket {
+  coin: string;
+  pair: string;
+  online: boolean;
+  min_trade_usdt: number;
+  taker_fee_rate: number | null;
+  quantity_precision: number;
+  price_ask: number | null;
+  chains: ChainInfo[];
+  note: string;
+}
 
 export interface AutoBuyTransaction {
   id: string;

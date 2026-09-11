@@ -1,10 +1,10 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { autoBuyAPI } from "@/api/endpoints";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { autoBuyAPI, marketAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert } from "@/components/Common";
-import type { AutoBuyPurchase, BlockchainNetwork } from "@/types";
-import { addressVerdict } from "@/utils/addressValidation";
-import { NETWORKS, canExchangeWithdrawToNetwork } from "@/utils/exchangeNetworks";
+import type { AutoBuyPurchase, BlockchainNetwork, ChainInfo } from "@/types";
+import { addressVerdictForChain } from "@/utils/chains";
+import { chainSummary } from "./PurchaseForm";
 
 interface Props {
   purchase: AutoBuyPurchase;
@@ -21,12 +21,23 @@ export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
   const [address, setAddress] = useState(purchase.wallet_address ?? "");
   const [confirm, setConfirm] = useState("");
   const [network, setNetwork] = useState<BlockchainNetwork>(purchase.blockchain_network);
+  const [chains, setChains] = useState<ChainInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const verdict = useMemo(() => addressVerdict(address, purchase.crypto_symbol, network), [address, purchase.crypto_symbol, network]);
-  const networkWarning = purchase.exchange && !canExchangeWithdrawToNetwork(purchase.exchange, network)
-    ? `${purchase.exchange} cannot withdraw to ${network}.` : null;
+  useEffect(() => {
+    marketAPI.coin(purchase.crypto_symbol, purchase.amount_usd)
+      .then((m) => setChains(m.chains.filter((c) => c.supported)))
+      .catch((e) => setError(errorMessage(e, "Bitget chain data is unavailable")));
+  }, [purchase.crypto_symbol, purchase.amount_usd]);
+
+  const chainInfo = chains.find((c) => c.chain === network) ?? null;
+  const verdict = useMemo(() => addressVerdictForChain(address, network), [address, network]);
+  const networkWarning = chainInfo
+    ? !chainInfo.withdrawable ? `Bitget has ${purchase.crypto_symbol} withdrawals on ${network} suspended.`
+      : chainInfo.meets_minimum === false ? `${purchase.amount_usd} USD per buy is below Bitget's minimum withdrawal on ${network} (about $${(chainInfo.min_purchase_usd ?? 0).toFixed(2)} needed). Raise the amount first.`
+      : null
+    : null;
   const confirmed = confirm.trim() === address.trim() && address.trim().length > 0;
   const canSubmit = !busy && verdict?.ok === true && confirmed && !networkWarning;
 
@@ -55,8 +66,11 @@ export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
         <div>
           <label className="label" htmlFor="sw-network">Blockchain network</label>
           <select id="sw-network" className="input" value={network} onChange={(e) => setNetwork(e.target.value as BlockchainNetwork)}>
-            {NETWORKS.map((n) => <option key={n} value={n}>{n}</option>)}
+            {chains.length === 0 && <option value={network}>{network}</option>}
+            {chains.map((c) => <option key={c.chain} value={c.chain} disabled={!c.withdrawable}>{c.chain}{c.family_label ? ` · ${c.family_label}` : ""}</option>)}
           </select>
+          {chainInfo && <p className="mt-1 text-xs text-slate-400">{chainSummary(chainInfo, purchase.crypto_symbol)}</p>}
+          <p className="mt-1 text-xs text-slate-500">Bitget only sends to addresses saved in your Bitget address book; add this address there first.</p>
         </div>
         <div>
           <label className="label" htmlFor="sw-address">Wallet address</label>

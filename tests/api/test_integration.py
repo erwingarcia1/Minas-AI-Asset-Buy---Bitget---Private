@@ -47,8 +47,8 @@ async def test_full_journey_to_executed_purchase(db, monkeypatch):
             await db.commit()
 
             r = await c.post("/api/exchange/keys", headers=H,
-                             json={"exchange": "binance", "api_key": "AKIAJOURNEYKEY123",
-                                   "api_secret": "journeysecret456"})
+                             json={"exchange": "bitget", "api_key": "bg_journeykey123",
+                                   "api_secret": "journeysecret456", "passphrase": "journeypass"})
             assert r.status_code == 201
             key_id = r.json()["id"]
             async with AsyncSessionLocal() as s:
@@ -59,7 +59,7 @@ async def test_full_journey_to_executed_purchase(db, monkeypatch):
             r = await c.post("/api/v2/purchases", headers=H,
                              json={"crypto_symbol": "BTC", "amount_usd": 100, "frequency": "weekly",
                                    "wallet_address": "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
-                                   "blockchain_network": "mainnet", "exchange_account_id": key_id,
+                                   "blockchain_network": "BTC", "exchange_account_id": key_id,
                                    "purchase_type": "autobuy"})
             assert r.status_code == 201, r.text
             purchase_id = uuid.UUID(r.json()["purchase_id"])

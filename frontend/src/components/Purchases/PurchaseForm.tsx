@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { autoBuyAPI, userAPI } from "@/api/endpoints";
+import { autoBuyAPI, marketAPI, userAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert } from "@/components/Common";
-import type { ApiKey, AutoBuyFrequency, AutoBuyPurchaseCreated, BlockchainNetwork } from "@/types";
-import { addressVerdict } from "@/utils/addressValidation";
-import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES, EXCHANGE_NETWORKS, NETWORKS, canExchangeWithdrawToNetwork } from "@/utils/exchangeNetworks";
+import type { ApiKey, AutoBuyFrequency, AutoBuyPurchaseCreated, ChainInfo, CoinMarket } from "@/types";
+import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain, fmtCoin } from "@/utils/chains";
+import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES } from "@/utils/exchangeNetworks";
 
-const DEFAULTS = { crypto: "BTC", amount: "50", network: "mainnet" as BlockchainNetwork, frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: true };
+const DEFAULTS = { crypto: "BTC", amount: "50", frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: true };
 
 export function validateAmountUsd(value: number): string | null {
   if (Number.isNaN(value)) return "Enter an amount.";
@@ -15,13 +15,20 @@ export function validateAmountUsd(value: number): string | null {
   return null;
 }
 
+/** Fee / minimum line for a chain, priced when the API had an amount to price against. */
+export function chainSummary(c: ChainInfo, coin: string): string {
+  const fee = `fee ${fmtCoin(c.withdraw_fee, coin)}${c.fee_usd != null ? ` (~$${c.fee_usd.toFixed(2)})` : ""}`;
+  const min = `min ${fmtCoin(c.min_withdraw_amount, coin)}${c.min_purchase_usd != null ? ` (≈ $${c.min_purchase_usd.toFixed(2)} per buy)` : ""}`;
+  return `${fee} · ${min}`;
+}
+
 /** One form for both modes: "Withdraw immediately" on = Auto-Buy to wallet, off = accumulate on the exchange. */
 export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPurchaseCreated) => void }) {
   const [accounts, setAccounts] = useState<ApiKey[]>([]);
   const [accountsError, setAccountsError] = useState<string | null>(null);
   const [crypto, setCrypto] = useState(DEFAULTS.crypto);
   const [amount, setAmount] = useState(DEFAULTS.amount);
-  const [network, setNetwork] = useState<BlockchainNetwork>(DEFAULTS.network);
+  const [chain, setChain] = useState<string>(DEFAULT_CHAIN_FOR_COIN[DEFAULTS.crypto]);
   const [address, setAddress] = useState(DEFAULTS.address);
   const [addressTouched, setAddressTouched] = useState(false);
   const [accountId, setAccountId] = useState("");
@@ -30,32 +37,61 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [market, setMarket] = useState<CoinMarket | null>(null);
+  const [marketError, setMarketError] = useState<string | null>(null);
+  const [marketLoading, setMarketLoading] = useState(false);
 
   useEffect(() => {
     userAPI.exchangeKeys()
       .then((keys) => { setAccounts(keys); setAccountId((cur) => cur || keys[0]?.id || ""); })
       .catch((e) => setAccountsError(errorMessage(e, "Could not load exchange accounts")));
   }, []);
+
+  // Bitget pair + chains (fee, minimum) for the chosen coin, priced against the amount (debounced).
+  const amountNumber = Number(amount);
+  useEffect(() => {
+    let cancelled = false;
+    setMarketLoading(true); setMarketError(null);
+    const t = setTimeout(() => {
+      marketAPI.coin(crypto, Number.isFinite(amountNumber) && amountNumber >= 1 ? amountNumber : undefined)
+        .then((m) => {
+          if (cancelled) return;
+          setMarket(m);
+          setChain((cur) => (m.chains.some((c) => c.chain === cur && c.supported) ? cur
+            : m.chains.find((c) => c.is_default && c.supported)?.chain ?? m.chains.find((c) => c.supported)?.chain ?? cur));
+        })
+        .catch((e) => { if (!cancelled) { setMarket(null); setMarketError(errorMessage(e, "Bitget market data is unavailable")); } })
+        .finally(() => { if (!cancelled) setMarketLoading(false); });
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [crypto, amountNumber]);
+
   // Any edit after a successful submit starts a fresh entry: drop the stale banner.
   const edited = <T,>(set: (v: T) => void) => (v: T) => { setSuccess(null); set(v); };
-  const [setCryptoE, setAmountE, setNetworkE, setAddressE, setAccountIdE, setFrequencyE, setWithdrawE] =
-    [edited(setCrypto), edited(setAmount), edited(setNetwork), edited(setAddress), edited(setAccountId), edited(setFrequency), edited(setWithdraw)];
+  const [setCryptoE, setAmountE, setChainE, setAddressE, setAccountIdE, setFrequencyE, setWithdrawE] =
+    [edited(setCrypto), edited(setAmount), edited(setChain), edited(setAddress), edited(setAccountId), edited(setFrequency), edited(setWithdraw)];
 
   const account = accounts.find((a) => a.id === accountId);
+  const chains = useMemo(() => (market?.chains ?? []).filter((c) => c.supported), [market]);
+  const chainInfo = chains.find((c) => c.chain === chain) ?? null;
   const hasAddress = address.trim().length > 0;
   // Validation runs on blur (touched) and, once touched, on every keystroke.
-  const verdict = useMemo(() => (addressTouched || hasAddress) && hasAddress ? addressVerdict(address, crypto, network) : null, [address, crypto, network, addressTouched, hasAddress]);
+  const verdict = useMemo(() => (addressTouched || hasAddress) && hasAddress ? addressVerdictForChain(address, chain) : null, [address, chain, addressTouched, hasAddress]);
   const addressMissing = withdraw && !hasAddress && addressTouched;   // required only when withdrawing
-  const amountError = validateAmountUsd(Number(amount));
-  const networkWarning = withdraw && account && !canExchangeWithdrawToNetwork(account.exchange, network)
-    ? `${account.exchange} does not support withdrawals to ${network}. Supported: ${(EXCHANGE_NETWORKS[account.exchange] ?? []).join(", ") || "none"}.`
+  const amountError = validateAmountUsd(amountNumber);
+  const pairWarning = market && !market.online ? `${market.pair} is not trading on Bitget right now.` : null;
+  const chainWarning = withdraw && chainInfo
+    ? !chainInfo.withdrawable ? `Bitget has ${crypto} withdrawals on ${chain} suspended.`
+      : chainInfo.meets_minimum === false ? `${amountNumber || 0} USD buys about ${fmtCoin(chainInfo.estimated_received ?? 0, crypto)} after fees, below Bitget's minimum withdrawal on ${chain}. Use at least about $${(chainInfo.min_purchase_usd ?? 0).toFixed(2)}.`
+      : null
     : null;
+  const marketBlocks = withdraw && (marketError !== null || (market !== null && !chainInfo));
   // withdraw: a valid address is required; accumulate: no address, or a valid one
   const addressOk = withdraw ? verdict?.ok === true : (!hasAddress || verdict?.ok === true);
-  const canSubmit = !busy && !!account && !amountError && addressOk && !networkWarning;
+  const canSubmit = !busy && !!account && !amountError && addressOk && !chainWarning && !pairWarning && !marketBlocks && !marketLoading;
 
   function reset() {
-    setCrypto(DEFAULTS.crypto); setAmount(DEFAULTS.amount); setNetwork(DEFAULTS.network);
+    setCrypto(DEFAULTS.crypto); setAmount(DEFAULTS.amount); setChain(DEFAULT_CHAIN_FOR_COIN[DEFAULTS.crypto]);
     setAddress(DEFAULTS.address); setAddressTouched(false); setFrequency(DEFAULTS.frequency); setWithdraw(DEFAULTS.withdraw);
   }
 
@@ -67,15 +103,15 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
     setBusy(true);
     try {
       const created = await autoBuyAPI.create({
-        crypto_symbol: crypto, amount_usd: Number(amount),
+        crypto_symbol: crypto, amount_usd: amountNumber,
         ...(address.trim() ? { wallet_address: address.trim() } : {}),
-        blockchain_network: network, frequency, exchange_account_id: account.id,
+        blockchain_network: chain, frequency, exchange_account_id: account.id,
         purchase_type: withdraw ? "autobuy" : "dca",
         withdraw_immediately: withdraw,
       });
       const when = created.next_execution ? new Date(created.next_execution).toLocaleString() : "the next scheduler run";
-      const mode = withdraw ? `each buy is sent to your wallet on ${network}` : "accumulating on exchange";
-      const banner = `Purchase created (${withdraw ? "autobuy" : "dca"}): ${crypto} for ${Number(amount).toFixed(2)} USD via ${account.exchange}, ${mode}. First execution at ${when}.`;
+      const mode = withdraw ? `each buy is sent to your wallet on ${chain}` : "accumulating on exchange";
+      const banner = `Purchase created (${withdraw ? "autobuy" : "dca"}): ${crypto} for ${amountNumber.toFixed(2)} USD via ${account.exchange}, ${mode}. First execution at ${when}.`;
       reset();
       setSuccess(banner);
       onCreated?.(created);
@@ -95,13 +131,16 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
       {success && <Alert kind="success">{success}</Alert>}
       {error && <Alert kind="error">{error}</Alert>}
       {accountsError && <Alert kind="error">{accountsError}</Alert>}
+      {marketError && <Alert kind={withdraw ? "error" : "warning"}>{marketError}{withdraw ? " Withdraw-immediately purchases need live chain data." : ""}</Alert>}
+      {pairWarning && <Alert kind="error">{pairWarning}</Alert>}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <label className="label" htmlFor="pf-crypto">Crypto</label>
-          <select id="pf-crypto" className="input" value={crypto} onChange={(e) => setCryptoE(e.target.value)}>
+          <select id="pf-crypto" className="input" value={crypto} onChange={(e) => { setCryptoE(e.target.value); setChain(DEFAULT_CHAIN_FOR_COIN[e.target.value] ?? ""); }}>
             {AUTOBUY_CRYPTOS.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+          {market && <p className="mt-1 text-xs text-slate-400">{market.pair} · min order {market.min_trade_usdt} USDT{market.taker_fee_rate != null ? ` · taker fee ${(market.taker_fee_rate * 100).toFixed(2)}%` : ""}</p>}
         </div>
         <div>
           <label className="label" htmlFor="pf-amount">Amount (USD)</label>
@@ -110,10 +149,13 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
         </div>
         <div>
           <label className="label" htmlFor="pf-network">Blockchain network</label>
-          <select id="pf-network" className="input" value={network} onChange={(e) => setNetworkE(e.target.value as BlockchainNetwork)}>
-            {NETWORKS.map((n) => <option key={n} value={n}>{n}</option>)}
+          <select id="pf-network" className="input" value={chain} onChange={(e) => setChainE(e.target.value)} disabled={marketLoading || chains.length === 0}>
+            {chains.length === 0 && <option value={chain}>{marketLoading ? "Loading chains…" : chain || "—"}</option>}
+            {chains.map((c) => <option key={c.chain} value={c.chain} disabled={withdraw && !c.withdrawable}>{c.chain}{c.family_label ? ` · ${c.family_label}` : ""}{!c.withdrawable ? " (withdrawals suspended)" : ""}</option>)}
           </select>
-          <p className="mt-1 text-xs text-slate-400">{crypto === "BTC" ? "Bitcoin addresses encode their network." : `${crypto} uses the same address on both networks.`}</p>
+          <p className="mt-1 text-xs text-slate-400" data-testid="chain-summary">
+            {chainInfo ? chainSummary(chainInfo, crypto) : marketLoading ? "Fetching Bitget chain data…" : "Bitget chain data unavailable"}
+          </p>
         </div>
 
         <div className="sm:col-span-2 lg:col-span-3">
@@ -122,7 +164,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           </label>
           <div className="relative">
             <input id="pf-address" className={`input pr-10 font-mono ${verdict ? (verdict.ok ? "border-green-500 focus:ring-green-500" : "border-red-500 focus:ring-red-500") : addressMissing ? "border-red-500" : ""}`}
-                   placeholder={crypto === "BTC" ? "bc1… / 1… / 3…" : crypto === "SOL" ? "Base58 public key" : "0x…"}
+                   placeholder={chainInfo?.family === "bitcoin" ? "bc1… / 1… / 3…" : chainInfo?.family === "solana" ? "Base58 public key" : chainInfo?.family === "tron" ? "T…" : "0x…"}
                    value={address} autoComplete="off" spellCheck={false}
                    onChange={(e) => setAddressE(e.target.value)} onBlur={() => setAddressTouched(true)}
                    aria-invalid={verdict ? !verdict.ok : addressMissing || undefined} aria-describedby="pf-address-status" />
@@ -135,6 +177,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           </div>
           {verdict && <p id="pf-address-status" className={`mt-1 text-xs ${verdict.ok ? "text-green-700" : "text-red-600"}`}>{verdict.reason}</p>}
           {!verdict && addressMissing && <p id="pf-address-status" className="mt-1 text-xs text-red-600">A wallet address is required.</p>}
+          {withdraw && <p className="mt-1 text-xs text-slate-500">Bitget only sends to addresses saved in your Bitget address book; add this address there first.</p>}
         </div>
 
         <div className="sm:col-span-2">
@@ -165,7 +208,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
         </span>
       </label>
 
-      {networkWarning && <Alert kind="warning">⚠ {networkWarning}</Alert>}
+      {chainWarning && <Alert kind="warning">⚠ {chainWarning}</Alert>}
       <button className="btn-primary" type="submit" disabled={!canSubmit}>{busy ? "Creating…" : "Create Purchase"}</button>
     </form>
   );

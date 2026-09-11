@@ -25,7 +25,8 @@ PURCHASE_FREQUENCIES = ("one_time", "daily", "weekly", "monthly")
 # missing travel-rule / identity data.
 PURCHASE_STATUSES = ("active", "paused", "completed", "failed", "cancelled", "needs_review", "withdrawal_failed", "needs_info")
 TRANSACTION_STATUSES = ("pending", "success", "failed", "needs_review", "needs_info")
-BLOCKCHAIN_NETWORKS = ("mainnet", "testnet")
+# blockchain_network now stores the exchange's chain name ("BTC", "ERC20", "SOL", "TRC20", ...); see api/utils/chains.py
+BLOCKCHAIN_NETWORKS = ("mainnet", "testnet")   # legacy values, kept for migration 018 and old tests
 
 
 class Wallet(Base):
@@ -34,7 +35,7 @@ class Wallet(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     address = Column(String(128), nullable=False, unique=True)
-    blockchain_network = Column(String(20), nullable=False)  # mainnet | testnet
+    blockchain_network = Column(String(40), nullable=False)  # exchange chain name (BTC, ERC20, SOL, ...)
     label = Column(String(100), nullable=True)
     verified_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -56,7 +57,7 @@ class Purchase(Base):
     frequency = Column(String(20), nullable=False)          # one_time | daily | weekly | monthly
     # autobuy: required, withdrawn to after every buy. dca: optional (kept for a later switch to withdraw).
     wallet_address = Column(String(128), nullable=True)
-    blockchain_network = Column(String(20), nullable=False)  # mainnet | testnet
+    blockchain_network = Column(String(40), nullable=False)  # exchange chain name (BTC, ERC20, SOL, ...)
     purchase_type = Column(Enum(*PURCHASE_TYPES, name="purchase_type"), nullable=False, default="autobuy",
                            server_default="autobuy")
     status = Column(String(20), nullable=False, default="active")

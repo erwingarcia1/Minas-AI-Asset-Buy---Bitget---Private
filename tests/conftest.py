@@ -17,6 +17,8 @@ Isolation guarantees:
 """
 import os
 import pathlib
+
+import pytest
 from urllib.parse import urlsplit
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -106,3 +108,69 @@ def flush_test_redis() -> None:
     url = os.environ["REDIS_URL"]
     guard_redis_url(url)
     redis.Redis.from_url(url).flushdb()
+
+
+# ------------------------------------------------------------------ Bitget market data stub (no network)
+
+SAMPLE_SYMBOL = {"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT", "minTradeAmount": "0",
+                 "maxTradeAmount": "900000000000000000000", "takerFeeRate": "0.002", "makerFeeRate": "0.002",
+                 "pricePrecision": "2", "quantityPrecision": "6", "quotePrecision": "8", "status": "online",
+                 "minTradeUSDT": "1", "maxMarketOrderValue": "1000000"}
+SAMPLE_CHAINS = {
+    "BTC": [{"chain": "BTC", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.00003",
+             "extraWithdrawFee": "0", "withdrawConfirm": "3", "minWithdrawAmount": "0.0005",
+             "browserUrl": "https://www.blockchain.com/explorer/transactions/btc/", "contractAddress": None, "withdrawMinScale": "8"},
+            {"chain": "BEP20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.00000195",
+             "extraWithdrawFee": "0", "withdrawConfirm": "60", "minWithdrawAmount": "0.00012961",
+             "browserUrl": "https://bscscan.com/tx/", "contractAddress": "0x7130", "withdrawMinScale": "8"},
+            {"chain": "LIGHTNING", "needTag": "false", "withdrawable": "false", "rechargeable": "false", "withdrawFee": "0.00001",
+             "extraWithdrawFee": "0", "withdrawConfirm": "6", "minWithdrawAmount": "0.00002", "browserUrl": "", "withdrawMinScale": "8"}],
+    "ETH": [{"chain": "ERC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.0008",
+             "extraWithdrawFee": "0", "withdrawConfirm": "12", "minWithdrawAmount": "0.001", "browserUrl": "https://etherscan.io/tx/", "withdrawMinScale": "8"},
+            {"chain": "ArbitrumOne", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.0001",
+             "extraWithdrawFee": "0", "withdrawConfirm": "12", "minWithdrawAmount": "0.001", "browserUrl": "https://arbiscan.io/tx/", "withdrawMinScale": "8"}],
+    "USDT": [{"chain": "ERC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.8",
+              "extraWithdrawFee": "0", "withdrawConfirm": "96", "minWithdrawAmount": "10", "browserUrl": "https://etherscan.io/tx/", "withdrawMinScale": "6"},
+             {"chain": "TRC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "1.5",
+              "extraWithdrawFee": "0", "withdrawConfirm": "3", "minWithdrawAmount": "10", "browserUrl": "https://tronscan.org/#/transaction/", "withdrawMinScale": "6"},
+             {"chain": "SOL", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "1",
+              "extraWithdrawFee": "0", "withdrawConfirm": "5", "minWithdrawAmount": "10", "browserUrl": "https://solscan.io/tx/", "withdrawMinScale": "6"}],
+    "USDC": [{"chain": "ERC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.8",
+              "extraWithdrawFee": "0", "withdrawConfirm": "96", "minWithdrawAmount": "10", "browserUrl": "https://etherscan.io/tx/", "withdrawMinScale": "6"}],
+    "SOL": [{"chain": "SOL", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.008",
+             "extraWithdrawFee": "0", "withdrawConfirm": "5", "minWithdrawAmount": "0.02", "browserUrl": "https://solscan.io/tx/", "withdrawMinScale": "8"}],
+}
+SAMPLE_ASK = {"BTC": 77042.84, "ETH": 4000.0, "SOL": 200.0, "USDT": 1.0, "USDC": 1.0}
+
+
+@pytest.fixture(autouse=True)
+def stub_bitget_market(monkeypatch):
+    """Tests never call Bitget: symbol/chain fetchers and the live ask are stubbed
+    with the shapes captured from the real endpoints, and the hour cache is
+    bypassed so every test sees its own stub."""
+    from api.services import bitget_market as bm
+
+    def fetch_symbol(symbol):
+        coin = symbol[:-4] if symbol.endswith("USDT") else symbol
+        if coin not in SAMPLE_CHAINS or coin in ("USDT", "USDC"):   # no USDT/USDT or USDC/USDT spot pair
+            return None
+        return {**SAMPLE_SYMBOL, "symbol": f"{coin}USDT", "baseCoin": coin}
+
+    def fetch_chains(coin):
+        return [dict(c) for c in SAMPLE_CHAINS.get(coin.upper(), [])]
+
+    monkeypatch.setattr(bm, "fetch_symbol", fetch_symbol)
+    monkeypatch.setattr(bm, "fetch_chains", fetch_chains)
+    monkeypatch.setattr(bm, "live_ask", lambda coin: SAMPLE_ASK.get(coin.upper(), 100.0))
+    # no cache: each test's stub is authoritative (failures still surface as MarketDataUnavailable, as in production)
+    def _cached_sync(key, producer):
+        try:
+            return producer()
+        except Exception as exc:
+            raise bm.MarketDataUnavailable(f"Bitget market data unavailable for {key}: {exc}") from exc
+
+    async def _cached(key, producer):
+        return _cached_sync(key, producer)
+    monkeypatch.setattr(bm, "_cached_sync", _cached_sync)
+    monkeypatch.setattr(bm, "_cached", _cached)
+    yield

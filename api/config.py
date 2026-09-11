@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+    # Exchanges the platform offers (CSV). Keys for other venues are refused and the
+    # UI shows only these; the other venues' client code stays in the repo.
+    supported_exchanges_csv: str = os.getenv("SUPPORTED_EXCHANGES", "bitget")
+
+    @property
+    def supported_exchanges(self) -> List[str]:
+        raw = [x.strip().lower() for x in self.supported_exchanges_csv.split(",")]
+        return [x for x in raw if x] or ["bitget"]
+
     # CORS — CSV in the ALLOWED_ORIGINS env var
     allowed_origins_csv: str = os.getenv(
         "ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8000")

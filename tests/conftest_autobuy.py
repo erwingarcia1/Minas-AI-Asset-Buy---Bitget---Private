@@ -67,6 +67,11 @@ async def make_key(db, user: User, exchange: str = "binance") -> APIKey:
 
 
 @pytest_asyncio.fixture
+async def bitget_key(db, user):
+    return await make_key(db, user, "bitget")
+
+
+@pytest_asyncio.fixture
 async def binance_key(db, user):
     return await make_key(db, user, "binance")
 
@@ -74,7 +79,7 @@ async def binance_key(db, user):
 async def make_purchase(db, user: User, key: APIKey, **overrides) -> Purchase:
     from api.models import utcnow
     fields = dict(user_id=user.id, exchange_account_id=key.id, crypto_symbol="BTC", amount_usd=50.0,
-                  frequency="daily", wallet_address=BTC_MAIN, blockchain_network="mainnet",
+                  frequency="daily", wallet_address=BTC_MAIN, blockchain_network="BTC",
                   status="active", failure_count=0, next_execution=utcnow())
     fields.update(overrides)
     p = Purchase(**fields)

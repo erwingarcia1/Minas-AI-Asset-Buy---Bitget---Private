@@ -18,7 +18,7 @@ import re
 from typing import Optional
 
 __all__ = ["validate_bitcoin_address", "validate_ethereum_address", "validate_solana_address",
-           "get_address_network", "validate_address_for_network", "detect_chain"]
+           "validate_tron_address", "get_address_network", "validate_address_for_network", "detect_chain"]
 
 _B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _B58_INDEX = {c: i for i, c in enumerate(_B58_ALPHABET)}
@@ -142,6 +142,14 @@ def validate_solana_address(address: str) -> bool:
         return False
     raw = _b58decode(address)
     return raw is not None and len(raw) == 32
+
+
+def validate_tron_address(address: str) -> bool:
+    """True for a Base58Check Tron address: version byte 0x41, 21 bytes, starts with 'T'."""
+    if not isinstance(address, str) or not address.startswith("T") or len(address) != 34:
+        return False
+    data = _b58check_payload(address)
+    return data is not None and len(data) == 21 and data[0] == 0x41
 
 
 def detect_chain(address: str) -> Optional[str]:

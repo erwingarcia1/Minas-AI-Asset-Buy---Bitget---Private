@@ -3,9 +3,17 @@ import uuid
 import pytest
 from sqlalchemy import select
 
+from api.config import settings
 from api.models import APIKey
 from api.routes.exchange import decrypt_value, encrypt_value, mask_api_key
 from tests.api.conftest import auth_headers
+
+
+@pytest.fixture(autouse=True)
+def _allow_binance(monkeypatch):
+    """These tests exercise key storage with Binance fixtures; the deployment
+    flag (SUPPORTED_EXCHANGES, default bitget) is widened here only."""
+    monkeypatch.setattr(settings, "supported_exchanges_csv", "bitget,binance")
 
 
 def test_fernet_round_trip():

@@ -188,6 +188,8 @@ app.include_router(email.router, prefix="/api/email", tags=["user"])
 from api.routes import autobuy_purchases, wallets
 app.include_router(autobuy_purchases.router, prefix="/api/v2/purchases", tags=["auto-buy"])
 app.include_router(wallets.router, prefix="/api/wallets", tags=["auto-buy"])
+from api.routes import market
+app.include_router(market.router, prefix="/api/v2/market", tags=["auto-buy"])
 
 if __name__ == "__main__":
     import uvicorn

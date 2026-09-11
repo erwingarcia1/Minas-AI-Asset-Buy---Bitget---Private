@@ -14,12 +14,13 @@ type Msg = { kind: "error" | "success"; text: string } | null;
 export default function Settings() {
   const { user, logout } = useAuth();
   const keys = useAsync(() => userAPI.exchangeKeys());
+  const supported = useAsync(() => userAPI.supportedExchanges().catch(() => ["bitget"]));
   const [pwMsg, setPwMsg] = useState<Msg>(null);
   const [mailMsg, setMailMsg] = useState<Msg>(null);
   const [keyMsg, setKeyMsg] = useState<Msg>(null);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
-  const [exchange, setExchange] = useState("binance");
+  const [exchange, setExchange] = useState("bitget");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [passphrase, setPassphrase] = useState("");
@@ -86,7 +87,20 @@ export default function Settings() {
 
       <section className="card space-y-4">
         <h2 className="font-semibold">Exchange API keys</h2>
-        <p className="text-sm text-slate-600">Keys are encrypted at rest and verified against the exchange before purchases can execute. Use spot-trade-only keys with withdrawals disabled.</p>
+        <p className="text-sm text-slate-600">Keys are encrypted at rest and verified against the exchange before purchases can execute.</p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" data-testid="key-guidance">
+          <p className="font-medium">Which Bitget key permissions do I need?</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            <li><span className="font-medium">Accumulate on exchange:</span> a key with <span className="font-medium">Read</span> and <span className="font-medium">Spot trade</span> only. Leave Withdraw off.</li>
+            <li><span className="font-medium">Withdraw immediately (send each buy to your wallet):</span> the key also needs <span className="font-medium">Withdraw</span>, and Bitget requires two things before it will send anything:
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                <li>Whitelist our server's IP on the key. <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span></li>
+                <li>Add your wallet address to your Bitget address book (withdrawal whitelist) first — Bitget rejects API withdrawals to unknown addresses.</li>
+              </ul>
+            </li>
+            <li>Bitget reports permissions as codes we cannot always confirm; if a key shows the withdrawal warning below, treat it as able to withdraw and use it only where that is intended.</li>
+          </ul>
+        </div>
         {keys.loading ? <Loading /> : keys.error ? <Alert kind="error">{keys.error}</Alert> : (
           <ul className="divide-y divide-slate-100 text-sm">
             {keys.data?.length === 0 && <li className="py-2 text-slate-500">No keys on file.</li>}
@@ -122,7 +136,9 @@ export default function Settings() {
         {keyMsg && <Alert kind={keyMsg.kind}>{keyMsg.text}</Alert>}
         <form onSubmit={addKey} className="grid gap-3 sm:grid-cols-2">
           <div><label className="label" htmlFor="key-exchange">Exchange</label>
-            <select id="key-exchange" className="input" value={exchange} onChange={(e) => setExchange(e.target.value)}><option value="binance">Binance</option><option value="bitget">Bitget</option><option value="bybit">Bybit</option><option value="okx">OKX</option></select></div>
+            <select id="key-exchange" className="input" value={exchange} onChange={(e) => setExchange(e.target.value)}>
+              {(supported.data ?? ["bitget"]).map((x) => <option key={x} value={x}>{x === "okx" ? "OKX" : capitalize(x)}</option>)}
+            </select></div>
           <div><label className="label" htmlFor="key-passphrase">Passphrase (Bitget/OKX)</label><input id="key-passphrase" className="input" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} /></div>
           <div><label className="label" htmlFor="key-api-key">API key</label><input id="key-api-key" className="input" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" /></div>
           <div><label className="label" htmlFor="key-api-secret">API secret</label><input id="key-api-secret" className="input" type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} autoComplete="off" /></div>

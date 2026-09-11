@@ -70,7 +70,9 @@ async def test_executor_routes_by_purchase_exchange(db, user, monkeypatch):
     assert VenueRecorder.calls == [("okx", "BTC-USDT", "okx-passphrase")]
 
 
-async def test_okx_key_requires_passphrase(db, user):
+async def test_okx_key_requires_passphrase(db, user, monkeypatch):
+    from api.config import settings
+    monkeypatch.setattr(settings, "supported_exchanges_csv", "bitget,okx")   # OKX is off by default
     async with client() as c:
         r = await c.post("/api/exchange/keys", headers=auth_headers(user),
                          json={"exchange": "okx", "api_key": "x" * 20,
