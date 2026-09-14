@@ -223,6 +223,23 @@ alerts and outbound user webhooks (`purchase.<event>`, HMAC-signed) all hang
 off those events. Dry-run emails are prefixed `[DRY RUN]`. The weekly digest
 runs on the Auto-Buy scheduler (Mondays 09:00 UTC, one worker via advisory lock).
 
+## Wallet-change hold (24 hours after a password reset or change)
+
+`POST /api/auth/reset-password` and `POST /api/auth/change-password` set
+`users.wallet_hold_until` to now + 24 h (migration 022) and
+`wallet_hold_reason` (`password_reset` | `password_change`); the
+password-changed email states when the hold ends, and `GET /api/user/profile`
+returns both fields while the hold is active (null otherwise). During the
+hold these answer 422 `{error: "wallet_change_hold", details: {action,
+hold_until, reason, message}}`: creating a purchase with a wallet address
+this user has never used (on any of their purchases or saved wallets),
+changing the wallet on a purchase to such an address, switching a purchase
+to withdraw-immediately (any address), and `POST /api/wallets` for a new
+address. Addresses already used by the user are accepted, existing purchases
+keep executing, and retry-withdrawal to the purchase's own address works.
+The hold is stored on the user row, so it survives restarts and applies in
+every worker.
+
 ## Purchase emails are queued
 
 The executor never waits on the email provider. Purchase confirmations,

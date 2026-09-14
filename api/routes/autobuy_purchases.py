@@ -22,7 +22,7 @@ from api.database import get_db
 from api.models import APIKey, Purchase, PurchaseTransaction, User, utcnow
 from api.models.purchase import PURCHASE_FREQUENCIES, PURCHASE_TYPES
 from api.routes.user import get_current_user
-from api.services import bitget_market
+from api.services import bitget_market, wallet_hold
 from api.utils.address_denylist import DENYLIST_REASON, is_denylisted
 from api.utils.chains import DEFAULT_CHAIN_FOR_COIN, family_for_chain, normalize_chain, validate_address_for_chain
 from api.utils.exchange_networks import SUPPORTED_CRYPTOS
@@ -359,6 +359,8 @@ async def create_purchase(
     account is not the caller's."""
     if payload.wallet_address is not None:
         _check_wallet(payload.wallet_address, payload.blockchain_network, payload.crypto_symbol)
+        # after a password reset/change: only addresses this user already uses, for 24h
+        await wallet_hold.check_new_address(db, current_user, payload.wallet_address, "create_purchase")
 
     account = (await db.execute(select(APIKey).where(
         APIKey.id == payload.exchange_account_id, APIKey.user_id == current_user.id))).scalar_one_or_none()
@@ -421,7 +423,9 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     if payload.travel_rule_info is not None:
         p.travel_rule_info = payload.travel_rule_info.to_json()
     if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
-        # switching ON withdraw-immediately: real address + network + typed confirmation, every time
+        # switching ON withdraw-immediately: blocked outright during the wallet-change hold,
+        # otherwise real address + network + typed confirmation, every time
+        wallet_hold.check_action(current_user, "switch_to_autobuy")
         address = payload.wallet_address
         network = payload.blockchain_network or p.blockchain_network or DEFAULT_CHAIN_FOR_COIN.get(p.crypto_symbol)
         if not address:
@@ -444,6 +448,7 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
         # changing the wallet on an existing purchase: same checks as creation
         network = payload.blockchain_network or p.blockchain_network or DEFAULT_CHAIN_FOR_COIN.get(p.crypto_symbol)
         _check_wallet(payload.wallet_address, network, p.crypto_symbol)
+        await wallet_hold.check_new_address(db, current_user, payload.wallet_address, "change_wallet")
         if p.purchase_type == "autobuy" and payload.confirm_wallet_address != payload.wallet_address:
             raise _reject("wallet_confirmation_mismatch", {
                 "message": "Type the wallet address again in confirm_wallet_address to change where coins are sent"})

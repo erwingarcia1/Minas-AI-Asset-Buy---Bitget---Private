@@ -301,12 +301,14 @@ async def change_password(
     """Change the password and invalidate every token issued before now."""
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
+    from api.services import wallet_hold
     current_user.password_hash = hash_password(payload.new_password)
     current_user.password_changed_at = datetime.now(timezone.utc)
+    hold_until = wallet_hold.start_hold(current_user, "password_change", current_user.password_changed_at)
     await db.commit()
-    logger.info("password changed", extra={"user_id": str(current_user.id)})
+    logger.info("password changed", extra={"user_id": str(current_user.id), "wallet_hold_until": hold_until.isoformat()})
     background.add_task(_send_password_changed_email, current_user.email,
-                        current_user.password_changed_at, _client_ip(request))
+                        current_user.password_changed_at, _client_ip(request), hold_until)
 
 
 # --------------------------------------------------------------------------
@@ -353,17 +355,24 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-async def _send_password_changed_email(email: str, when: datetime, ip: str) -> None:
-    """Security notice after a reset or a change. Never affects the password change itself."""
+async def _send_password_changed_email(email: str, when: datetime, ip: str, hold_until: Optional[datetime] = None) -> None:
+    """Security notice after a reset or a change (never optional, never affects
+    the password change itself). Mentions the 24-hour hold on new withdrawal addresses."""
     app = settings.app_name
     stamp = when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     contact = f"contact {settings.support_email} immediately" if settings.support_email else "contact support immediately"
+    hold = ""
+    if hold_until is not None:
+        ends = hold_until.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        hold = (f" For your safety, new withdrawal addresses are on hold until {ends}: until then you cannot add a new "
+                "wallet address, switch a purchase to withdraw-immediately, or start an autobuy purchase to an address you "
+                "have not used before. Purchases to addresses you already use keep running.")
     text = (f"The password for your {app} account was changed.\n\n"
             f"When: {stamp}\nFrom IP address: {ip}\n\n"
-            f"Every other session has been signed out. If this wasn't you, {contact}.")
+            f"Every other session has been signed out.{hold} If this wasn't you, {contact}.")
     html = (f"<p>The password for your {app} account was changed.</p>"
             f"<p><strong>When:</strong> {stamp}<br/><strong>From IP address:</strong> {ip}</p>"
-            f"<p>Every other session has been signed out. If this wasn't you, {contact}.</p>")
+            f"<p>Every other session has been signed out.{hold} If this wasn't you, {contact}.</p>")
     try:
         await resend.send_email(email, f"Your {app} password was changed", html, text_content=text,
                                 template="password_changed")
@@ -438,12 +447,14 @@ async def reset_password(request: Request, response: Response, payload: ResetPas
     if verify_password(payload.new_password, user.password_hash):
         raise HTTPException(status_code=422, detail="New password must differ from the current password")
 
+    from api.services import wallet_hold
     user.password_hash = hash_password(payload.new_password)
     user.password_changed_at = datetime.now(timezone.utc)
+    hold_until = wallet_hold.start_hold(user, "password_reset", user.password_changed_at)
     await db.commit()
     await _mark_reset_used(decoded["jti"], int(decoded.get("exp", 0)))
-    logger.info("password reset completed", extra={"user_id": str(user.id)})
-    background.add_task(_send_password_changed_email, user.email, user.password_changed_at, _client_ip(request))
+    logger.info("password reset completed", extra={"user_id": str(user.id), "wallet_hold_until": hold_until.isoformat()})
+    background.add_task(_send_password_changed_email, user.email, user.password_changed_at, _client_ip(request), hold_until)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -1358,6 +1358,39 @@
             ],
             "title": "Email Enabled"
           },
+          "email_milestones": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Milestones"
+          },
+          "email_purchase_confirmations": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Purchase Confirmations"
+          },
+          "email_weekly_summary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Weekly Summary"
+          },
           "phone_number": {
             "anyOf": [
               {
@@ -1424,8 +1457,34 @@
       },
       "PreferencesResponse": {
         "properties": {
+          "always_on_emails": {
+            "default": [
+              "password reset",
+              "password changed",
+              "purchase failed",
+              "withdrawal failed",
+              "withdrawal needs information"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Always On Emails",
+            "type": "array"
+          },
           "email_enabled": {
             "title": "Email Enabled",
+            "type": "boolean"
+          },
+          "email_milestones": {
+            "title": "Email Milestones",
+            "type": "boolean"
+          },
+          "email_purchase_confirmations": {
+            "title": "Email Purchase Confirmations",
+            "type": "boolean"
+          },
+          "email_weekly_summary": {
+            "title": "Email Weekly Summary",
             "type": "boolean"
           },
           "has_device_token": {
@@ -1462,6 +1521,9 @@
         },
         "required": [
           "email_enabled",
+          "email_purchase_confirmations",
+          "email_weekly_summary",
+          "email_milestones",
           "sms_enabled",
           "push_enabled",
           "quiet_hours_start",
@@ -3107,6 +3169,29 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "wallet_hold_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Reason"
+          },
+          "wallet_hold_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Until"
           }
         },
         "required": [
@@ -5361,7 +5446,7 @@
         ]
       },
       "put": {
-        "description": "Update channel toggles, quiet hours (UTC), phone number, device token.",
+        "description": "Update channel toggles, optional email categories (purchase confirmations,\nweekly summary, milestones), quiet hours (UTC), phone number, device token.\nSecurity and failure emails cannot be switched off.",
         "operationId": "update_preferences_api_notifications_preferences_put",
         "requestBody": {
           "content": {
@@ -5880,7 +5965,7 @@
     },
     "/api/user/profile": {
       "get": {
-        "description": "Return the authenticated user's own profile.",
+        "description": "Return the authenticated user's own profile, including any active\nwallet-change hold (`wallet_hold_until`).",
         "operationId": "get_profile_api_user_profile_get",
         "responses": {
           "200": {

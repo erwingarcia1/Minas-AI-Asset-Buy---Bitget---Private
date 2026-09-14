@@ -13,6 +13,9 @@ export interface UserProfile {
   kyc_status: KycStatus;
   role?: "user" | "admin";
   created_at: string;
+  /** Active 24h hold on new withdrawal addresses after a password reset/change, else null. */
+  wallet_hold_until?: string | null;
+  wallet_hold_reason?: "password_reset" | "password_change" | string | null;
 }
 
 export type KycStatus = "pending" | "verified" | "rejected";

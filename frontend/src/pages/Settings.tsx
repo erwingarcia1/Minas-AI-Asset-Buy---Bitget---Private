@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { passwordProblem } from "@/utils/validation";
 import { capitalize, fmtDate } from "@/utils/format";
 import NotificationSettings from "@/components/Settings/NotificationSettings";
+import WalletHoldNotice from "@/components/Common/WalletHoldNotice";
 
 type Msg = { kind: "error" | "success"; text: string } | null;
 
@@ -94,6 +95,7 @@ export default function Settings() {
           <div><dt className="text-slate-500">Member since</dt><dd>{fmtDate(user.created_at)}</dd></div>
           <div><dt className="text-slate-500">User ID</dt><dd className="font-mono text-xs">{user.id}</dd></div>
         </dl>
+        <WalletHoldNotice user={user} />
         {mailMsg && <Alert kind={mailMsg.kind}>{mailMsg.text}</Alert>}
         <button className="btn-secondary" onClick={() => void sendVerification()}>Send verification email</button>
       </section>

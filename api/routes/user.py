@@ -100,6 +100,9 @@ class UserProfile(UTCModel):
     kyc_sumsub_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    # active 24h hold on new withdrawal addresses (after a password reset/change), else null
+    wallet_hold_until: Optional[datetime] = None
+    wallet_hold_reason: Optional[str] = None
 
 
 class UserPublicProfile(UTCModel):
@@ -119,10 +122,20 @@ class ProfileUpdateRequest(BaseModel):
 # Routes
 # --------------------------------------------------------------------------
 
+def _profile(user: User) -> UserProfile:
+    from api.services.wallet_hold import active_hold
+    out = UserProfile.model_validate(user, from_attributes=True)
+    until = active_hold(user)
+    out.wallet_hold_until = until
+    out.wallet_hold_reason = user.wallet_hold_reason if until else None
+    return out
+
+
 @router.get("/profile", response_model=UserProfile)
 async def get_profile(current_user: User = Depends(get_current_user)):
-    """Return the authenticated user's own profile."""
-    return current_user
+    """Return the authenticated user's own profile, including any active
+    wallet-change hold (`wallet_hold_until`)."""
+    return _profile(current_user)
 
 
 @router.put("/profile", response_model=UserProfile)

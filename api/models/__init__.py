@@ -26,6 +26,9 @@ class User(Base):
     device_token = Column(String(255), nullable=True)         # FCM registration token
     notification_preferences = Column(String(500), nullable=True)  # JSON blob
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    # 24h hold on new withdrawal destinations after a password reset/change (migration 022)
+    wallet_hold_until = Column(DateTime(timezone=True), nullable=True)
+    wallet_hold_reason = Column(String(40), nullable=True)   # password_reset | password_change
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     

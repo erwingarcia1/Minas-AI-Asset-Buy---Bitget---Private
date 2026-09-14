@@ -63,6 +63,8 @@ async def add_wallet(payload: WalletCreateRequest, current_user: User = Depends(
                      db: AsyncSession = Depends(get_db)):
     """Save a wallet. The address must match the declared chain's format
     (Bitcoin mainnet, EVM 0x…, Solana, Tron); addresses are unique platform-wide."""
+    from api.services import wallet_hold
+    await wallet_hold.check_new_address(db, current_user, payload.address, "add_wallet")
     if is_denylisted(payload.address):
         raise HTTPException(status_code=422, detail={"error": "wallet_address_denylisted",
                                                     "details": {"address": payload.address, "message": DENYLIST_REASON}})

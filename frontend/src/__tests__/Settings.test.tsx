@@ -11,7 +11,8 @@ vi.mock("@/api/endpoints", () => ({
   notificationAPI: { preferences: vi.fn(), update: vi.fn() },
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
 }));
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z" }, logout: vi.fn() }) }));
+const authUser: Record<string, unknown> = { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z" };
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: authUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
 import { notificationAPI, userAPI } from "@/api/endpoints";
 
 const PREFS = { email_enabled: true, email_purchase_confirmations: true, email_weekly_summary: true, email_milestones: true,
@@ -142,5 +143,31 @@ describe("Settings: email notifications", () => {
     render(<MemoryRouter initialEntries={["/settings/notifications"]}><Settings /></MemoryRouter>);
     const section = await screen.findByRole("region", { name: "Email notifications" });
     expect(section.className).toMatch(/ring-2/);
+  });
+});
+
+describe("Settings: wallet-change hold", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    vi.mocked(notificationAPI.preferences).mockResolvedValue(PREFS as never);
+  });
+
+  it("tells the user when the hold on new withdrawal addresses ends", async () => {
+    authUser.wallet_hold_until = new Date(Date.now() + 20 * 3600 * 1000).toISOString();
+    authUser.wallet_hold_reason = "password_reset";
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    const notice = await screen.findByTestId("wallet-hold");
+    expect(notice).toHaveTextContent(/new withdrawal addresses are on hold until .* after a password reset/);
+    expect(notice).toHaveTextContent(/addresses you already use keep running/);
+    delete authUser.wallet_hold_until; delete authUser.wallet_hold_reason;
+  });
+
+  it("shows nothing once the hold has expired", async () => {
+    authUser.wallet_hold_until = new Date(Date.now() - 60 * 1000).toISOString();
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Exchange API keys");
+    expect(screen.queryByTestId("wallet-hold")).toBeNull();
+    delete authUser.wallet_hold_until;
   });
 });

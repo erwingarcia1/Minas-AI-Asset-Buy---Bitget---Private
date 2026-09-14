@@ -305,6 +305,9 @@ class PreferencesPayload(TypedDict):
     """PreferencesPayload."""
     device_token: NotRequired[Optional[str]]
     email_enabled: NotRequired[Optional[bool]]
+    email_milestones: NotRequired[Optional[bool]]
+    email_purchase_confirmations: NotRequired[Optional[bool]]
+    email_weekly_summary: NotRequired[Optional[bool]]
     phone_number: NotRequired[Optional[str]]
     push_enabled: NotRequired[Optional[bool]]
     quiet_hours_end: NotRequired[Optional[int]]
@@ -314,7 +317,11 @@ class PreferencesPayload(TypedDict):
 
 class PreferencesResponse(TypedDict):
     """PreferencesResponse."""
+    always_on_emails: NotRequired[List[str]]
     email_enabled: bool
+    email_milestones: bool
+    email_purchase_confirmations: bool
+    email_weekly_summary: bool
     has_device_token: bool
     phone_number: NotRequired[Optional[str]]
     push_enabled: bool
@@ -619,6 +626,8 @@ class UserProfile(TypedDict):
     kyc_sumsub_id: NotRequired[Optional[str]]
     role: NotRequired[str]
     updated_at: str
+    wallet_hold_reason: NotRequired[Optional[str]]
+    wallet_hold_until: NotRequired[Optional[str]]
 
 
 class UserPublicProfile(TypedDict):

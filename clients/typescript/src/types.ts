@@ -264,6 +264,9 @@ export interface PlatformStats {
 export interface PreferencesPayload {
   device_token?: string | null;
   email_enabled?: boolean | null;
+  email_milestones?: boolean | null;
+  email_purchase_confirmations?: boolean | null;
+  email_weekly_summary?: boolean | null;
   phone_number?: string | null;
   push_enabled?: boolean | null;
   quiet_hours_end?: number | null;
@@ -272,7 +275,11 @@ export interface PreferencesPayload {
 }
 
 export interface PreferencesResponse {
+  always_on_emails?: string[];
   email_enabled: boolean;
+  email_milestones: boolean;
+  email_purchase_confirmations: boolean;
+  email_weekly_summary: boolean;
   has_device_token: boolean;
   phone_number?: string | null;
   push_enabled: boolean;
@@ -550,6 +557,8 @@ export interface UserProfile {
   kyc_sumsub_id?: string | null;
   role?: string;
   updated_at: string;
+  wallet_hold_reason?: string | null;
+  wallet_hold_until?: string | null;
 }
 
 export interface UserPublicProfile {
