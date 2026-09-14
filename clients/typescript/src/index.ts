@@ -1,4 +1,4 @@
-import { CSRF_HEADER } from "./http";
+import { CSRF_HEADER } from "./http.js";
 /**
  * AutoBuy Crypto API — TypeScript client.
  *
