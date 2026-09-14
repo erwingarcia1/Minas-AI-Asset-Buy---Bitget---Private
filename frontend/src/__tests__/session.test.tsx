@@ -2,12 +2,15 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const post = vi.fn();
+const { post, instanceRequest, responseInterceptors } = vi.hoisted(() => ({
+  post: vi.fn(), instanceRequest: vi.fn(), responseInterceptors: [] as Array<(err: unknown) => unknown>,
+}));
 vi.mock("axios", () => {
-  const instance = { interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } }, request: vi.fn(), post: vi.fn(), get: vi.fn(), put: vi.fn(), delete: vi.fn() };
+  const instance = { interceptors: { request: { use: vi.fn() }, response: { use: (_ok: unknown, onError: (err: unknown) => unknown) => responseInterceptors.push(onError) } },
+    request: (...a: unknown[]) => instanceRequest(...a), post: vi.fn(), get: vi.fn(), put: vi.fn(), delete: vi.fn() };
   return { default: { create: () => instance, post: (...a: unknown[]) => post(...a), isAxiosError: () => false }, AxiosError: class {} };
 });
-import { bootstrapSession, csrfToken, refreshAccessToken } from "@/api/client";
+import { SESSION_EXPIRED_NOTICE, bootstrapSession, csrfToken, refreshAccessToken } from "@/api/client";
 import { ProtectedRoute, PublicOnlyRoute } from "@/components/Common/ProtectedRoute";
 import { purgeLegacyTokenStorage, useAuthStore } from "@/store/authStore";
 
@@ -50,12 +53,57 @@ describe("session: tokens stay out of localStorage", () => {
     expect(localStorage.length).toBe(0);
   });
 
-  it("bootstrap without a valid cookie marks the session anonymous", async () => {
+  it("bootstrap without any session marks the visitor anonymous, silently", async () => {
     post.mockRejectedValue(new Error("401"));
     expect(await bootstrapSession()).toBe(false);
     expect(useAuthStore.getState().status).toBe("anonymous");
     expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(useAuthStore.getState().notice).toBeNull();
     await expect(refreshAccessToken()).rejects.toThrow();
+  });
+
+  it("bootstrap with a session cookie that no longer refreshes tells the user the session expired", async () => {
+    document.cookie = "autobuy_csrf=stale; path=/";
+    post.mockRejectedValue({ response: { status: 401 } });
+    expect(await bootstrapSession()).toBe(false);
+    const s = useAuthStore.getState();
+    expect(s.status).toBe("anonymous");
+    expect(s.notice).toBe(SESSION_EXPIRED_NOTICE);
+    expect(document.cookie).not.toContain("autobuy_csrf=stale");   // no repeated notices on the next load
+  });
+
+  it("REPRODUCTION: a CSRF cookie scoped to /api/auth is invisible to the page, so refresh would have no header", () => {
+    // jsdom serves the test page at http://localhost:3000/ ; cookie path rules apply to document.cookie
+    document.cookie = "autobuy_csrf=scoped; path=/api/auth";
+    expect(document.cookie).not.toContain("autobuy_csrf");
+    expect(csrfToken()).toBeNull();
+    // the fix: the API sets it on path=/ (readable on every route), the refresh cookie stays on /api/auth
+    document.cookie = "autobuy_csrf=visible; path=/";
+    expect(csrfToken()).toBe("visible");
+  });
+
+  it("a short-lived access token is refreshed silently on 401 and the request is retried", async () => {
+    document.cookie = "autobuy_csrf=cookie-csrf; path=/";
+    useAuthStore.getState().setTokens({ ...TOKENS, access_token: "expired-acc", csrf_token: "cookie-csrf" });
+    post.mockResolvedValue({ data: { ...TOKENS, access_token: "fresh-acc" } });
+    instanceRequest.mockResolvedValue({ data: { ok: true } });
+    const onError = responseInterceptors[0];
+    const original = { url: "/user/profile", headers: { Authorization: "Bearer expired-acc" } as Record<string, string> };
+    const result = await onError({ config: original, response: { status: 401 } });
+    expect(result).toEqual({ data: { ok: true } });
+    expect(post).toHaveBeenCalledWith(expect.stringMatching(/\/auth\/refresh$/), undefined, expect.objectContaining({ headers: { "X-CSRF-Token": "cookie-csrf" } }));
+    expect(instanceRequest).toHaveBeenCalledWith(expect.objectContaining({ _retried: true, headers: expect.objectContaining({ Authorization: "Bearer fresh-acc" }) }));
+    expect(useAuthStore.getState().accessToken).toBe("fresh-acc");
+    expect(useAuthStore.getState().notice).toBeNull();   // the user noticed nothing
+  });
+
+  it("when the refresh itself fails on 401 the user is signed out with the session-expired notice", async () => {
+    useAuthStore.getState().setTokens(TOKENS);
+    post.mockRejectedValue({ response: { status: 401 } });
+    const onError = responseInterceptors[0];
+    await expect(onError({ config: { url: "/user/profile", headers: {} }, response: { status: 401 } })).rejects.toBeTruthy();
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(useAuthStore.getState().notice).toBe(SESSION_EXPIRED_NOTICE);
   });
 });
 

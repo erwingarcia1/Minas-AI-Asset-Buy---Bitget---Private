@@ -45,9 +45,13 @@ curl -s $BASE/api/dashboard/ -H "$AUTH"
 JWT bearer tokens. `POST /api/auth/login` answers `{access_token,
 token_type, expires_in, csrf_token}` and sets two cookies scoped to
 `/api/auth` with `SameSite=Lax` (and `Secure` outside development):
-`autobuy_refresh` (the 7-day revocable **refresh token**, `HttpOnly`, never
-in a response body) and `autobuy_csrf` (readable). The 30-minute **access
-token** must be kept in memory only.
+`autobuy_refresh` (the 7-day revocable **refresh token**, `HttpOnly`, path
+`/api/auth`, never in a response body) and `autobuy_csrf` (readable, path
+`/` so the page can read it on any route). The 30-minute **access token**
+must be kept in memory only. The signing key is `SECRET_KEY` from the
+environment, so sessions survive API restarts; a refresh fails only for a
+revoked, expired or pre-password-change token (each rejection is logged
+with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 
 - Send `Authorization: Bearer <access_token>` on every protected call.
 - On 401 or page load, `POST /api/auth/refresh` with no body and the header

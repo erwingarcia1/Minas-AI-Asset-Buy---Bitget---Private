@@ -51,14 +51,33 @@ export async function refreshAccessToken(): Promise<string> {
   return data.access_token;
 }
 
-/** On page load: try the cookie once; mark the session anonymous when there is none. */
+export const SESSION_EXPIRED_NOTICE = "Your session expired, please sign in again.";
+
+/** Forget the readable CSRF cookie (the httpOnly refresh cookie is cleared by the API). */
+function forgetCsrfCookie(): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${CSRF_COOKIE}=; max-age=0; path=/`;
+  document.cookie = `${CSRF_COOKIE}=; max-age=0; path=/api/auth`;
+}
+
+/**
+ * On page load: try the cookie once. A visitor with no session becomes
+ * anonymous silently; a visitor who HAD a session (the CSRF cookie is there)
+ * but cannot refresh it is told the session expired, never left guessing.
+ */
 export async function bootstrapSession(): Promise<boolean> {
+  const hadSession = csrfToken() !== null;
   try {
     refreshing = refreshing ?? refreshAccessToken();
     await refreshing;
     return true;
   } catch {
-    useAuthStore.getState().setAnonymous();
+    if (hadSession) {
+      forgetCsrfCookie();
+      useAuthStore.getState().logout(SESSION_EXPIRED_NOTICE);
+    } else {
+      useAuthStore.getState().setAnonymous();
+    }
     return false;
   } finally {
     refreshing = null;
@@ -81,7 +100,8 @@ api.interceptors.response.use(undefined, async (error: AxiosError<ApiErrorBody>)
     } catch {
       refreshing = null;
     }
-    useAuthStore.getState().logout("Your session has expired. Please sign in again.");
+    forgetCsrfCookie();
+    useAuthStore.getState().logout(SESSION_EXPIRED_NOTICE);
   }
   throw error;
 });

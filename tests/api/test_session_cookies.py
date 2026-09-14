@@ -11,7 +11,7 @@ from api.auth import hash_password
 from api.config import settings
 from api.models import User
 from api.routes import auth as auth_mod
-from api.routes.auth import COOKIE_PATH, CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE
+from api.routes.auth import COOKIE_PATH, CSRF_COOKIE, CSRF_COOKIE_PATH, CSRF_HEADER, REFRESH_COOKIE
 
 PW = "Sess-Passw0rd!1"
 
@@ -48,6 +48,8 @@ async def test_login_sets_httponly_cookies_and_returns_no_refresh_token_in_the_b
     assert "max-age=" in refresh_attrs and "secure" not in refresh_attrs, "Secure is off in development (plain http on localhost)"
     csrf_attrs = cookie_attrs(r, CSRF_COOKIE)
     assert "httponly" not in csrf_attrs and "samesite=lax" in csrf_attrs, "the CSRF cookie must be readable by the page"
+    assert CSRF_COOKIE_PATH == "/" and "path=/;" in csrf_attrs + ";", \
+        "the CSRF cookie must be visible to document.cookie on every page route, not only under /api/auth"
     assert r.cookies[CSRF_COOKIE] == body["csrf_token"]
     decoded = jwt.decode(r.cookies[REFRESH_COOKIE], settings.secret_key, algorithms=[settings.algorithm])
     assert decoded["type"] == "refresh" and decoded["sub"] == str(account.id)
@@ -122,3 +124,64 @@ async def test_refresh_token_in_a_body_is_ignored(account):
         c.cookies.clear()
         r = await c.post("/api/auth/refresh", json={"refresh_token": token}, cookies={CSRF_COOKIE: "c"}, headers={CSRF_HEADER: "c"})
     assert r.status_code == 401
+
+
+async def test_csrf_failures_are_logged_with_a_reason(account, caplog):
+    import logging
+    async with client() as c:
+        await c.post("/api/auth/login", json={"email": account.email, "password": PW})
+        with caplog.at_level(logging.WARNING, logger="autobuy.auth"):
+            r = await c.post("/api/auth/refresh")
+    assert r.status_code == 403 and "no X-CSRF-Token header" in r.json()["detail"]["details"]["message"]
+    rec = next(x for x in caplog.records if x.getMessage() == "csrf_failed")
+    assert rec.reason == "no X-CSRF-Token header" and rec.has_refresh_cookie is True and rec.path == "/api/auth/refresh"
+
+
+async def test_refresh_survives_an_api_restart(account):
+    """The signing key comes from SECRET_KEY in the environment, never generated at
+    startup, so a refresh cookie minted by one process is valid for the next one."""
+    import importlib
+    from api import config as config_mod
+    assert "secrets.token" not in open(config_mod.__file__).read() and "uuid4" not in open(config_mod.__file__).read()
+    fresh = config_mod.Settings()          # what a restarted process would load
+    assert fresh.secret_key == settings.secret_key and fresh.algorithm == settings.algorithm
+    assert fresh.refresh_token_expire_days >= 1 and fresh.access_token_expire_minutes <= 60
+    async with client() as c:
+        login = (await c.post("/api/auth/login", json={"email": account.email, "password": PW})).json()
+        cookie = c.cookies[REFRESH_COOKIE]
+    # "restart": a brand-new client (no shared state) presenting the cookie minted before
+    decoded = jwt.decode(cookie, fresh.secret_key, algorithms=[fresh.algorithm])
+    assert decoded["type"] == "refresh"
+    async with client() as c2:
+        r = await c2.post("/api/auth/refresh", cookies={REFRESH_COOKIE: cookie, CSRF_COOKIE: login["csrf_token"]},
+                          headers={CSRF_HEADER: login["csrf_token"]})
+    assert r.status_code == 200 and r.json()["access_token"]
+    importlib.invalidate_caches()
+
+
+async def test_refresh_fails_only_after_a_password_change_revocation_or_expiry(account, db):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    async with client() as c:
+        login = (await c.post("/api/auth/login", json={"email": account.email, "password": PW})).json()
+        H = {CSRF_HEADER: login["csrf_token"]}
+        # a plain refresh keeps working, repeatedly (rotation)
+        for _ in range(3):
+            r = await c.post("/api/auth/refresh", headers={CSRF_HEADER: c.cookies[CSRF_COOKIE]})
+            assert r.status_code == 200, r.text
+        # password change: everything issued before dies
+        await asyncio.sleep(1.1)
+        acc = r.json()["access_token"]
+        ok = await c.post("/api/auth/change-password", headers={"Authorization": f"Bearer {acc}"},
+                          json={"current_password": PW, "new_password": "Changed-Passw0rd!2"})
+        assert ok.status_code == 204
+        r = await c.post("/api/auth/refresh", headers={CSRF_HEADER: c.cookies[CSRF_COOKIE]})
+        assert r.status_code == 401, "pre-change refresh cookie must die"
+        assert not c.cookies.get(REFRESH_COOKIE), "and the API clears the dead cookie"
+        # expiry: a cookie past its exp is rejected
+        expired = jwt.encode({"sub": str(account.id), "type": "refresh", "jti": "x1",
+                              "iat": datetime.now(timezone.utc) - timedelta(days=8),
+                              "exp": datetime.now(timezone.utc) - timedelta(days=1)},
+                             settings.secret_key, algorithm=settings.algorithm)
+        r = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: expired, CSRF_COOKIE: "c"}, headers={CSRF_HEADER: "c"})
+        assert r.status_code == 401

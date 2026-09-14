@@ -176,7 +176,11 @@ async def _revoke(jti: str, exp_ts: int) -> None:
 REFRESH_COOKIE = "autobuy_refresh"
 CSRF_COOKIE = "autobuy_csrf"
 CSRF_HEADER = "X-CSRF-Token"
-COOKIE_PATH = "/api/auth"
+COOKIE_PATH = "/api/auth"      # the refresh cookie: only ever sent to the auth endpoints
+CSRF_COOKIE_PATH = "/"         # the CSRF cookie must be readable by the page on ANY route
+# (document.cookie only exposes cookies whose Path matches the page URL: a CSRF
+# cookie scoped to /api/auth is invisible on /dashboard, so after a reload the
+# page could not send the header and every refresh answered 403.)
 
 
 def _cookie_secure() -> bool:
@@ -187,22 +191,28 @@ def set_session_cookies(response: Response, refresh_token: str, csrf_token: str)
     max_age = settings.refresh_token_expire_days * 24 * 3600
     response.set_cookie(REFRESH_COOKIE, refresh_token, max_age=max_age, path=COOKIE_PATH,
                         httponly=True, secure=_cookie_secure(), samesite="lax")
-    response.set_cookie(CSRF_COOKIE, csrf_token, max_age=max_age, path=COOKIE_PATH,
+    response.set_cookie(CSRF_COOKIE, csrf_token, max_age=max_age, path=CSRF_COOKIE_PATH,
                         httponly=False, secure=_cookie_secure(), samesite="lax")
 
 
 def clear_session_cookies(response: Response) -> None:
-    for name in (REFRESH_COOKIE, CSRF_COOKIE):
-        response.delete_cookie(name, path=COOKIE_PATH, httponly=name == REFRESH_COOKIE,
-                               secure=_cookie_secure(), samesite="lax")
+    response.delete_cookie(REFRESH_COOKIE, path=COOKIE_PATH, httponly=True, secure=_cookie_secure(), samesite="lax")
+    response.delete_cookie(CSRF_COOKIE, path=CSRF_COOKIE_PATH, httponly=False, secure=_cookie_secure(), samesite="lax")
+    # older builds set the CSRF cookie on /api/auth: clear that copy too
+    response.delete_cookie(CSRF_COOKIE, path=COOKIE_PATH, httponly=False, secure=_cookie_secure(), samesite="lax")
 
 
 def _require_csrf(request: Request) -> None:
     cookie = request.cookies.get(CSRF_COOKIE)
     header = request.headers.get(CSRF_HEADER)
-    if not cookie or not header or not secrets.compare_digest(cookie, header):
-        raise HTTPException(status_code=403, detail={"error": "csrf_failed",
-                                                    "details": {"message": f"Missing or mismatched {CSRF_HEADER} header"}})
+    if cookie and header and secrets.compare_digest(cookie, header):
+        return
+    reason = ("no CSRF cookie" if not cookie else "no X-CSRF-Token header" if not header
+              else "header does not match the CSRF cookie")
+    logger.warning("csrf_failed", extra={"path": request.url.path, "reason": reason,
+                                         "has_refresh_cookie": bool(request.cookies.get(REFRESH_COOKIE))})
+    raise HTTPException(status_code=403, detail={"error": "csrf_failed",
+                                                "details": {"message": f"{reason}: send {CSRF_HEADER} equal to the {CSRF_COOKIE} cookie"}})
 
 
 def _start_session(response: Response, user_id: str) -> TokenResponse:
@@ -290,15 +300,26 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         detail="Invalid or expired refresh token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    def dead(reason: str) -> JSONResponse:
+        # A raised HTTPException would drop the injected response's Set-Cookie
+        # headers, so build the 401 explicitly and clear the dead cookies on it.
+        logger.info("refresh rejected", extra={"reason": reason})
+        out = JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED,
+                           content={"detail": "Invalid or expired refresh token"},
+                           headers={"WWW-Authenticate": "Bearer"})
+        clear_session_cookies(out)
+        return out
+
     _require_csrf(request)
     raw = request.cookies.get(REFRESH_COOKIE)
     if not raw:
+        logger.info("refresh rejected", extra={"reason": "no refresh cookie"})
         raise invalid
     try:
         decoded = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError:
-        clear_session_cookies(response)
-        raise invalid
+    except JWTError as exc:
+        return dead(f"refresh token invalid or expired: {type(exc).__name__}")
     if decoded.get("type") != "refresh" or not decoded.get("sub"):
         raise invalid
     try:
@@ -308,18 +329,17 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
 
     jti = decoded.get("jti")
     if jti and await _is_revoked(jti):
-        raise invalid
+        return dead("refresh token revoked (logout or rotation)")
 
     # Make sure the user still exists before minting new tokens.
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
-        raise invalid
+        return dead("user no longer exists")
     if user.password_changed_at is not None and decoded.get("iat") is not None:
         issued = datetime.fromtimestamp(decoded["iat"], tz=timezone.utc)
         if issued < user.password_changed_at:
-            clear_session_cookies(response)
-            raise invalid
+            return dead("refresh token issued before the password was changed")
     if jti:   # rotation: the cookie just used cannot be replayed
         try:
             await _revoke(jti, int(decoded.get("exp", 0)))
