@@ -22,6 +22,7 @@ import type {
   IntegrationInfo,
   KeyVerifyResponse,
   KycOverride,
+  LiftWalletHold,
   LoginRequest,
   LogoutRequest,
   PerformanceResponse,
@@ -127,6 +128,11 @@ export class AdminApi {
   /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
   kycOverride(userId: string, body: KycOverride): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/kyc-override", { body, auth: true });
+  }
+
+  /** Lift Wallet Hold — `POST /api/admin/users/{user_id}/lift-wallet-hold` */
+  liftWalletHold(userId: string, body: LiftWalletHold): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/lift-wallet-hold", { body, auth: true });
   }
 
   /** Suspend User — `POST /api/admin/users/{user_id}/suspend` */

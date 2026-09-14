@@ -315,6 +315,29 @@
           "suspended": {
             "title": "Suspended",
             "type": "boolean"
+          },
+          "wallet_hold_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Reason"
+          },
+          "wallet_hold_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Until"
           }
         },
         "required": [
@@ -1125,6 +1148,28 @@
           "note"
         ],
         "title": "KycOverride",
+        "type": "object"
+      },
+      "LiftWalletHold": {
+        "properties": {
+          "confirm_email": {
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Confirm Email",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 5,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_email",
+          "reason"
+        ],
+        "title": "LiftWalletHold",
         "type": "object"
       },
       "LoginRequest": {
@@ -4005,6 +4050,58 @@
           }
         ],
         "summary": "Kyc Override",
+        "tags": [
+          "user"
+        ]
+      }
+    },
+    "/api/admin/users/{user_id}/lift-wallet-hold": {
+      "post": {
+        "description": "Support override: clear the 24-hour wallet-change hold for a customer who\nreset their own password and proved their identity. Requires the user's\nemail typed exactly and a reason; writes an audit entry (admin, when, why)\nand emails the user that the hold was lifted. 409 when no hold is active.",
+        "operationId": "lift_wallet_hold_api_admin_users__user_id__lift_wallet_hold_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiftWalletHold"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lift Wallet Hold",
         "tags": [
           "user"
         ]

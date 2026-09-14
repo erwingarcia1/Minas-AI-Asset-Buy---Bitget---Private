@@ -124,6 +124,9 @@ export const adminAPI = {
   unsuspend: (id: string) => api.post(`/admin/users/${id}/unsuspend`),
   /** `confirm` must equal the user's email; the server rejects anything else. */
   removeUser: (id: string, confirm: string) => api.delete(`/admin/users/${id}`, { params: { confirm } }),
+  /** Support override for the 24h wallet-change hold; `confirm` must equal the user's email. */
+  liftWalletHold: (id: string, confirm: string, reason: string) =>
+    api.post(`/admin/users/${id}/lift-wallet-hold`, { confirm_email: confirm, reason }),
   transactions: (params: { status_filter?: string; user_id?: string; limit?: number; offset?: number } = {}) =>
     data<{ items: AdminTxRow[]; total: number }>(api.get("/admin/transactions", { params })),
   alerts: () => data<AdminAlert[]>(api.get("/admin/alerts")),

@@ -25,6 +25,7 @@ from .types import (
     IntegrationInfo,
     KeyVerifyResponse,
     KycOverride,
+    LiftWalletHold,
     LoginRequest,
     LogoutRequest,
     PerformanceResponse,
@@ -140,6 +141,10 @@ class AdminApi:
         """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
         return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
 
+    def lift_wallet_hold(self, user_id: str, body: LiftWalletHold) -> Any:
+        """Lift Wallet Hold — ``POST /api/admin/users/{user_id}/lift-wallet-hold``."""
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/lift-wallet-hold", auth=True, body=body)
+
     def suspend_user(self, user_id: str) -> Any:
         """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""
         return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/suspend", auth=True)
@@ -190,6 +195,10 @@ class AsyncAdminApi:
     async def kyc_override(self, user_id: str, body: KycOverride) -> Any:
         """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
         return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
+
+    async def lift_wallet_hold(self, user_id: str, body: LiftWalletHold) -> Any:
+        """Lift Wallet Hold — ``POST /api/admin/users/{user_id}/lift-wallet-hold``."""
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/lift-wallet-hold", auth=True, body=body)
 
     async def suspend_user(self, user_id: str) -> Any:
         """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""

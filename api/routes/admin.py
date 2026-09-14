@@ -80,6 +80,8 @@ class AdminUserRow(UTCModel):
     suspended: bool
     created_at: datetime
     invested_usdt: float = 0.0
+    wallet_hold_until: Optional[datetime] = None   # active 24h hold on new withdrawal addresses, else null
+    wallet_hold_reason: Optional[str] = None
 
 
 class AdminUserList(BaseModel):
@@ -106,9 +108,12 @@ async def list_users(
         .order_by(User.created_at.desc()).limit(limit).offset(offset))).scalars().all()
     invested = await history.invested_per_user(db)
     items = []
+    from api.services.wallet_hold import active_hold
     for user in users:
         row = AdminUserRow.model_validate(user)
         row.invested_usdt = invested.get(user.id, 0.0)
+        row.wallet_hold_until = active_hold(user)
+        row.wallet_hold_reason = user.wallet_hold_reason if row.wallet_hold_until else None
         items.append(row)
     return AdminUserList(items=items, total=total)
 
@@ -165,6 +170,40 @@ async def delete_user(
     await db.delete(user)
     await db.commit()
     audit(admin, "user_deleted", user_id=str(user_id), email=user.email)
+
+
+class LiftWalletHold(BaseModel):
+    confirm_email: str = Field(min_length=3, max_length=255)   # must equal the user's email
+    reason: str = Field(min_length=5, max_length=500)          # how the customer proved who they are
+
+
+@router.post("/users/{user_id}/lift-wallet-hold", status_code=204)
+async def lift_wallet_hold(
+    user_id: UUID,
+    payload: LiftWalletHold,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Support override: clear the 24-hour wallet-change hold for a customer who
+    reset their own password and proved their identity. Requires the user's
+    email typed exactly and a reason; writes an audit entry (admin, when, why)
+    and emails the user that the hold was lifted. 409 when no hold is active."""
+    from api.services import wallet_hold
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if payload.confirm_email.strip().lower() != user.email.lower():
+        raise HTTPException(status_code=400, detail="confirm_email must match the user's email exactly")
+    until = wallet_hold.active_hold(user)
+    if until is None:
+        raise HTTPException(status_code=409, detail="No wallet-change hold is active for this user")
+    lifted_at = datetime.now(timezone.utc)
+    user.wallet_hold_until = None
+    user.wallet_hold_reason = None
+    await db.commit()
+    audit(admin, "wallet_hold_lifted", user_id=str(user.id), email=user.email, reason=payload.reason,
+          hold_was_until=until.isoformat(), lifted_at=lifted_at.isoformat())
+    await wallet_hold.notify_hold_lifted(db, user, admin, payload.reason, until, lifted_at)
 
 
 class KycOverride(BaseModel):

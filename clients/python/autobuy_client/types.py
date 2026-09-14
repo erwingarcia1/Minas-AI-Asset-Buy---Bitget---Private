@@ -77,6 +77,8 @@ class AdminUserRow(TypedDict):
     kyc_status: str
     role: str
     suspended: bool
+    wallet_hold_reason: NotRequired[Optional[str]]
+    wallet_hold_until: NotRequired[Optional[str]]
 
 
 class AlertItem(TypedDict):
@@ -253,6 +255,12 @@ class KycOverride(TypedDict):
     """KycOverride."""
     note: str
     status: str
+
+
+class LiftWalletHold(TypedDict):
+    """LiftWalletHold."""
+    confirm_email: str
+    reason: str
 
 
 class LoginRequest(TypedDict):

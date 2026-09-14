@@ -4,10 +4,11 @@ import { errorMessage } from "@/api/client";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
 import { useAsync } from "@/hooks/useAsync";
 import type { AdminUserRow } from "@/types";
-import { fmtDay, fmtUsdt } from "@/utils/format";
+import { fmtDate, fmtDay, fmtUsdt } from "@/utils/format";
 import { ConfirmEmailDialog } from "./ConfirmEmailDialog";
 
-type Pending = { kind: "suspend" | "delete"; user: AdminUserRow } | null;
+type Pending = { kind: "suspend" | "delete" | "lift_hold"; user: AdminUserRow } | null;
+const HOLD_REASON_MIN = 5;
 
 export default function UserManagement() {
   const [query, setQuery] = useState("");
@@ -16,6 +17,7 @@ export default function UserManagement() {
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [holdReason, setHoldReason] = useState("");
 
   async function unsuspend(u: AdminUserRow) {
     setNotice(null);
@@ -25,11 +27,19 @@ export default function UserManagement() {
 
   async function confirmPending(typed: string) {
     if (!pending) return;
+    if (pending.kind === "lift_hold" && holdReason.trim().length < HOLD_REASON_MIN) {
+      setDialogError("Write how the customer proved their identity (at least 5 characters) before lifting the hold.");
+      return;
+    }
     setBusy(true); setDialogError(null);
     try {
       if (pending.kind === "delete") await adminAPI.removeUser(pending.user.id, typed);
+      else if (pending.kind === "lift_hold") await adminAPI.liftWalletHold(pending.user.id, typed, holdReason.trim());
       else await adminAPI.suspend(pending.user.id);
-      setNotice(pending.kind === "delete" ? `${pending.user.email} deleted.` : `${pending.user.email} suspended.`);
+      setNotice(pending.kind === "delete" ? `${pending.user.email} deleted.`
+        : pending.kind === "lift_hold" ? `Wallet-change hold lifted for ${pending.user.email}; they have been emailed.`
+        : `${pending.user.email} suspended.`);
+      setHoldReason("");
       setPending(null);
       await reload();
     } catch (err) {
@@ -59,11 +69,18 @@ export default function UserManagement() {
                   <td className="px-4 py-2">{fmtDay(u.created_at)}</td>
                   <td className="px-4 py-2">{fmtUsdt(u.invested_usdt)}</td>
                   <td className="px-4 py-2"><StatusBadge status={u.kyc_status} /></td>
-                  <td className="px-4 py-2"><StatusBadge status={u.suspended ? "suspended" : "active"} /></td>
+                  <td className="px-4 py-2"><StatusBadge status={u.suspended ? "suspended" : "active"} />
+                    {u.wallet_hold_until && new Date(u.wallet_hold_until).getTime() > Date.now() && (
+                      <div className="mt-1 text-xs text-amber-700" data-testid="hold-until">Wallet hold until {fmtDate(u.wallet_hold_until)}</div>
+                    )}
+                  </td>
                   <td className="space-x-2 whitespace-nowrap px-4 py-2 text-right">
                     {u.suspended
                       ? <button className="btn-secondary !py-1" onClick={() => void unsuspend(u)}>Unsuspend</button>
                       : <button className="btn-secondary !py-1" onClick={() => { setDialogError(null); setPending({ kind: "suspend", user: u }); }}>Suspend</button>}
+                    {u.wallet_hold_until && new Date(u.wallet_hold_until).getTime() > Date.now() && (
+                      <button className="btn-secondary !py-1" onClick={() => { setDialogError(null); setHoldReason(""); setPending({ kind: "lift_hold", user: u }); }}>Lift wallet hold</button>
+                    )}
                     <button className="btn-danger !py-1" onClick={() => { setDialogError(null); setPending({ kind: "delete", user: u }); }}>Delete</button>
                   </td>
                 </tr>
@@ -74,14 +91,23 @@ export default function UserManagement() {
       )}
       {pending && (
         <ConfirmEmailDialog
-          title={pending.kind === "delete" ? "Delete this user?" : "Suspend this user?"}
+          title={pending.kind === "delete" ? "Delete this user?" : pending.kind === "lift_hold" ? "Lift the wallet-change hold?" : "Suspend this user?"}
           description={pending.kind === "delete"
             ? "Deleting removes their exchange keys, schedules AND transaction history. This cannot be undone."
-            : "A suspended user cannot sign in and none of their schedules execute until unsuspended."}
+            : pending.kind === "lift_hold"
+              ? "Only after the customer has proved who they are. Lifting the hold lets them send coins to new addresses right away; the customer is emailed and the override is audited with your reason."
+              : "A suspended user cannot sign in and none of their schedules execute until unsuspended."}
           email={pending.user.email}
-          confirmLabel={pending.kind === "delete" ? "Delete user" : "Suspend user"}
+          confirmLabel={pending.kind === "delete" ? "Delete user" : pending.kind === "lift_hold" ? "Lift hold" : "Suspend user"}
+          danger={pending.kind !== "lift_hold"}
           busy={busy}
           error={dialogError}
+          extra={pending.kind === "lift_hold" ? (
+            <div>
+              <label className="label" htmlFor="hold-reason">How did the customer prove their identity?</label>
+              <input id="hold-reason" className="input" value={holdReason} onChange={(e) => setHoldReason(e.target.value)} placeholder="e.g. video call with ID, ticket #4711" />
+            </div>
+          ) : undefined}
           onConfirm={(typed) => void confirmPending(typed)}
           onCancel={() => { if (!busy) setPending(null); }}
         />

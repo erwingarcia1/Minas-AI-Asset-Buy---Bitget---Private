@@ -63,6 +63,8 @@ export interface AdminUserRow {
   kyc_status: string;
   role: string;
   suspended: boolean;
+  wallet_hold_reason?: string | null;
+  wallet_hold_until?: string | null;
 }
 
 export interface AlertItem {
@@ -218,6 +220,11 @@ export interface KeyVerifyResponse {
 export interface KycOverride {
   note: string;
   status: string;
+}
+
+export interface LiftWalletHold {
+  confirm_email: string;
+  reason: string;
 }
 
 export interface LoginRequest {

@@ -125,3 +125,78 @@ def test_scheduler_has_the_outbox_job():
     sched = ps.build_scheduler()
     job = sched.get_job("drain_email_outbox")
     assert job is not None and job.func is ps.drain_email_outbox and job.max_instances == 1
+
+
+# --------------------------------------------------------------------------- edge cases
+
+async def test_queued_emails_still_drain_while_the_schedulers_are_paused(db, user, binance_key, working_provider):
+    """Pausing stops trading, not notifications."""
+    from api.services import scheduler_state
+    await scheduler_state.pause(by="admin-test")
+    try:
+        await make_purchase(db, user, binance_key, purchase_type="dca", next_execution=NOW)
+        counts = await ps.execute_due_purchases(db, now=NOW, gateway=FakeGateway(), dry_run=True)
+        assert counts["executed"] == 0, "trading is paused"
+        await email_outbox.enqueue(user.email, "queued while paused", "<p>x</p>", "x", template="purchase")
+        assert (await email_outbox.drain())["sent"] == 1
+        await email_outbox.enqueue(user.email, "queued while paused 2", "<p>x</p>", "x", template="purchase")
+        await ps._run_once()   # the scheduler's run also drains, even though the run itself is skipped
+        assert [m["subject"] for m in working_provider] == ["queued while paused", "queued while paused 2"]
+    finally:
+        await scheduler_state.resume()
+
+
+async def test_redis_down_logs_error_with_recipient_and_template_and_leaves_the_purchase_alone(db, user, binance_key, monkeypatch, caplog):
+    import logging
+
+    def no_redis():
+        raise ConnectionError("redis refused")
+    monkeypatch.setattr(email_outbox, "_redis", no_redis)
+
+    async def provider_down(*a, **kw):
+        raise resend.ResendError("Resend unreachable: boom")
+    monkeypatch.setattr(resend, "send_email", provider_down)
+    p = await make_purchase(db, user, binance_key, purchase_type="dca", next_execution=NOW)
+    with caplog.at_level(logging.ERROR):
+        counts = await ps.execute_due_purchases(db, now=NOW, gateway=FakeGateway(), dry_run=True)
+    assert counts["executed"] == 1
+    await db.refresh(p)
+    (buy,) = await tx_for(db, p)
+    assert p.status == "active" and p.failure_count == 0 and buy.status == "success"
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("email outbox unavailable" in m and user.email in m and "template=purchase" in m for m in errors)
+    assert any("email lost" in m and user.email in m and "template=purchase" in m for m in errors)
+    # the drain itself copes with Redis being gone
+    assert await email_outbox.drain() == {"sent": 0, "failed": 0, "timed_out": 0, "remaining": 0}
+
+
+async def test_dropped_emails_are_logged_with_recipient_and_template(working_provider, monkeypatch, caplog):
+    import logging
+    from api.services.redis_client import get_redis
+    await get_redis().rpush(email_outbox.OUTBOX_KEY, "{not json")
+    await email_outbox.enqueue("a@example.com", "will fail", "<p>x</p>", "x", template="purchase")
+
+    async def reject(*a, **kw):
+        raise resend.ResendError("Resend 422: bad address", status=422)
+    monkeypatch.setattr(resend, "send_email", reject)
+    with caplog.at_level(logging.ERROR):
+        counts = await email_outbox.drain()
+    assert counts["failed"] == 2 and counts["remaining"] == 0
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("unreadable" in m for m in errors)
+    assert any("email dropped" in m and "a@example.com" in m and "template=purchase" in m for m in errors)
+
+
+async def test_outbox_is_capped_and_trimming_is_logged(monkeypatch, caplog):
+    import logging
+    monkeypatch.setattr(email_outbox, "MAX_QUEUE_LENGTH", 3)
+    with caplog.at_level(logging.ERROR):
+        for i in range(5):
+            assert await email_outbox.enqueue("a@example.com", f"m{i}", "<p>x</p>", "x", template="purchase")
+    assert await email_outbox.length() == 3
+    from api.services.redis_client import get_redis
+    import json
+    kept = [json.loads(x)["subject"] for x in await get_redis().lrange(email_outbox.OUTBOX_KEY, 0, -1)]
+    assert kept == ["m2", "m3", "m4"], "newest kept, oldest dropped"
+    trims = [r.getMessage() for r in caplog.records if "over its cap" in r.getMessage()]
+    assert len(trims) == 2 and "1 oldest message(s) dropped" in trims[0] and "template=purchase" in trims[0]

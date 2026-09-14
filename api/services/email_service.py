@@ -13,6 +13,9 @@ from __future__ import annotations
 from api.config import settings
 from api.integrations import resend
 from api.integrations.resend import ResendError
+import logging
+
+logger = logging.getLogger("autobuy.email")
 
 
 class EmailService:
@@ -37,9 +40,13 @@ class EmailService:
         if await email_outbox.enqueue(to, subject, html, text, template):
             return True
         try:
-            return await asyncio.wait_for(self._send(to, subject, html, text, template), 5.0)
-        except Exception:
-            return False
+            ok = await asyncio.wait_for(self._send(to, subject, html, text, template), 5.0)
+        except Exception as exc:
+            ok = False
+            logger.error("email lost (outbox unavailable, inline attempt failed): to=%s template=%s reason=%s", to, template, exc)
+        if not ok:
+            logger.error("email lost (outbox unavailable, inline attempt failed): to=%s template=%s", to, template)
+        return ok
 
     async def send_purchase_event_email(self, user_email: str, event) -> bool:
         """One email per Auto-Buy attempt outcome (see purchase_events). Queued,

@@ -365,7 +365,8 @@ export interface AdminStats {
   total_users: number; verified_users: number; suspended_users: number; total_invested_usdt: number;
   total_transactions: number; failed_transactions_24h: number; active_purchases: number; signups_7d: number; volume_7d_usdt: number;
 }
-export interface AdminUserRow { id: string; email: string; role: string; kyc_status: string; suspended: boolean; created_at: string; invested_usdt: number }
+export interface AdminUserRow { id: string; email: string; role: string; kyc_status: string; suspended: boolean; created_at: string; invested_usdt: number;
+  wallet_hold_until?: string | null; wallet_hold_reason?: string | null }
 export interface AdminTxRow { id: string; user_id: string; crypto: string; cost_usdt: number; status: string; error_message?: string | null; created_at: string }
 export interface AdminAlert { name: string; severity: "ok" | "warning" | "critical"; value: string; detail: string }
 

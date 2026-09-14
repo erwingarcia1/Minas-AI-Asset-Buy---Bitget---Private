@@ -238,7 +238,13 @@ to withdraw-immediately (any address), and `POST /api/wallets` for a new
 address. Addresses already used by the user are accepted, existing purchases
 keep executing, and retry-withdrawal to the purchase's own address works.
 The hold is stored on the user row, so it survives restarts and applies in
-every worker.
+every worker. Support override: `POST /api/admin/users/{id}/lift-wallet-hold`
+(admin only) with `{confirm_email, reason}` — the email must match exactly,
+the reason (min 5 chars) records how the customer proved their identity;
+the hold is cleared, an `admin_action` audit line `wallet_hold_lifted` is
+written with the admin id, user, reason and time, a `wallet_hold_lifted`
+row lands in the user's notification history, and the user is emailed.
+409 when no hold is active.
 
 ## Purchase emails are queued
 
@@ -247,8 +253,11 @@ failures and campaign emails are rendered on the purchase path and pushed
 onto a Redis outbox (`autobuy:email:outbox`, shared by all workers, survives
 restarts); the scheduler sends them after each run and every minute
 (`drain_email_outbox`), 20 s budget per drain and 10 s per email. A timed-out
-or rejected email is logged and dropped; it never fails, retries or delays a
-purchase. If Redis is unavailable, one 5-second inline attempt is made.
+or rejected email is logged at ERROR with recipient and template and dropped;
+it never fails, retries or delays a purchase. If Redis is unavailable, one
+5-second inline attempt is made and a loss is logged at ERROR. The list is
+capped at 10,000 messages (oldest dropped, logged). Draining ignores the
+admin pause switch: pausing stops trading, not notifications.
 Security emails (password reset / changed) are sent directly by the request
 that triggers them.
 

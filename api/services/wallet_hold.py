@@ -103,3 +103,39 @@ def check_action(user: User, action: str) -> None:
         return
     logger.warning("action blocked by wallet change hold: user=%s action=%s until=%s", user.id, action, until.isoformat())
     raise reject(user, until, action)
+
+
+async def notify_hold_lifted(db: AsyncSession, user: User, admin: User, reason: str,
+                             was_until: datetime, lifted_at: datetime) -> bool:
+    """Security email (never optional) telling the user an admin lifted the hold,
+    recorded in the notifications audit table. Never raises."""
+    from api.config import settings
+    from api.integrations import resend
+    from api.models import Notification
+    app = settings.app_name
+    stamp = lifted_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    contact = f"contact {settings.support_email} immediately" if settings.support_email else "contact support immediately"
+    subject = f"Your {app} withdrawal-address hold was lifted"
+    text = (f"A {app} support administrator lifted the hold on new withdrawal addresses for your account at {stamp}, "
+            f"after you confirmed your identity. New wallet addresses, switching a purchase to withdraw-immediately "
+            f"and autobuy purchases to new addresses are allowed again. "
+            f"If you did not ask for this, {contact}.")
+    html = (f"<p>A {app} support administrator lifted the hold on new withdrawal addresses for your account at "
+            f"<strong>{stamp}</strong>, after you confirmed your identity.</p>"
+            f"<p>New wallet addresses, switching a purchase to withdraw-immediately and autobuy purchases to new "
+            f"addresses are allowed again.</p><p>If you did not ask for this, {contact}.</p>")
+    ok = True
+    try:
+        await resend.send_email(user.email, subject, html, text_content=text, template="wallet_hold_lifted")
+    except Exception as exc:
+        ok = False
+        logger.error("wallet hold lifted notice not delivered: user=%s reason=%s", user.id, exc)
+    try:
+        db.add(Notification(user_id=user.id, channel="email", template="wallet_hold_lifted", subject=subject,
+                            status="sent" if ok else "failed"))
+        await db.commit()
+    except Exception:
+        logger.exception("could not record the wallet-hold-lifted notification for user %s", user.id)
+    logger.warning("wallet change hold lifted: user=%s by admin=%s reason=%r was_until=%s",
+                   user.id, admin.id, reason, was_until.isoformat())
+    return ok

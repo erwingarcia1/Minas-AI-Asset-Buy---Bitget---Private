@@ -112,6 +112,16 @@ export class AdminApi {
   }
 
   /**
+   * Lift Wallet Hold — `POST /api/admin/users/{user_id}/lift-wallet-hold`
+   * @param {string} userId
+   * @param {import('./types.js').LiftWalletHold} body
+   * @returns {Promise<unknown>}
+   */
+  liftWalletHold(userId, body) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/lift-wallet-hold", { body, auth: true });
+  }
+
+  /**
    * Suspend User — `POST /api/admin/users/{user_id}/suspend`
    * @param {string} userId
    * @returns {Promise<unknown>}

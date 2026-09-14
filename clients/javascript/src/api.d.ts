@@ -22,6 +22,7 @@ import type {
   IntegrationInfo,
   KeyVerifyResponse,
   KycOverride,
+  LiftWalletHold,
   LoginRequest,
   LogoutRequest,
   PerformanceResponse,
@@ -94,6 +95,8 @@ export declare class AdminApi {
   deleteUser(userId: string, query: { confirm: string }): Promise<unknown>;
   /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
   kycOverride(userId: string, body: KycOverride): Promise<unknown>;
+  /** Lift Wallet Hold — `POST /api/admin/users/{user_id}/lift-wallet-hold` */
+  liftWalletHold(userId: string, body: LiftWalletHold): Promise<unknown>;
   /** Suspend User — `POST /api/admin/users/{user_id}/suspend` */
   suspendUser(userId: string): Promise<unknown>;
   /** Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend` */

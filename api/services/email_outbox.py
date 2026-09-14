@@ -7,8 +7,10 @@ list (shared by every worker, survives restarts) and returns at once. The
 scheduler drains the list after each run and every minute, under a time
 budget, so a hanging provider delays nothing but its own emails.
 
-A failed or timed-out email is logged and dropped; it never fails, retries
-or delays a purchase.
+A failed or timed-out email is logged at ERROR (recipient + template) and
+dropped; it never fails, retries or delays a purchase. The list is capped at
+MAX_QUEUE_LENGTH (oldest dropped, logged). Draining ignores the admin pause
+switch: pausing stops trading, not notifications.
 """
 from __future__ import annotations
 
@@ -42,10 +44,12 @@ async def enqueue(to: str, subject: str, html: str, text: str, template: str = "
         length = await r.rpush(OUTBOX_KEY, payload)
         if length > MAX_QUEUE_LENGTH:
             await r.ltrim(OUTBOX_KEY, -MAX_QUEUE_LENGTH, -1)
-            logger.error("email outbox over %d messages; oldest dropped", MAX_QUEUE_LENGTH)
+            logger.error("email outbox over its cap of %d messages: %d oldest message(s) dropped (newest kept: to=%s template=%s)",
+                         MAX_QUEUE_LENGTH, length - MAX_QUEUE_LENGTH, to, template)
         return True
     except Exception as exc:
-        logger.error("email outbox unavailable (%s): to=%s subject=%r", exc, to, subject)
+        logger.error("email outbox unavailable, message not queued: to=%s template=%s subject=%r reason=%s",
+                     to, template, subject, exc)
         return False
 
 
@@ -79,7 +83,7 @@ async def drain(budget_seconds: float = DRAIN_BUDGET_SECONDS,
             msg = json.loads(raw)
         except ValueError:
             counts["failed"] += 1
-            logger.error("email outbox: dropped unreadable message")
+            logger.error("email outbox: dropped an unreadable message (%r)", str(raw)[:120])
             continue
         remaining_budget = budget_seconds - (time.perf_counter() - started)
         timeout = max(min(per_email_timeout, remaining_budget), 0.05)
@@ -91,12 +95,14 @@ async def drain(budget_seconds: float = DRAIN_BUDGET_SECONDS,
             counts["sent"] += 1
         except asyncio.TimeoutError:
             counts["timed_out"] += 1
-            logger.error("email dropped after %.1fs timeout: to=%s subject=%r", timeout, msg["to"], msg["subject"])
+            logger.error("email dropped after %.1fs timeout: to=%s template=%s subject=%r",
+                         timeout, msg["to"], msg.get("template"), msg["subject"])
         except resend.ResendNotConfigured:
             counts["failed"] += 1   # already logged as skipped by the integration
         except Exception as exc:
             counts["failed"] += 1
-            logger.error("email dropped: to=%s subject=%r reason=%s", msg["to"], msg["subject"], exc)
+            logger.error("email dropped: to=%s template=%s subject=%r reason=%s",
+                         msg["to"], msg.get("template"), msg["subject"], exc)
     try:
         counts["remaining"] = int(await r.llen(OUTBOX_KEY))
     except Exception:
