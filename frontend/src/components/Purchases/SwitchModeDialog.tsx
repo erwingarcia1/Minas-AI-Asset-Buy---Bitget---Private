@@ -3,7 +3,7 @@ import { autoBuyAPI, marketAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert } from "@/components/Common";
 import type { AutoBuyPurchase, BlockchainNetwork, ChainInfo } from "@/types";
-import { addressVerdictForChain } from "@/utils/chains";
+import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain } from "@/utils/chains";
 import { chainSummary } from "./PurchaseForm";
 
 interface Props {
@@ -20,7 +20,7 @@ interface Props {
 export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
   const [address, setAddress] = useState(purchase.wallet_address ?? "");
   const [confirm, setConfirm] = useState("");
-  const [network, setNetwork] = useState<BlockchainNetwork>(purchase.blockchain_network);
+  const [network, setNetwork] = useState<BlockchainNetwork>(purchase.blockchain_network ?? DEFAULT_CHAIN_FOR_COIN[purchase.crypto_symbol] ?? "");
   const [chains, setChains] = useState<ChainInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

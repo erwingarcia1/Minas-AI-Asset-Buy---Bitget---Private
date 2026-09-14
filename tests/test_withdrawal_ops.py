@@ -186,7 +186,7 @@ async def test_retry_endpoint(db, user, other_user, bitget_key, client, events, 
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "active" and body["next_execution"] is not None
-    assert body["withdrawal"]["tx_type"] == "withdrawal" and body["withdrawal"]["status"] == "success"
+    assert body["withdrawal"]["tx_type"] == "withdrawal" and body["withdrawal"]["status"] == "simulated"   # dry run
     assert body["withdrawal"]["withdrawal_chain"] == "BTC" and body["withdrawal"]["parent_transaction_id"]
     assert gw.placed == [] and len(gw.withdrawals) == 1
     again = await c.post(f"/api/v2/purchases/{p.id}/retry-withdrawal", headers=auth(user))

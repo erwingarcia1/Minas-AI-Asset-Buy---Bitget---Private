@@ -74,7 +74,7 @@ async def test_full_journey_to_executed_purchase(db, monkeypatch):
             assert counts["executed"] == 1
 
             txs = (await c.get("/api/transactions/", headers=H)).json()
-            assert txs["total"] == 2 and {t["status"] for t in txs["items"]} == {"completed"}
+            assert txs["total"] == 2 and {t["tx_type"]: t["status"] for t in txs["items"]} == {"buy": "completed", "withdrawal": "simulated"}
             by_type = {t["tx_type"]: t for t in txs["items"]}
             assert by_type["buy"]["order_id"] == "ORD-1" and by_type["withdrawal"]["withdrawal_id"] == "WD-1"
             d = (await c.get("/api/dashboard/", headers=H)).json()

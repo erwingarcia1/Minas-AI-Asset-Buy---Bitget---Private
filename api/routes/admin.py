@@ -248,6 +248,9 @@ async def force_retry(
         raise HTTPException(status_code=404, detail="Purchase not found")
     if p.status in ("cancelled", "completed"):
         raise HTTPException(status_code=409, detail=f"purchase is {p.status}")
+    if p.exchange_account_id is None:
+        raise HTTPException(status_code=409, detail="Exchange key removed: the purchase cannot run again; "
+                                                    "the user must add a key and create a new purchase")
     if p.status in ("withdrawal_failed", "needs_info"):
         raise HTTPException(status_code=409, detail=f"purchase is {p.status}: its buy filled and the coins are on the "
                                                     "exchange; retry the withdrawal (POST /api/v2/purchases/{id}/retry-withdrawal), never the buy")

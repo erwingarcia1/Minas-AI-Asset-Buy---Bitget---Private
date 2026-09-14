@@ -25,7 +25,8 @@ from api.models import APIKey, Purchase, PurchaseTransaction
 
 DB_SUCCESS = "success"
 API_COMPLETED = "completed"
-API_STATUSES = ("pending", "completed", "failed")
+API_SIMULATED = "simulated"   # a dry-run withdrawal: recorded, nothing was sent
+API_STATUSES = ("pending", "completed", "failed", "simulated")
 
 
 def to_api_status(db_status: str) -> str:
@@ -33,7 +34,26 @@ def to_api_status(db_status: str) -> str:
 
 
 def from_api_status(api_status: str) -> str:
-    return DB_SUCCESS if api_status == API_COMPLETED else api_status
+    return DB_SUCCESS if api_status in (API_COMPLETED, API_SIMULATED) else api_status
+
+
+def is_simulated(tx: PurchaseTransaction) -> bool:
+    return tx.tx_type == "withdrawal" and tx.status == DB_SUCCESS and (tx.raw_status or "") == "simulated"
+
+
+def presented_status(tx: PurchaseTransaction) -> str:
+    """The status shown everywhere (API, UI, emails, CSV): a dry-run
+    withdrawal is "simulated", never "completed"."""
+    return API_SIMULATED if is_simulated(tx) else to_api_status(tx.status)
+
+
+def fmt_amount(value, digits: int = 8) -> str:
+    """Crypto amounts for humans: at most `digits` decimals, trailing zeros trimmed
+    ("0.00076179", "0.5", "0"). Storage keeps full precision."""
+    if value is None:
+        return ""
+    text = f"{float(value):.{digits}f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 @dataclass
@@ -44,7 +64,7 @@ class HistoryRow:
     crypto: str
     purchase_type: str            # autobuy | dca
     tx_type: str                  # withdrawal | accumulation
-    status: str                   # API vocabulary: pending | completed | failed
+    status: str                   # API vocabulary: pending | completed | failed | simulated (dry-run withdrawal)
     amount_crypto: float          # coins bought (0 when the buy failed)
     cost_usd: float               # quote spent (the purchase amount when the fill did not report it)
     fill_price: Optional[float]
@@ -87,7 +107,7 @@ def _row(tx: PurchaseTransaction, p: Purchase, exchange: Optional[str]) -> Histo
         cost = float(p.amount_usd) if tx.tx_type in BUY_TYPES else 0.0
     return HistoryRow(
         id=tx.id, purchase_id=p.id, user_id=p.user_id, crypto=p.crypto_symbol,
-        purchase_type=p.purchase_type, tx_type=tx.tx_type, status=to_api_status(tx.status),
+        purchase_type=p.purchase_type, tx_type=tx.tx_type, status=presented_status(tx),
         amount_crypto=amount, cost_usd=float(cost), fill_price=tx.fill_price,
         fee=tx.fee, fee_currency=tx.fee_currency, exchange=exchange,
         order_id=tx.order_id or (tx.exchange_tx_id if tx.tx_type == "accumulation" else None),
@@ -113,6 +133,11 @@ def _filters(user_id=None, status: Optional[str] = None, crypto: Optional[str] =
         where.append(Purchase.user_id == user_id)
     if status is not None:
         where.append(PurchaseTransaction.status == from_api_status(status))
+        simulated = (PurchaseTransaction.tx_type == "withdrawal") & (PurchaseTransaction.raw_status == "simulated")
+        if status == API_SIMULATED:
+            where.append(simulated)
+        elif status == API_COMPLETED:
+            where.append(~simulated)
     if crypto is not None:
         where.append(Purchase.crypto_symbol == crypto.strip().upper())
     if since is not None:

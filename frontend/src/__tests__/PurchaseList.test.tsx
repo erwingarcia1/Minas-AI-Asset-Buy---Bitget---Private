@@ -48,6 +48,35 @@ describe("PurchaseList: parked purchases and withdrawal rows", () => {
     expect(screen.getByText(/beneficiary \(travel-rule\) details/)).toBeInTheDocument();
   });
 
+  it("accumulate purchases show where coins are held instead of a network", () => {
+    render(<PurchaseList purchases={[{ ...base, id: "d1", purchase_type: "dca", withdraw_immediately: false, status: "active", blockchain_network: null, wallet_address: null, last_error: null }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByTestId("purchase-venue")).toHaveTextContent("Bitget · Held on Bitget");
+    expect(screen.getByTestId("purchase-venue").textContent).not.toMatch(/BTC|ERC20/);
+  });
+
+  it("says when the exchange key was removed and does not offer to resume", () => {
+    render(<PurchaseList purchases={[{ ...base, status: "paused", exchange: null, exchange_account_id: null, exchange_key_removed: true,
+      last_error: "Exchange key removed. Add an exchange key and create a new purchase." }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByTestId("purchase-venue")).toHaveTextContent("Exchange key removed");
+    expect(screen.getByTestId("purchase-venue").textContent).not.toContain("—");
+    expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Retry withdrawal" })).toBeNull();
+  });
+
+  it("shows a simulated (dry-run) withdrawal as simulated with trimmed amounts", async () => {
+    vi.mocked(autoBuyAPI.transactions).mockResolvedValue([{ ...wd, status: "simulated", tx_hash: null, raw_status: "simulated",
+      amount_executed: 0.00073179, expected_received: 0.00073179, withdrawal_fee: 0.00003000 }, { ...buy, amount_executed: 0.00076332, fee: 0.00000153 }] as never);
+    render(<PurchaseList purchases={[{ ...base, status: "completed" }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Transactions" }));
+    await screen.findByText("WD-1");
+    expect(screen.getByText("simulated")).toBeInTheDocument();
+    expect(screen.getByText("dry run: nothing was sent")).toBeInTheDocument();
+    expect(screen.getByText("0.00073179 BTC")).toBeInTheDocument();
+    expect(screen.getByText("0.00003 BTC")).toBeInTheDocument();
+    expect(screen.getByText("0.00000153 BTC")).toBeInTheDocument();
+    expect(screen.queryByText(/0\.00003000/)).toBeNull();
+  });
+
   it("shows withdrawal rows with their chain fee and on-chain tx hash", async () => {
     render(<PurchaseList purchases={[base]} onChanged={vi.fn()} onError={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Transactions" }));

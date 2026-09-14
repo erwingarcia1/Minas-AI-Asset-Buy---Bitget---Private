@@ -101,6 +101,7 @@ class ChainOut(TypedDict):
     browser_url: NotRequired[Optional[str]]
     chain: str
     estimated_received: NotRequired[Optional[float]]
+    estimated_sent: NotRequired[Optional[float]]
     extra_withdraw_fee_pct: float
     family: NotRequired[Optional[str]]
     family_label: NotRequired[Optional[str]]
@@ -127,6 +128,7 @@ class CoinMarketOut(TypedDict):
     """CoinMarketOut."""
     chains: List[ChainOut]
     coin: str
+    fee_mode: NotRequired[str]
     min_trade_usdt: float
     note: NotRequired[str]
     online: bool
@@ -349,11 +351,12 @@ class PurchaseCreatedOut(TypedDict):
 class PurchaseDetailOut(TypedDict):
     """PurchaseDetailOut."""
     amount_usd: float
-    blockchain_network: str
+    blockchain_network: NotRequired[Optional[str]]
     created_at: str
     crypto_symbol: str
     exchange: NotRequired[Optional[str]]
     exchange_account_id: NotRequired[Optional[str]]
+    exchange_key_removed: NotRequired[bool]
     failure_count: int
     frequency: str
     id: str
@@ -372,11 +375,12 @@ class PurchaseDetailOut(TypedDict):
 class PurchaseOut(TypedDict):
     """PurchaseOut."""
     amount_usd: float
-    blockchain_network: str
+    blockchain_network: NotRequired[Optional[str]]
     created_at: str
     crypto_symbol: str
     exchange: NotRequired[Optional[str]]
     exchange_account_id: NotRequired[Optional[str]]
+    exchange_key_removed: NotRequired[bool]
     failure_count: int
     frequency: str
     id: str
@@ -523,6 +527,7 @@ class TransactionOut(TypedDict):
     error_message: NotRequired[Optional[str]]
     exchange_tx_id: NotRequired[Optional[str]]
     executed_at: NotRequired[Optional[str]]
+    expected_received: NotRequired[Optional[float]]
     fee: NotRequired[Optional[float]]
     fee_currency: NotRequired[Optional[str]]
     fill_price: NotRequired[Optional[float]]

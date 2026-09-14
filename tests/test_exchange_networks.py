@@ -30,8 +30,8 @@ def test_config_changes_are_honoured(monkeypatch):
 
 
 def test_supported_cryptos_map_to_chains():
-    assert set(en.SUPPORTED_CRYPTOS) == {"BTC", "ETH", "USDT", "USDC", "SOL"}
+    assert set(en.SUPPORTED_CRYPTOS) == {"BTC", "ETH", "USDC", "SOL"}, "USDT is the quote coin, not a purchase coin"
     assert en.chain_for_crypto("btc") == "bitcoin"
-    assert en.chain_for_crypto("USDT") == "ethereum" and en.chain_for_crypto("USDC") == "ethereum"
+    assert en.chain_for_crypto("USDC") == "ethereum"
     assert en.chain_for_crypto("SOL") == "solana"
     assert en.chain_for_crypto("DOGE") is None

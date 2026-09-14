@@ -61,6 +61,9 @@ INTERVAL_MINUTES = 5
 WITHDRAW_NETWORK_CODES = {"BTC": "BTC", "ETH": "ETH", "USDT": "ETH", "USDC": "ETH", "SOL": "SOL"}
 
 
+KEY_REMOVED_MESSAGE = "Exchange key removed. Add an exchange key and create a new purchase."
+
+
 class ExecutionError(Exception):
     """A failed attempt; the message is stored on the transaction.
 
@@ -157,19 +160,26 @@ class ExchangeClientGateway:
             raise self._wrap(exc, "lookup") from exc
 
     def withdraw(self, account, purchase, amount, client_oid, dry_run):
-        """Send `amount` of the coin to the purchase's wallet on its chain.
+        """Send the coins of a buy (`amount` = bought minus the trading fee) to
+        the purchase's wallet on its chain.
 
-        Bitget: the chain's live fee/minimum/precision (hour-cached) decide the
-        withdrawal size — floored to the chain precision — and a size that does
-        not clear minimum + fee fails before anything is sent. Dry runs use the
-        same real data and never call the withdrawal endpoint.
+        Bitget: the chain's live fee/minimum/precision (hour-cached) and
+        BITGET_WITHDRAW_FEE_MODE decide the size actually sent (see
+        bitget_market.withdrawal_plan): exclusive = net minus the fee, floored
+        to the chain precision; inclusive = the net balance, Bitget deducts the
+        fee. The minimum applies to the size sent. Before a LIVE withdrawal the
+        account's available balance must cover size (+ fee when exclusive).
+        Dry runs use the same real data and never call the withdrawal endpoint.
         """
         if not purchase.wallet_address:
             raise ExecutionError("no wallet address on an autobuy purchase", stage="withdraw")
         chain = purchase.blockchain_network
+        if not chain:
+            raise ExecutionError("no blockchain network on an autobuy purchase", stage="withdraw", code="CHAIN_MISSING")
         fee = fee_currency = None
-        size = amount
+        size, received = amount, amount
         try:
+            client = _client_for(account)
             if account.exchange == "bitget":
                 from api.services import bitget_market
                 entry = bitget_market.find_chain(bitget_market.get_chains_sync(purchase.crypto_symbol), chain)
@@ -179,15 +189,21 @@ class ExchangeClientGateway:
                 if not entry["withdrawable"]:
                     raise ExecutionError(f"Bitget has {purchase.crypto_symbol} withdrawals on {chain} suspended",
                                          stage="withdraw", code="CHAIN_NOT_WITHDRAWABLE")
-                factor = 10 ** int(entry["withdraw_min_scale"])
-                size = int(amount * factor) / factor
-                fee = (entry["withdraw_fee"] or 0.0) + size * (entry["extra_withdraw_fee_pct"] or 0.0)
+                plan = bitget_market.withdrawal_plan(amount, entry)
+                size, fee, received = plan["size"], plan["fee"], plan["received"]
                 fee_currency = purchase.crypto_symbol
-                if size < (entry["min_withdraw_amount"] or 0.0) + fee or size - fee <= 0:
+                minimum = entry["min_withdraw_amount"] or 0.0
+                if not plan["sendable"] or size < minimum:
                     raise ExecutionError(
-                        f"{size:.8f} {purchase.crypto_symbol} is below Bitget's minimum withdrawal on {chain} "
-                        f"({entry['min_withdraw_amount']:g} + {fee:.8f} fee)", stage="withdraw", code="WITHDRAW_BELOW_MINIMUM")
-            client = _client_for(account)
+                        f"{size:.8f} {purchase.crypto_symbol} would be sent ({plan['mode']} fee {fee:.8f}), below "
+                        f"Bitget's minimum withdrawal of {minimum:g} on {chain}", stage="withdraw", code="WITHDRAW_BELOW_MINIMUM")
+                if not dry_run:
+                    available = client.get_available(purchase.crypto_symbol)
+                    if available + 1e-12 < plan["balance_needed"]:
+                        raise ExecutionError(
+                            f"available {purchase.crypto_symbol} balance {available:.8f} is below the {plan['balance_needed']:.8f} "
+                            f"needed to send {size:.8f} with the {fee:.8f} fee ({plan['mode']} mode)",
+                            stage="withdraw", code="INSUFFICIENT_BALANCE")
             result = client.withdraw(purchase.crypto_symbol, purchase.wallet_address, size,
                                      network=chain if account.exchange == "bitget"
                                      else WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol, chain),
@@ -195,7 +211,7 @@ class ExchangeClientGateway:
                                      travel_rule=purchase.travel_rule_dict() or None)
         except Exception as exc:
             raise self._wrap(exc, "withdraw") from exc
-        return {"withdrawal_id": result["withdrawal_id"], "chain": chain, "size": size,
+        return {"withdrawal_id": result["withdrawal_id"], "chain": chain, "size": size, "expected_received": received,
                 "withdrawal_fee": result.get("fee", fee), "withdrawal_fee_currency": result.get("fee_currency", fee_currency),
                 "tx_hash": result.get("tx_hash"), "raw_status": "simulated" if dry_run else "submitted"}
 
@@ -393,8 +409,14 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
     await db.commit()
 
     if account is None:
-        _fail_attempt(purchase, tx, "exchange account no longer exists", now)
+        tx.status = "failed"
+        tx.error_message = KEY_REMOVED_MESSAGE
+        tx.executed_at = now
+        purchase.status = "failed"
+        purchase.next_execution = None
+        purchase.last_error = KEY_REMOVED_MESSAGE
         await db.commit()
+        logger.error("purchase %s: exchange key removed; purchase stopped", purchase.id)
         events.append(("buy_failed", tx.error_message, tx))
         await emit_all()
         return tx
@@ -494,7 +516,8 @@ async def _withdraw_after_buy(db: AsyncSession, purchase: Purchase, account: API
         result = await asyncio.to_thread(gateway.withdraw, account, purchase, amount, wd.client_oid, dry_run)
         wd.status = "success"
         if result.get("size") is not None:
-            wd.amount_executed = result["size"]
+            wd.amount_executed = result["size"]          # what was handed to the exchange
+        wd.expected_received = result.get("expected_received", wd.amount_executed)
         wd.withdrawal_id = result.get("withdrawal_id")
         wd.exchange_tx_id = wd.withdrawal_id
         wd.withdrawal_chain = result.get("chain") or wd.withdrawal_chain

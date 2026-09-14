@@ -137,8 +137,22 @@ were verified against the live endpoints on 2026-09-11: symbols carry
 amount that clears minimum + fee at the live ask), and 503
 `exchange_data_unavailable` when Bitget cannot be reached and nothing is
 cached (the purchase is not created). The executor re-checks the pair before
-buying and the chain before withdrawing; the withdrawal size is floored to
-`withdrawMinScale`. Bitget only sends API withdrawals to addresses saved in
+buying and the chain before withdrawing. The withdrawal size depends on
+`BITGET_WITHDRAW_FEE_MODE`: `exclusive` (default) assumes Bitget charges the
+fee on top of `size`, so the executor sends net minus fee (floored to
+`withdrawMinScale`) and checks the account's available balance covers size +
+fee before a live withdrawal; `inclusive` sends the net balance and Bitget
+deducts the fee. The minimum applies to the size actually sent. Withdrawal
+rows store both `amount_executed` (sent) and `expected_received`. A dry-run
+withdrawal is presented with status `simulated` in the purchases API, the
+transactions API (`status_filter=simulated`), emails and the tax CSV
+(`withdrawal_status` column); storage keeps `success` + `raw_status =
+simulated`. Crypto amounts are shown with at most 8 decimals, trailing zeros
+trimmed. Purchase coins are BTC, ETH, USDC, SOL (USDT is the quote coin);
+accumulate purchases without a wallet store no `blockchain_network` (null,
+"held on the exchange"). Deleting an exchange key pauses its purchases with
+`last_error` "Exchange key removed…", `exchange_key_removed: true`, and
+resuming or force-retrying them answers 409 `exchange_key_removed`. Bitget only sends API withdrawals to addresses saved in
 the user's Bitget address book, and withdraw-enabled keys must whitelist the
 server's IP; both are explained on the Settings page.
 

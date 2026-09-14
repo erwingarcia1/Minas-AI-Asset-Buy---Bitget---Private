@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, List, Optional
 
 from api.models import Purchase, PurchaseTransaction, User
+from api.services.history import fmt_amount, presented_status
 
 logger = logging.getLogger("autobuy.events")
 
@@ -54,7 +55,7 @@ class PurchaseEvent:
         return {
             "event": self.type, "transaction_id": str(tx.id), "purchase_id": str(self.purchase.id),
             "crypto": self.purchase.crypto_symbol, "purchase_type": self.purchase.purchase_type,
-            "tx_type": tx.tx_type, "status": tx.status, "amount_crypto": tx.amount_executed,
+            "tx_type": tx.tx_type, "status": presented_status(tx), "amount_crypto": tx.amount_executed,
             "cost_usd": tx.cost_usd, "fill_price": tx.fill_price, "fee": tx.fee, "fee_currency": tx.fee_currency,
             "exchange": self.exchange, "order_id": tx.order_id, "withdrawal_id": tx.withdrawal_id,
             "wallet_address": self.purchase.wallet_address if tx.tx_type == "withdrawal" else None,
@@ -120,8 +121,9 @@ async def _dispatcher(db, event: PurchaseEvent) -> None:
         await dispatcher.notify(
             db, event.user, template="purchase_executed",
             subject=f"Bought {p.crypto_symbol}",
-            body=f"{(tx.amount_executed or 0):.8f} {p.crypto_symbol} for {(tx.cost_usd or p.amount_usd):.2f} USD"
-                 + (f", sent to {p.wallet_address}" if event.type == "withdrawal_sent" else ", held on the exchange"),
+            body=f"{fmt_amount(tx.amount_executed or 0)} {p.crypto_symbol} for {(tx.cost_usd or p.amount_usd):.2f} USD"
+                 + (f", withdrawal to {p.wallet_address} simulated (nothing was sent)" if event.type == "withdrawal_sent" and presented_status(tx) == "simulated"
+                    else f", sent to {p.wallet_address}" if event.type == "withdrawal_sent" else ", held on the exchange"),
             critical=(tx.cost_usd or p.amount_usd) >= LARGE_TRANSACTION_USDT, include_email=False)
     else:
         await dispatcher.notify(
@@ -147,7 +149,7 @@ async def _slack(db, event: PurchaseEvent) -> None:
                          f"(attempt {event.attempt}/{event.max_attempts}{', dry run' if event.dry_run else ''}): "
                          f"{str(event.error or '')[:200]}")
     elif event.type == "withdrawal_sent" and not event.dry_run:
-        await send_slack(f":outbox_tray: AutoBuy withdrawal sent: {(event.tx.amount_executed or 0):.8f} "
+        await send_slack(f":outbox_tray: AutoBuy withdrawal sent: {fmt_amount(event.tx.amount_executed or 0)} "
                          f"{p.crypto_symbol} to {p.wallet_address} ({p.blockchain_network}) "
                          f"via {event.exchange or '?'}, withdrawal {event.tx.withdrawal_id}")
 

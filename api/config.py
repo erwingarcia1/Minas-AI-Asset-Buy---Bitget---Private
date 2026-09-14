@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     # UI shows only these; the other venues' client code stays in the repo.
     supported_exchanges_csv: str = os.getenv("SUPPORTED_EXCHANGES", "bitget")
 
+    # How Bitget charges the withdrawal fee. "exclusive" (default): the fee is
+    # taken on top of `size`, so we send net - fee (rounded down to the chain's
+    # precision) and the wallet receives `size`. "inclusive": we send the net
+    # balance and Bitget deducts the fee from it. Confirm against a real
+    # withdrawal before changing.
+    bitget_withdraw_fee_mode: str = os.getenv("BITGET_WITHDRAW_FEE_MODE", "exclusive").strip().lower() or "exclusive"
+
     @property
     def supported_exchanges(self) -> List[str]:
         raw = [x.strip().lower() for x in self.supported_exchanges_csv.split(",")]

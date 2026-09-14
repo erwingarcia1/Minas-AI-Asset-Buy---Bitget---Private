@@ -84,6 +84,7 @@ export interface ChainOut {
   browser_url?: string | null;
   chain: string;
   estimated_received?: number | null;
+  estimated_sent?: number | null;
   extra_withdraw_fee_pct: number;
   family?: string | null;
   family_label?: string | null;
@@ -108,6 +109,7 @@ export interface ChangePasswordRequest {
 export interface CoinMarketOut {
   chains: ChainOut[];
   coin: string;
+  fee_mode?: string;
   min_trade_usdt: number;
   note?: string;
   online: boolean;
@@ -303,11 +305,12 @@ export interface PurchaseCreatedOut {
 
 export interface PurchaseDetailOut {
   amount_usd: number;
-  blockchain_network: string;
+  blockchain_network?: string | null;
   created_at: string;
   crypto_symbol: string;
   exchange?: string | null;
   exchange_account_id?: string | null;
+  exchange_key_removed?: boolean;
   failure_count: number;
   frequency: string;
   id: string;
@@ -325,11 +328,12 @@ export interface PurchaseDetailOut {
 
 export interface PurchaseOut {
   amount_usd: number;
-  blockchain_network: string;
+  blockchain_network?: string | null;
   created_at: string;
   crypto_symbol: string;
   exchange?: string | null;
   exchange_account_id?: string | null;
+  exchange_key_removed?: boolean;
   failure_count: number;
   frequency: string;
   id: string;
@@ -458,6 +462,7 @@ export interface TransactionOut {
   error_message?: string | null;
   exchange_tx_id?: string | null;
   executed_at?: string | null;
+  expected_received?: number | null;
   fee?: number | null;
   fee_currency?: string | null;
   fill_price?: number | null;

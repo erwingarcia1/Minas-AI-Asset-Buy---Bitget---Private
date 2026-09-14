@@ -5,6 +5,7 @@ import { Alert } from "@/components/Common";
 import type { ApiKey, AutoBuyFrequency, AutoBuyPurchaseCreated, ChainInfo, CoinMarket } from "@/types";
 import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain, fmtCoin } from "@/utils/chains";
 import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES } from "@/utils/exchangeNetworks";
+import { capitalize } from "@/utils/format";
 
 const DEFAULTS = { crypto: "BTC", amount: "50", frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: true };
 
@@ -60,7 +61,14 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           setChain((cur) => (m.chains.some((c) => c.chain === cur && c.supported) ? cur
             : m.chains.find((c) => c.is_default && c.supported)?.chain ?? m.chains.find((c) => c.supported)?.chain ?? cur));
         })
-        .catch((e) => { if (!cancelled) { setMarket(null); setMarketError(errorMessage(e, "Bitget market data is unavailable")); } })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          setMarket(null);
+          // never surface raw exchange errors or cache keys: log them, show a plain message
+          console.warn("market data unavailable", e);
+          const status = (e as { response?: { status?: number } })?.response?.status;
+          setMarketError(status === 404 ? `${crypto} cannot be bought on Bitget right now.` : "Bitget market data is temporarily unavailable. Please try again in a minute.");
+        })
         .finally(() => { if (!cancelled) setMarketLoading(false); });
     }, 300);
     return () => { cancelled = true; clearTimeout(t); };
@@ -85,6 +93,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
       : chainInfo.meets_minimum === false ? `${amountNumber || 0} USD buys about ${fmtCoin(chainInfo.estimated_received ?? 0, crypto)} after fees, below Bitget's minimum withdrawal on ${chain}. Use at least about $${(chainInfo.min_purchase_usd ?? 0).toFixed(2)}.`
       : null
     : null;
+  const chainNeeded = withdraw || hasAddress;   // accumulate without a wallet: coins stay on the exchange, no chain
   const marketBlocks = withdraw && (marketError !== null || (market !== null && !chainInfo));
   // withdraw: a valid address is required; accumulate: no address, or a valid one
   const addressOk = withdraw ? verdict?.ok === true : (!hasAddress || verdict?.ok === true);
@@ -105,7 +114,8 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
       const created = await autoBuyAPI.create({
         crypto_symbol: crypto, amount_usd: amountNumber,
         ...(address.trim() ? { wallet_address: address.trim() } : {}),
-        blockchain_network: chain, frequency, exchange_account_id: account.id,
+        ...(chainNeeded ? { blockchain_network: chain } : {}),
+        frequency, exchange_account_id: account.id,
         purchase_type: withdraw ? "autobuy" : "dca",
         withdraw_immediately: withdraw,
       });
@@ -147,7 +157,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           <input id="pf-amount" className="input" type="number" min={10} max={1000000} step="0.01" value={amount} onChange={(e) => setAmountE(e.target.value)} />
           {amountError && <p className="mt-1 text-xs text-red-600">{amountError}</p>}
         </div>
-        <div>
+        {chainNeeded ? <div>
           <label className="label" htmlFor="pf-network">Blockchain network</label>
           <select id="pf-network" className="input" value={chain} onChange={(e) => setChainE(e.target.value)} disabled={marketLoading || chains.length === 0}>
             {chains.length === 0 && <option value={chain}>{marketLoading ? "Loading chains…" : chain || "—"}</option>}
@@ -156,7 +166,11 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           <p className="mt-1 text-xs text-slate-400" data-testid="chain-summary">
             {chainInfo ? chainSummary(chainInfo, crypto) : marketLoading ? "Fetching Bitget chain data…" : "Bitget chain data unavailable"}
           </p>
-        </div>
+        </div> : <div>
+          <span className="label">Delivery</span>
+          <p className="input bg-slate-50 text-slate-600" data-testid="held-on-exchange">Held on {account ? capitalize(account.exchange) : "the exchange"}</p>
+          <p className="mt-1 text-xs text-slate-400">No network needed: coins stay in your exchange account.</p>
+        </div>}
 
         <div className="sm:col-span-2 lg:col-span-3">
           <label className="label" htmlFor="pf-address">

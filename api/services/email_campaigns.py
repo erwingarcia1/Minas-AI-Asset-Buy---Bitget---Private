@@ -13,6 +13,7 @@ from api.database import AsyncSessionLocal
 from api.models import User
 from api.config import settings
 from api.services.email_service import email_service
+from api.services.history import fmt_amount
 from api.services.email_templates import render
 
 logger = logging.getLogger("autobuy.campaigns")
@@ -39,7 +40,7 @@ async def on_buy_executed(db, user: User, tx, purchase) -> None:
     if count == 1:
         html, text = render(
             "first_purchase", name=_name(user), crypto=purchase.crypto_symbol,
-            amount_crypto=f"{(tx.amount_executed or 0):.8f}",
+            amount_crypto=fmt_amount(tx.amount_executed or 0),
             cost_usdt=f"{cost:.2f}",
             exchange_rate=f"{tx.fill_price:.2f}" if tx.fill_price else "market",
             order_id=tx.order_id or "-")
@@ -72,7 +73,7 @@ async def send_weekly_summaries() -> int:
             if not completed and not failed:
                 continue
             grouped = history.group_by_crypto(completed)
-            rows = [{"crypto": c, "amount": f"{a:.8f}", "cost": f"{cost:.2f}"} for c, a, cost in grouped]
+            rows = [{"crypto": c, "amount": fmt_amount(a), "cost": f"{cost:.2f}"} for c, a, cost in grouped]
             total = sum(cost for _, _, cost in grouped)
             html, text = render(
                 "purchase_summary", name=_name(user), rows=rows,

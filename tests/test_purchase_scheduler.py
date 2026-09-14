@@ -141,7 +141,9 @@ async def test_missing_exchange_account_is_a_failure(db, user, binance_key):
     await ps.execute_due_purchases(db, now=NOW, gateway=gw, dry_run=True)
     assert gw.calls == []
     txs = await tx_for(db, p)
-    assert txs[0].status == "failed" and "exchange account" in txs[0].error_message
+    assert txs[0].status == "failed" and txs[0].error_message == ps.KEY_REMOVED_MESSAGE
+    await db.refresh(p)
+    assert p.status == "failed" and p.next_execution is None, "stopped at once, no three retries"
 
 
 async def test_gateway_dry_run_via_real_client_is_simulated(db, user, binance_key, monkeypatch):

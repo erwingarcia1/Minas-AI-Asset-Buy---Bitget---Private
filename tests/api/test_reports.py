@@ -63,17 +63,18 @@ async def test_tax_csv_export(db, history):
     lines = r.text.strip().splitlines()
     assert lines[0] == ("datetime_utc,crypto,quantity,fill_price_usd,usd_amount,fee,fee_currency,exchange,order_id,"
                         "purchase_type,tx_type,withdrawal_address,network,withdrawal_fee,withdrawal_fee_currency,"
-                        "tx_hash,method")
+                        "tx_hash,withdrawal_status,method")
     assert len(lines) == 4  # 3 successful buys; the failed one is excluded
     btc1 = next(l for l in lines if "ORD-BTC-1" in l)
     cells = btc1.split(",")
-    assert cells[0].startswith(f"{year}-03-15 10:30:00") and cells[1] == "BTC" and cells[2] == "0.00200000"
-    assert cells[3] == "50000.00" and cells[4] == "100.00" and cells[5] == "0.10000000" and cells[6] == "USDT"
+    # crypto amounts: at most 8 decimals, trailing zeros trimmed; money keeps 2 decimals
+    assert cells[0].startswith(f"{year}-03-15 10:30:00") and cells[1] == "BTC" and cells[2] == "0.002"
+    assert cells[3] == "50000.00" and cells[4] == "100.00" and cells[5] == "0.1" and cells[6] == "USDT"
     assert cells[7] == "binance" and cells[9] == "autobuy" and cells[10] == "withdrawal"
     assert cells[11] == "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq" and cells[12] == "BTC"
-    assert cells[13] == "0.00005000" and cells[14] == "BTC" and cells[15] == "0xbtc1" and cells[16] == "FIFO"
+    assert cells[13] == "0.00005" and cells[14] == "BTC" and cells[15] == "0xbtc1" and cells[16] == "completed" and cells[17] == "FIFO"
     eth = next(l for l in lines if "ORD-ETH-1" in l).split(",")
-    assert eth[10] == "buy" and eth[11] == "" and eth[12] == "", "held on exchange: no withdrawal columns"
+    assert eth[10] == "buy" and eth[11] == "" and eth[12] == "" and eth[16] == "", "held on exchange: no withdrawal columns"
 
 
 async def test_pdf_export(db, history):

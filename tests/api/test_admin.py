@@ -169,6 +169,13 @@ async def test_transactions_audit_and_force_retry(db, admin, user, binance_key):
     done = await make_autobuy_purchase(db, user, crypto="SOL", key=binance_key, status="completed", next_execution=None)
     async with client() as c:
         assert (await c.post(f"/api/admin/purchases/{done.id}/force-retry", headers=H)).status_code == 409
+    # a purchase whose exchange key was deleted can never run again
+    orphan = await make_autobuy_purchase(db, user, crypto="ETH", key=binance_key, status="paused", next_execution=None)
+    orphan.exchange_account_id = None
+    await db.commit()
+    async with client() as c:
+        r = await c.post(f"/api/admin/purchases/{orphan.id}/force-retry", headers=H)
+    assert r.status_code == 409 and "Exchange key removed" in r.json()["detail"]
     # a filled buy whose withdrawal failed must never be re-armed for another buy
     for parked in ("withdrawal_failed", "needs_info"):
         stranded = await make_autobuy_purchase(db, user, crypto="BTC", key=binance_key, status=parked, next_execution=None)

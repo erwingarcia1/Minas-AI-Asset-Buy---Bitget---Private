@@ -126,7 +126,9 @@ async def test_real_subscribers_email_campaign_webhook_slack(db, user, binance_k
 
     purchase_mails = [m for m in capture.sent if m["template"] == "purchase"]
     assert len(purchase_mails) == 1, "autobuy: one email per attempt, on the withdrawal outcome"
-    assert purchase_mails[0]["subject"].startswith("[DRY RUN] ✓ Purchase complete") and "sent to your wallet" in purchase_mails[0]["subject"]
+    # dry run: the withdrawal is simulated and the email must say so, never "sent to your wallet"
+    assert purchase_mails[0]["subject"].startswith("[DRY RUN] ✓ Purchase complete") and "withdrawal simulated" in purchase_mails[0]["subject"]
+    assert "sent to your wallet" not in purchase_mails[0]["subject"]
     assert p.wallet_address in purchase_mails[0]["text"] and "ORD-1" in purchase_mails[0]["text"]
     assert any(m["template"] == "first_purchase" for m in capture.sent)
     assert [d["event"] for d in delivered] == ["purchase.buy_executed", "purchase.withdrawal_sent"]

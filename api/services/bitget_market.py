@@ -25,8 +25,12 @@ _SYMBOL_KEY = "bitget:market:symbol:{symbol}"
 _CHAINS_KEY = "bitget:market:chains:{coin}"
 
 
+UNAVAILABLE_MESSAGE = "Bitget market data is temporarily unavailable. Please try again in a minute."
+
+
 class MarketDataUnavailable(RuntimeError):
-    """Bitget could not be reached and nothing is cached."""
+    """Bitget could not be reached and nothing is cached. str(exc) is for logs;
+    users get UNAVAILABLE_MESSAGE."""
 
 
 def _client():
@@ -213,39 +217,95 @@ def check_symbol(coin: str, amount_usd: float, symbol: Optional[dict]) -> None:
             "message": f"Bitget caps market orders on {symbol['symbol']} at {max_value:g} USDT"})
 
 
-def estimate_received(amount_usd: float, price: float, symbol: dict, chain: dict) -> dict:
-    """Coins the wallet would receive for a buy of amount_usd at `price`:
-    quantity after the taker fee, floored to the chain's withdrawal precision,
-    minus the chain's withdrawal fee (and percentage fee)."""
+FEE_MODES = ("exclusive", "inclusive")
+
+
+def fee_mode() -> str:
+    mode = (settings.bitget_withdraw_fee_mode or "exclusive").lower()
+    return mode if mode in FEE_MODES else "exclusive"
+
+
+def _floor(value: float, scale: int) -> float:
+    factor = 10 ** int(scale)
+    return int(value * factor + 1e-9) / factor
+
+
+def withdrawal_plan(net_balance: float, chain: dict, mode: Optional[str] = None) -> dict:
+    """How a withdrawal of `net_balance` coins (after the trading fee) is sized:
+
+    exclusive (default): Bitget charges the fee ON TOP of size, so
+        size = floor(net - fee), received = size, balance needed = size + fee
+    inclusive: Bitget deducts the fee FROM size, so
+        size = floor(net), received = size - fee, balance needed = size
+
+    Sizes are floored to the chain's withdrawMinScale. `fee` includes the
+    percentage extra fee when the chain has one. `sendable` is False when
+    nothing positive would reach the wallet."""
+    mode = mode or fee_mode()
+    scale = chain.get("withdraw_min_scale", 8)
+    flat = chain.get("withdraw_fee") or 0.0
+    pct = chain.get("extra_withdraw_fee_pct") or 0.0
+    if mode == "inclusive":
+        size = _floor(max(net_balance, 0.0), scale)
+        fee = flat + size * pct
+        received = size - fee
+        needed = size
+    else:
+        # the percentage fee applies to what is sent; solve size + flat + size*pct <= net
+        size = _floor(max((net_balance - flat) / (1 + pct), 0.0), scale)
+        fee = flat + size * pct
+        received = size
+        needed = size + fee
+    return {"mode": mode, "size": size, "fee": fee, "received": max(received, 0.0), "balance_needed": needed,
+            "sendable": size > 0 and received > 0}
+
+
+def estimate_received(amount_usd: float, price: float, symbol: dict, chain: dict, mode: Optional[str] = None) -> dict:
+    """What a buy of amount_usd at `price` turns into: coins after the taker
+    fee, then the withdrawal plan for the configured fee mode."""
     fee_rate = symbol.get("taker_fee_rate") or 0.0
     bought = amount_usd / price
     after_trade_fee = bought * (1 - fee_rate)
-    scale = chain.get("withdraw_min_scale", 8)
-    factor = 10 ** scale
-    size = int(after_trade_fee * factor) / factor
-    withdraw_fee = (chain.get("withdraw_fee") or 0.0) + size * (chain.get("extra_withdraw_fee_pct") or 0.0)
-    return {"bought": bought, "withdraw_size": size, "withdraw_fee": withdraw_fee,
-            "received": max(size - withdraw_fee, 0.0), "min_withdraw_amount": chain.get("min_withdraw_amount") or 0.0}
+    plan = withdrawal_plan(after_trade_fee, chain, mode)
+    return {"bought": bought, "net": after_trade_fee, "withdraw_size": plan["size"], "withdraw_fee": plan["fee"],
+            "received": plan["received"], "sendable": plan["sendable"], "mode": plan["mode"],
+            "min_withdraw_amount": chain.get("min_withdraw_amount") or 0.0}
+
+
+def meets_minimum(est: dict) -> bool:
+    """Bitget's minimum applies to the amount actually sent."""
+    return est["sendable"] and est["withdraw_size"] >= est["min_withdraw_amount"]
+
+
+def minimum_purchase_usd(price: float, symbol: dict, chain: dict, mode: Optional[str] = None) -> float:
+    """Smallest USD amount whose buy still clears minimum + fee, with a 1% margin."""
+    mode = mode or fee_mode()
+    min_amount = chain.get("min_withdraw_amount") or 0.0
+    flat = chain.get("withdraw_fee") or 0.0
+    pct = chain.get("extra_withdraw_fee_pct") or 0.0
+    # exclusive: net >= min + flat + min*pct ; inclusive: net >= min (fee comes out of it), but received must be > 0
+    needed_net = min_amount + flat + min_amount * pct if mode == "exclusive" else max(min_amount, flat / max(1 - pct, 1e-9) + 1e-8)
+    fee_rate = symbol.get("taker_fee_rate") or 0.0
+    return round(needed_net * price / max(1 - fee_rate, 1e-9) * 1.01, 2)
 
 
 def check_withdrawal(coin: str, amount_usd: float, price: float, symbol: dict, chain: dict) -> dict:
-    """The chain is withdrawable and the amount after fees clears Bitget's minimum."""
+    """The chain is withdrawable and the amount actually sent clears Bitget's minimum."""
     if not chain.get("withdrawable"):
         raise PurchaseValidationError("chain_not_withdrawable", {
             "coin": coin, "chain": chain.get("chain"),
             "message": f"Bitget does not allow {coin} withdrawals on {chain.get('chain')} right now"})
     est = estimate_received(amount_usd, price, symbol, chain)
-    if est["withdraw_size"] < est["min_withdraw_amount"] + est["withdraw_fee"] or est["received"] <= 0:
-        needed_coins = est["min_withdraw_amount"] + est["withdraw_fee"]
-        min_usd = needed_coins * price / max(1 - (symbol.get("taker_fee_rate") or 0.0), 1e-9)
+    if not meets_minimum(est):
+        min_usd = minimum_purchase_usd(price, symbol, chain)
         raise PurchaseValidationError("below_minimum_withdrawal", {
             "coin": coin, "chain": chain.get("chain"), "amount_usd": amount_usd,
             "estimated_coins": round(est["withdraw_size"], 8),
             "min_withdraw_amount": est["min_withdraw_amount"], "withdraw_fee": round(est["withdraw_fee"], 8),
-            "minimum_usd": round(min_usd * 1.01, 2),
-            "message": (f"{amount_usd:g} USD buys about {est['withdraw_size']:.8f} {coin}, below Bitget's minimum "
-                        f"withdrawal on {chain.get('chain')} ({est['min_withdraw_amount']:g} {coin} + "
-                        f"{est['withdraw_fee']:.8f} fee). Use at least about {min_usd * 1.01:.2f} USD."),
+            "fee_mode": est["mode"], "minimum_usd": min_usd,
+            "message": (f"{amount_usd:g} USD buys about {est['net']:.8f} {coin}; after the {est['withdraw_fee']:.8f} "
+                        f"{coin} withdrawal fee that is below Bitget's minimum withdrawal of "
+                        f"{est['min_withdraw_amount']:g} {coin} on {chain.get('chain')}. Use at least about {min_usd:.2f} USD."),
         })
     return est
 

@@ -80,7 +80,7 @@ export interface Purchase {
   created_at: string;
 }
 
-export type TransactionStatus = "pending" | "completed" | "failed";
+export type TransactionStatus = "pending" | "completed" | "failed" | "simulated";
 
 /** One Auto-Buy execution attempt (purchase_transactions is the single source of truth). */
 export interface Transaction {
@@ -216,6 +216,7 @@ export interface ChainInfo {
   is_default: boolean;
   fee_usd?: number | null;
   min_purchase_usd?: number | null;
+  estimated_sent?: number | null;
   estimated_received?: number | null;
   meets_minimum?: boolean | null;
 }
@@ -237,7 +238,7 @@ export interface AutoBuyTransaction {
   purchase_id: string;
   exchange_tx_id: string | null;
   tx_type?: "buy" | "withdrawal" | "accumulation";
-  status: "pending" | "success" | "failed" | "needs_review" | "needs_info";
+  status: "pending" | "success" | "failed" | "needs_review" | "needs_info" | "simulated";
   amount_executed: number | null;
   fee: number | null;
   error_message: string | null;
@@ -254,6 +255,7 @@ export interface AutoBuyTransaction {
   withdrawal_chain?: string | null;
   withdrawal_fee?: number | null;
   withdrawal_fee_currency?: string | null;
+  expected_received?: number | null;   // withdrawal rows: what the wallet should receive after the network fee
   tx_hash?: string | null;
   raw_status?: string | null;
 }
@@ -281,11 +283,12 @@ export interface AutoBuyPurchase {
   amount_usd: number;
   frequency: AutoBuyFrequency;
   wallet_address: string | null;   // null on accumulate purchases without a wallet on file
-  blockchain_network: BlockchainNetwork;
+  blockchain_network: BlockchainNetwork | null;   // null on accumulate purchases: coins are held on the exchange
   purchase_type?: PurchaseType;     // absent on API builds older than migration 012
   withdraw_immediately?: boolean;   // absent on API builds older than migration 011
   exchange_account_id: string | null;
   exchange: string | null;
+  exchange_key_removed?: boolean;   // the key was deleted: the purchase cannot run again
   status: AutoBuyStatus;
   failure_count: number;
   last_error: string | null;
@@ -300,7 +303,7 @@ export interface AutoBuyPurchaseCreate {
   crypto_symbol: string;
   amount_usd: number;
   wallet_address?: string;          // required for autobuy; optional for dca (accumulate never withdraws)
-  blockchain_network: BlockchainNetwork;
+  blockchain_network?: BlockchainNetwork;   // required for autobuy; omitted for accumulate without a wallet
   frequency: AutoBuyFrequency;
   exchange_account_id: string;
   purchase_type: PurchaseType;      // autobuy = withdraw to wallet after each buy, dca = accumulate on exchange

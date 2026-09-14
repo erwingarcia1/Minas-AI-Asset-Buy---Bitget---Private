@@ -112,6 +112,35 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled());
   });
 
+  it("offers no USDT as a purchase coin (purchases are paid in USDT)", async () => {
+    render(<PurchaseForm />);
+    await ready();
+    const coins = Array.from((screen.getByLabelText("Crypto") as HTMLSelectElement).options).map((o) => o.value);
+    expect(coins).not.toContain("USDT");
+    expect(coins).toEqual(expect.arrayContaining(["BTC", "ETH", "USDC", "SOL"]));
+  });
+
+  it("accumulate mode hides the network, shows where coins are held and sends no chain", async () => {
+    render(<PurchaseForm />);
+    await ready();
+    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));
+    expect(screen.queryByLabelText(/Blockchain network/)).toBeNull();
+    expect(screen.getByTestId("held-on-exchange")).toHaveTextContent("Held on Binance");   // the fixture key is on Binance
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
+    expect(autoBuyAPI.create).toHaveBeenCalledWith(expect.not.objectContaining({ blockchain_network: expect.anything() }));
+    expect(autoBuyAPI.create).toHaveBeenCalledWith(expect.objectContaining({ purchase_type: "dca" }));
+  });
+
+  it("shows a plain message, never raw exchange errors, when market data fails", async () => {
+    vi.mocked(marketAPI.coin).mockRejectedValue({ response: { status: 503, data: { detail: { error: "exchange_data_unavailable",
+      details: { message: "Bitget market data unavailable for bitget:market:symbol:BTCUSDT: 40034" } } } } });
+    render(<PurchaseForm />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Bitget market data is temporarily unavailable. Please try again in a minute.");
+    expect(alert.textContent).not.toMatch(/bitget:market|40034/);
+  });
+
   it("validates the address against the chosen chain's format", async () => {
     render(<PurchaseForm />);
     await ready();
@@ -126,7 +155,7 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
   it("blocks withdraw purchases when Bitget chain data is unavailable", async () => {
     vi.mocked(marketAPI.coin).mockRejectedValue(new Error("503"));
     render(<PurchaseForm />);
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Bitget market data is unavailable|503/));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/temporarily unavailable/));
     fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
     expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
   });

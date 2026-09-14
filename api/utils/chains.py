@@ -27,7 +27,7 @@ CHAIN_FAMILIES = {
 }
 
 # What the coin is delivered as when the user picks the "native" chain.
-DEFAULT_CHAIN_FOR_COIN = {"BTC": "BTC", "ETH": "ERC20", "USDT": "ERC20", "USDC": "ERC20", "SOL": "SOL"}
+DEFAULT_CHAIN_FOR_COIN = {"BTC": "BTC", "ETH": "ERC20", "USDC": "ERC20", "SOL": "SOL"}
 
 FAMILY_LABELS = {"bitcoin": "Bitcoin", "ethereum": "EVM (0x…)", "solana": "Solana", "tron": "Tron (T…)"}
 

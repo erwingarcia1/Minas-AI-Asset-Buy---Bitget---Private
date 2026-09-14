@@ -57,7 +57,8 @@ class Purchase(Base):
     frequency = Column(String(20), nullable=False)          # one_time | daily | weekly | monthly
     # autobuy: required, withdrawn to after every buy. dca: optional (kept for a later switch to withdraw).
     wallet_address = Column(String(128), nullable=True)
-    blockchain_network = Column(String(40), nullable=False)  # exchange chain name (BTC, ERC20, SOL, ...)
+    # exchange chain name (BTC, ERC20, SOL, ...); None on accumulate purchases without a wallet
+    blockchain_network = Column(String(40), nullable=True)
     purchase_type = Column(Enum(*PURCHASE_TYPES, name="purchase_type"), nullable=False, default="autobuy",
                            server_default="autobuy")
     status = Column(String(20), nullable=False, default="active")
@@ -123,6 +124,7 @@ class PurchaseTransaction(Base):
     withdrawal_id = Column(String(128), nullable=True)       # autobuy: exchange withdrawal id
     withdrawal_fee = Column(Float, nullable=True)
     withdrawal_fee_currency = Column(String(10), nullable=True)
+    expected_received = Column(Float, nullable=True)         # withdrawal: what the wallet should receive after the chain fee
     tx_hash = Column(String(128), nullable=True)             # on-chain hash once the exchange reports it
     # Idempotency + row lineage (migration 017)
     client_oid = Column(String(64), nullable=True, unique=True)   # written before the order is sent

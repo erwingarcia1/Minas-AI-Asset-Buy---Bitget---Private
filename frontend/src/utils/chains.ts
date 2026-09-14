@@ -1,3 +1,4 @@
+import { fmtAmount } from "@/utils/format";
 import type { ChainFamily } from "@/types";
 import { detectChain, getAddressNetwork, isDenylisted, DENYLIST_REASON } from "@/utils/addressValidation";
 
@@ -11,7 +12,7 @@ export const CHAIN_FAMILIES: Record<string, ChainFamily> = {
   trc20: "tron",
 };
 
-export const DEFAULT_CHAIN_FOR_COIN: Record<string, string> = { BTC: "BTC", ETH: "ERC20", USDT: "ERC20", USDC: "ERC20", SOL: "SOL" };
+export const DEFAULT_CHAIN_FOR_COIN: Record<string, string> = { BTC: "BTC", ETH: "ERC20", USDC: "ERC20", SOL: "SOL" };
 
 export const familyForChain = (chain: string | null | undefined): ChainFamily | null =>
   chain ? CHAIN_FAMILIES[chain.trim().toLowerCase()] ?? null : null;
@@ -36,4 +37,4 @@ export function addressVerdictForChain(address: string, chain: string): { ok: bo
   return TRON_RE.test(a) ? { ok: true, reason: "Valid Tron address" } : { ok: false, reason: "TRC20 needs a T… Tron address" };
 }
 
-export const fmtCoin = (n: number, coin: string, digits = 8) => `${n.toLocaleString(undefined, { maximumFractionDigits: digits })} ${coin}`;
+export const fmtCoin = (n: number, coin: string, digits = 8) => `${fmtAmount(n, digits)} ${coin}`;

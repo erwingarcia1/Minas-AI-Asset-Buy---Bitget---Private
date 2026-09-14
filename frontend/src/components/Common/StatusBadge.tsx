@@ -13,6 +13,7 @@ const colors: Record<string, string> = {
   needs_review: "bg-red-100 text-red-800",
   withdrawal_failed: "bg-red-100 text-red-800",
   needs_info: "bg-amber-100 text-amber-800",
+  simulated: "bg-sky-100 text-sky-800",
   suspended: "bg-red-100 text-red-800",
 };
 

@@ -2,6 +2,7 @@
 chains it can be withdrawn on, with fee, minimum and the smallest purchase
 that still clears the minimum withdrawal. Mounted at /api/v2/market."""
 import asyncio
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +15,7 @@ from api.utils.chains import DEFAULT_CHAIN_FOR_COIN, FAMILY_LABELS, family_for_c
 from api.utils.exchange_networks import SUPPORTED_CRYPTOS
 
 router = APIRouter()
+logger = logging.getLogger("autobuy.market")
 
 
 class ChainOut(BaseModel):
@@ -33,7 +35,8 @@ class ChainOut(BaseModel):
     # priced at the live ask when amount_usd is given
     fee_usd: Optional[float] = None
     min_purchase_usd: Optional[float] = None
-    estimated_received: Optional[float] = None
+    estimated_sent: Optional[float] = None       # coins handed to Bitget for the withdrawal
+    estimated_received: Optional[float] = None   # coins the wallet should receive
     meets_minimum: Optional[bool] = None
 
 
@@ -46,6 +49,7 @@ class CoinMarketOut(BaseModel):
     quantity_precision: int
     price_ask: Optional[float] = None
     chains: List[ChainOut]
+    fee_mode: str = "exclusive"   # BITGET_WITHDRAW_FEE_MODE: exclusive = fee on top of the sent amount
     note: str = "Fees and minimums are Bitget's live values, cached for up to an hour."
 
 
@@ -63,7 +67,9 @@ async def coin_market(coin: str, amount_usd: Optional[float] = Query(None, ge=1)
         chains = await bitget_market.get_chains(coin)
         price = await asyncio.to_thread(bitget_market.live_ask, coin) if amount_usd else None
     except bitget_market.MarketDataUnavailable as exc:
-        raise HTTPException(status_code=503, detail={"error": "exchange_data_unavailable", "details": {"message": str(exc)}})
+        logger.warning("market data unavailable for %s: %s", coin, exc)
+        raise HTTPException(status_code=503, detail={"error": "exchange_data_unavailable",
+                                                    "details": {"message": bitget_market.UNAVAILABLE_MESSAGE}})
     if symbol is None:
         raise HTTPException(status_code=404, detail={"error": "pair_not_available",
                                                     "details": {"coin": coin, "message": f"{coin}/USDT is not a Bitget spot pair"}})
@@ -78,13 +84,12 @@ async def coin_market(coin: str, amount_usd: Optional[float] = Query(None, ge=1)
                        is_default=(c["chain"] or "").lower() == DEFAULT_CHAIN_FOR_COIN.get(coin, "").lower())
         if price and amount_usd:
             est = bitget_market.estimate_received(amount_usd, price, symbol, c)
-            needed = est["min_withdraw_amount"] + est["withdraw_fee"]
-            fee_rate = symbol.get("taker_fee_rate") or 0.0
             row.fee_usd = round(est["withdraw_fee"] * price, 4)
-            row.min_purchase_usd = round(needed * price / max(1 - fee_rate, 1e-9) * 1.01, 2)
+            row.min_purchase_usd = bitget_market.minimum_purchase_usd(price, symbol, c)
+            row.estimated_sent = round(est["withdraw_size"], 8)
             row.estimated_received = round(est["received"], 8)
-            row.meets_minimum = est["withdraw_size"] >= needed and est["received"] > 0
+            row.meets_minimum = bitget_market.meets_minimum(est)
         out.append(row)
     return CoinMarketOut(coin=coin, pair=symbol["symbol"], online=symbol["online"], min_trade_usdt=symbol["min_trade_usdt"],
                          taker_fee_rate=symbol.get("taker_fee_rate"), quantity_precision=symbol["quantity_precision"],
-                         price_ask=price, chains=out)
+                         price_ask=price, chains=out, fee_mode=bitget_market.fee_mode())

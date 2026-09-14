@@ -39,7 +39,7 @@ async def test_create_with_valid_address_and_network(client, db, user, binance_k
     ({"wallet_address": BTC_TEST, "blockchain_network": "BTC"}, "invalid_wallet_address"),    # testnet addr on the BTC chain
     ({"wallet_address": ETH}, "invalid_wallet_address"),                                      # ETH address for BTC
     ({"crypto_symbol": "ETH", "blockchain_network": "ERC20", "wallet_address": SOL}, "invalid_wallet_address"),  # SOL address on ERC20
-    ({"crypto_symbol": "USDT", "blockchain_network": "ERC20", "wallet_address": BTC_MAIN}, "invalid_wallet_address"),  # USDT ERC20 needs 0x
+    ({"crypto_symbol": "USDC", "blockchain_network": "ERC20", "wallet_address": BTC_MAIN}, "invalid_wallet_address"),  # USDC ERC20 needs 0x
     ({"wallet_address": BTC_MAIN[:-1] + "b"}, "invalid_wallet_address"),                        # bad checksum
 ])
 async def test_create_rejects_mismatched_address_chain(client, db, user, binance_key, over, expected_error):
@@ -63,10 +63,19 @@ async def test_chain_defaults_to_the_coins_native_chain(client, db, user, binanc
 # --------------------------------------------------------------------------- live Bitget validation (stubbed data)
 
 async def test_bitget_rejects_pairs_that_do_not_exist(client, user, bitget_key):
-    r = await client.post(P, json=body(bitget_key, crypto_symbol="USDT", blockchain_network="ERC20", wallet_address=ETH, purchase_type="dca"),
+    # the stub lists no USDCUSDT pair: refused with a structured error
+    r = await client.post(P, json=body(bitget_key, crypto_symbol="USDC", blockchain_network="ERC20", wallet_address=ETH, purchase_type="dca"),
                           headers=auth(user))
     assert r.status_code == 422 and r.json()["detail"]["error"] == "pair_not_available", r.text
-    assert "USDT/USDT" in r.json()["detail"]["details"]["message"]
+    assert "USDC/USDT" in r.json()["detail"]["details"]["message"]
+
+
+async def test_usdt_is_not_a_purchase_coin(client, user, bitget_key):
+    """Purchases are paid in USDT and Bitget has no USDTUSDT pair: refused before any exchange call."""
+    r = await client.post(P, json=body(bitget_key, crypto_symbol="USDT", blockchain_network="ERC20", wallet_address=ETH, purchase_type="dca"),
+                          headers=auth(user))
+    assert r.status_code == 422 and "unsupported crypto" in r.text and "USDT" not in str(
+        [e["msg"] for e in r.json()["detail"]]).split("choose one of")[1]
 
 
 async def test_bitget_rejects_below_minimum_withdrawal_at_creation(client, user, bitget_key):
@@ -100,6 +109,11 @@ async def test_bitget_data_unavailable_is_503_not_a_silent_accept(client, user, 
     monkeypatch.setattr(bm, "fetch_symbol", boom)
     r = await client.post(P, json=body(bitget_key), headers=auth(user))
     assert r.status_code == 503 and r.json()["detail"]["error"] == "exchange_data_unavailable"
+    msg = r.json()["detail"]["details"]["message"]
+    assert msg == bm.UNAVAILABLE_MESSAGE and "bitget:market" not in msg and "bitget down" not in msg, \
+        "users get a plain message; cache keys and raw errors go to the log"
+    m = await client.get("/api/v2/market/coins/BTC", headers=auth(user))
+    assert m.status_code == 503 and m.json()["detail"]["details"]["message"] == bm.UNAVAILABLE_MESSAGE
 
 
 async def test_market_endpoint_reports_chains_fees_and_minimum_purchase(client, user):

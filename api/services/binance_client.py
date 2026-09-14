@@ -241,6 +241,14 @@ class BinanceClient:
         return {"withdrawal_id": wid, "amount": amount, "dry_run": False}
 
 
+    def get_available(self, coin: str) -> float:
+        """Free spot balance of `coin` on the account (checked before a live withdrawal)."""
+        try:
+            with time_binance("available"):
+                return float(self._client.get_spot_available(coin))
+        except ExchangeAPIError as exc:
+            raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
+
     # Exchange withdrawal statuses -> (done, ok). Anything else is still in flight.
     WITHDRAWAL_TERMINAL = {"success": (True, True), "wallet_fail": (True, False), "cancel": (True, False),
                            "reject": (True, False), "fail": (True, False), "failed": (True, False)}

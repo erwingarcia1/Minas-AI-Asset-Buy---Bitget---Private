@@ -426,6 +426,17 @@
             ],
             "title": "Estimated Received"
           },
+          "estimated_sent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Sent"
+          },
           "extra_withdraw_fee_pct": {
             "title": "Extra Withdraw Fee Pct",
             "type": "number"
@@ -564,6 +575,11 @@
           },
           "coin": {
             "title": "Coin",
+            "type": "string"
+          },
+          "fee_mode": {
+            "default": "exclusive",
+            "title": "Fee Mode",
             "type": "string"
           },
           "min_trade_usdt": {
@@ -1593,8 +1609,15 @@
             "type": "number"
           },
           "blockchain_network": {
-            "title": "Blockchain Network",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockchain Network"
           },
           "created_at": {
             "format": "date-time",
@@ -1627,6 +1650,11 @@
               }
             ],
             "title": "Exchange Account Id"
+          },
+          "exchange_key_removed": {
+            "default": false,
+            "title": "Exchange Key Removed",
+            "type": "boolean"
           },
           "failure_count": {
             "title": "Failure Count",
@@ -1726,7 +1754,6 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
-          "blockchain_network",
           "purchase_type",
           "withdraw_immediately",
           "status",
@@ -1744,8 +1771,15 @@
             "type": "number"
           },
           "blockchain_network": {
-            "title": "Blockchain Network",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockchain Network"
           },
           "created_at": {
             "format": "date-time",
@@ -1778,6 +1812,11 @@
               }
             ],
             "title": "Exchange Account Id"
+          },
+          "exchange_key_removed": {
+            "default": false,
+            "title": "Exchange Key Removed",
+            "type": "boolean"
           },
           "failure_count": {
             "title": "Failure Count",
@@ -1869,7 +1908,6 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
-          "blockchain_network",
           "purchase_type",
           "withdraw_immediately",
           "status",
@@ -2459,6 +2497,17 @@
               }
             ],
             "title": "Executed At"
+          },
+          "expected_received": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Received"
           },
           "fee": {
             "anyOf": [

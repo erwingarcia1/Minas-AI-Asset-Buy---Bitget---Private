@@ -6,7 +6,8 @@ export const EXCHANGE_NETWORKS: Record<string, string[]> = {
   okx: ["mainnet", "testnet"],
   bybit: ["mainnet", "testnet"],
 };
-export const AUTOBUY_CRYPTOS = ["BTC", "ETH", "USDT", "USDC", "SOL"] as const;
+// Purchases are paid in USDT, and Bitget has no USDTUSDT pair, so USDT is not a purchase coin.
+export const AUTOBUY_CRYPTOS = ["BTC", "ETH", "USDC", "SOL"] as const;
 export const AUTOBUY_FREQUENCIES = [
   { value: "one_time", label: "One-time" }, { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" },

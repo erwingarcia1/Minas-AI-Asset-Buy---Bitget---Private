@@ -257,7 +257,17 @@ async def delete_key(
     key = result.scalar_one_or_none()
     if key is None:
         raise HTTPException(status_code=404, detail="API key not found")
+    # Purchases on this key can never run again (the FK is set to NULL): stop
+    # them now with a clear reason instead of letting the executor discover it.
+    from api.models import Purchase
+    from api.tasks.purchase_scheduler import KEY_REMOVED_MESSAGE
+    affected = (await db.execute(select(Purchase).where(
+        Purchase.exchange_account_id == key.id, Purchase.status.in_(("active", "paused"))))).scalars().all()
+    for p in affected:
+        p.status = "paused"
+        p.next_execution = None
+        p.last_error = KEY_REMOVED_MESSAGE
     await db.delete(key)
     await db.commit()
-    logger.info("api_key_deleted", extra={"user_id": str(current_user.id),
-                                          "key_id": str(key_id)})
+    logger.info("api_key_deleted", extra={"user_id": str(current_user.id), "key_id": str(key_id),
+                                          "purchases_stopped": len(affected)})

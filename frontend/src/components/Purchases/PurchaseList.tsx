@@ -4,7 +4,7 @@ import { errorMessage } from "@/api/client";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
 import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/types";
 import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
-import { capitalize, fmtDate } from "@/utils/format";
+import { capitalize, fmtAmount, fmtDate } from "@/utils/format";
 
 const FREQ: Record<string, string> = { one_time: "One-time", daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 /** Purchases parked after a filled buy whose withdrawal did not go through: the coins sit on the exchange. */
@@ -49,7 +49,12 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
             {purchases.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-500">No purchases yet.</td></tr>}
             {purchases.map((p) => (
               <tr key={p.id} className="border-t border-slate-100" data-testid="purchase-row">
-                <td className="whitespace-nowrap px-4 py-2 font-medium">{p.crypto_symbol}<div className="text-xs font-normal text-slate-400">{p.exchange ?? "—"} · {p.blockchain_network}</div></td>
+                <td className="whitespace-nowrap px-4 py-2 font-medium">{p.crypto_symbol}
+                  <div className="text-xs font-normal text-slate-400" data-testid="purchase-venue">
+                    {p.exchange_key_removed || (!p.exchange && !p.exchange_account_id) ? <span className="text-red-600">Exchange key removed</span> : capitalize(p.exchange ?? "")}
+                    {purchaseMode(p) === "dca" ? ` · Held on ${capitalize(p.exchange ?? "exchange")}` : p.blockchain_network ? ` · ${p.blockchain_network}` : ""}
+                  </div>
+                </td>
                 <td className="px-4 py-2">{fmtUsd(p.amount_usd)}</td>
                 <td className="px-4 py-2">{FREQ[p.frequency] ?? capitalize(p.frequency)}</td>
                 <td className="px-4 py-2">
@@ -61,8 +66,9 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                 <td className="space-x-2 whitespace-nowrap px-4 py-2 text-right">
                   <button className="btn-secondary !py-1" onClick={() => setOpen(open?.id === p.id ? null : p)}>{open?.id === p.id ? "Hide" : "Transactions"}</button>
                   {p.status === "active" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "paused" }))}>Pause</button>}
-                  {p.status === "paused" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
-                  {["withdrawal_failed", "needs_info"].includes(p.status) && (
+                  {p.status === "paused" && !p.exchange_key_removed && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
+                  {p.status === "paused" && p.exchange_key_removed && <button className="btn-secondary !py-1" disabled title="Exchange key removed: add a key and create a new purchase">Resume</button>}
+                  {["withdrawal_failed", "needs_info"].includes(p.status) && !p.exchange_key_removed && (
                     <button className="btn-primary !py-1" onClick={() => { if (confirm(`Send the ${p.crypto_symbol} already bought to ${p.wallet_address ?? "the wallet on file"} on ${p.blockchain_network} again? No new buy is placed.`)) void act(() => autoBuyAPI.retryWithdrawal(p.id)); }}>Retry withdrawal</button>
                   )}
                   {["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
@@ -100,7 +106,7 @@ function TransactionHistory({ purchase }: { purchase: AutoBuyPurchase }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-semibold">Transactions · {purchase.crypto_symbol} {fmtUsd(purchase.amount_usd)} · {purchaseMode(purchase) === "autobuy" ? "autobuy: sent to wallet" : purchaseMode(purchase) === "dca" ? "accumulate on exchange" : "mode unknown (outdated API)"}</h3>
         <select className="input w-auto" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">
-          <option value="">All statuses</option><option value="pending">Pending</option><option value="success">Success</option><option value="failed">Failed</option>
+          <option value="">All statuses</option><option value="pending">Pending</option><option value="success">Success</option><option value="failed">Failed</option><option value="simulated">Simulated</option>
         </select>
       </div>
       {error && <Alert kind="error">{error}</Alert>}
@@ -110,10 +116,10 @@ function TransactionHistory({ purchase }: { purchase: AutoBuyPurchase }) {
           <tbody>{rows?.map((t) => (
             <tr key={t.id} className="border-t border-slate-100">
               <td className="py-2">{fmtDate(t.executed_at ?? t.created_at)}</td>
-              <td>{t.amount_executed != null ? `${t.amount_executed.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${purchase.crypto_symbol}` : "—"}</td>
+              <td>{t.amount_executed != null ? `${fmtAmount(t.amount_executed)} ${purchase.crypto_symbol}` : "—"}{t.tx_type === "withdrawal" && t.expected_received != null && t.expected_received !== t.amount_executed && <div className="text-xs text-slate-400">≈ {fmtAmount(t.expected_received)} {purchase.crypto_symbol} received</div>}</td>
               <td><StatusBadge status={t.status} /> {t.tx_type && <span className="text-xs text-slate-400">{t.tx_type}</span>}{t.error_message && <div className="text-xs text-red-600">{t.error_message}</div>}</td>
-              <td className="font-mono text-xs">{t.exchange_tx_id ?? "—"}{t.tx_type === "withdrawal" && <div className="text-slate-400" title="on-chain transaction hash">{t.tx_hash ? `tx ${t.tx_hash.slice(0, 18)}…` : t.raw_status === "simulated" ? "simulated (dry run)" : `awaiting tx hash${t.raw_status ? ` · ${t.raw_status}` : ""}`}</div>}</td>
-              <td className="text-right">{t.tx_type === "withdrawal" ? (t.withdrawal_fee != null ? `${t.withdrawal_fee} ${t.withdrawal_fee_currency ?? ""}` : "—") : t.fee != null ? `${t.fee} ${t.fee_currency ?? ""}` : "—"}</td>
+              <td className="font-mono text-xs">{t.exchange_tx_id ?? "—"}{t.tx_type === "withdrawal" && <div className="text-slate-400" title="on-chain transaction hash">{t.tx_hash ? `tx ${t.tx_hash.slice(0, 18)}…` : t.status === "simulated" ? "dry run: nothing was sent" : `awaiting tx hash${t.raw_status ? ` · ${t.raw_status}` : ""}`}</div>}</td>
+              <td className="text-right">{t.tx_type === "withdrawal" ? (t.withdrawal_fee != null ? `${fmtAmount(t.withdrawal_fee)} ${t.withdrawal_fee_currency ?? ""}` : "—") : t.fee != null ? `${fmtAmount(t.fee)} ${t.fee_currency ?? ""}` : "—"}</td>
             </tr>
           ))}</tbody>
         </table>

@@ -37,25 +37,34 @@ class EmailService:
         cost = tx.cost_usd if tx.cost_usd is not None else p.amount_usd
         price = f" at {tx.fill_price:.2f}" if tx.fill_price else ""
         prefix = "[DRY RUN] " if event.dry_run else ""
+        from api.services.history import fmt_amount, presented_status
         if event.type == "buy_executed":
-            subject = f"{prefix}✓ Purchase complete: {amount:.8f} {coin}"
-            text = (f"You bought {amount:.8f} {coin} for {cost:.2f} USD{price} on {event.exchange or 'your exchange'}. "
+            subject = f"{prefix}✓ Purchase complete: {fmt_amount(amount)} {coin}"
+            text = (f"You bought {fmt_amount(amount)} {coin} for {cost:.2f} USD{price} on {event.exchange or 'your exchange'}. "
                     f"The coins are held on the exchange (accumulate mode). Order: {tx.order_id or '-'}")
+        elif event.type == "withdrawal_sent" and presented_status(tx) == "simulated":
+            subject = f"{prefix}✓ Purchase complete: {fmt_amount(amount)} {coin} withdrawal simulated"
+            text = (f"You bought {coin} for {cost:.2f} USD{price} on {event.exchange or 'your exchange'}. "
+                    f"The withdrawal of {fmt_amount(amount)} {coin} to {p.wallet_address} ({p.blockchain_network}) was "
+                    f"SIMULATED (status: simulated) — nothing was sent; the coins stay on the exchange. "
+                    f"Order: {tx.order_id or '-'} · Withdrawal: {tx.withdrawal_id or '-'}")
         elif event.type == "withdrawal_sent":
-            subject = f"{prefix}✓ Purchase complete: {amount:.8f} {coin} sent to your wallet"
-            text = (f"You bought {amount:.8f} {coin} for {cost:.2f} USD{price} on {event.exchange or 'your exchange'} "
-                    f"and it was sent to {p.wallet_address} ({p.blockchain_network}). "
+            received = tx.expected_received if tx.expected_received is not None else amount
+            subject = f"{prefix}✓ Purchase complete: {fmt_amount(received)} {coin} sent to your wallet"
+            text = (f"You bought {coin} for {cost:.2f} USD{price} on {event.exchange or 'your exchange'} "
+                    f"and {fmt_amount(amount)} {coin} was sent to {p.wallet_address} ({p.blockchain_network}); "
+                    f"about {fmt_amount(received)} {coin} should arrive after the {fmt_amount(tx.withdrawal_fee or 0)} {coin} network fee. "
                     f"Order: {tx.order_id or '-'} · Withdrawal: {tx.withdrawal_id or '-'}")
         elif event.type == "withdrawal_failed":
             subject = f"{prefix}✗ Withdrawal failed: {coin}"
-            text = (f"Your {coin} buy filled, but sending {amount:.8f} {coin} to "
+            text = (f"Your {coin} buy filled, but sending {fmt_amount(amount)} {coin} to "
                     f"{p.wallet_address} ({tx.withdrawal_chain or p.blockchain_network}) failed: {event.error}. "
                     f"The coins remain safely on {event.exchange or 'the exchange'} and we will NOT buy again. "
                     "Fix the cause (wallet on the exchange's address book, withdrawal permission, IP allowlist), "
                     "then use 'Retry withdrawal' on the purchase.")
         elif event.type == "withdrawal_needs_info":
             subject = f"{prefix}⚠ Withdrawal needs more information: {coin}"
-            text = (f"Your {coin} buy filled, but {event.exchange or 'the exchange'} will not send {amount:.8f} {coin} to "
+            text = (f"Your {coin} buy filled, but {event.exchange or 'the exchange'} will not send {fmt_amount(amount)} {coin} to "
                     f"{p.wallet_address} until more information is provided: {event.error}. "
                     f"The coins remain on {event.exchange or 'the exchange'}; nothing will be retried automatically. "
                     "Contact support to add the required details, then retry the withdrawal.")

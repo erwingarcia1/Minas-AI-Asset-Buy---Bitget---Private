@@ -11,12 +11,13 @@ EXCHANGE_NETWORKS: Dict[str, List[str]] = {
     "bybit": ["mainnet", "testnet"],
 }
 
-# Coin -> chain whose address format applies. USDT/USDC are delivered as
-# ERC-20 tokens, so they use Ethereum addresses.
+# Coin -> chain whose address format applies. USDC is delivered as an ERC-20
+# token by default, so it uses Ethereum addresses. USDT is NOT a purchase coin:
+# purchases are paid in USDT and Bitget has no USDTUSDT pair. USDC stays because
+# USDCUSDT exists and was online on Bitget when checked (2026-09-13).
 CRYPTO_CHAINS: Dict[str, str] = {
     "BTC": "bitcoin",
     "ETH": "ethereum",
-    "USDT": "ethereum",
     "USDC": "ethereum",
     "SOL": "solana",
 }

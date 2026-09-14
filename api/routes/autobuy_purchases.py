@@ -96,7 +96,9 @@ class PurchaseCreateRequest(BaseModel):
             raise ValueError("wallet_address is required for withdraw-immediately (autobuy) purchases")
         if self.wallet_address is not None and len(self.wallet_address) < 20:
             raise ValueError("wallet_address is too short to be a valid address")
-        if self.blockchain_network is None:
+        # A chain matters only when coins leave the exchange: autobuy, or a wallet kept on file.
+        # Accumulate purchases without a wallet store no chain ("Held on the exchange").
+        if self.blockchain_network is None and (self.purchase_type == "autobuy" or self.wallet_address):
             self.blockchain_network = DEFAULT_CHAIN_FOR_COIN.get(self.crypto_symbol, "ERC20")
         return self
 
@@ -184,8 +186,8 @@ class TransactionOut(BaseModel):
     purchase_id: UUID
     exchange_tx_id: Optional[str] = None
     tx_type: str = "withdrawal"   # buy | withdrawal | accumulation
-    status: str
-    amount_executed: Optional[float] = None
+    status: str                   # pending | success | failed | needs_review | needs_info | simulated (dry-run withdrawal)
+    amount_executed: Optional[float] = None   # withdrawal rows: the amount handed to the exchange
     fee: Optional[float] = None
     error_message: Optional[str] = None
     executed_at: Optional[datetime] = None
@@ -201,6 +203,7 @@ class TransactionOut(BaseModel):
     withdrawal_chain: Optional[str] = None
     withdrawal_fee: Optional[float] = None
     withdrawal_fee_currency: Optional[str] = None
+    expected_received: Optional[float] = None   # withdrawal rows: what the wallet should receive
     tx_hash: Optional[str] = None
     raw_status: Optional[str] = None
 
@@ -213,11 +216,12 @@ class PurchaseOut(BaseModel):
     amount_usd: float
     frequency: str
     wallet_address: Optional[str] = None   # None on accumulate purchases without a wallet on file
-    blockchain_network: str
+    blockchain_network: Optional[str] = None   # None on accumulate purchases: coins are held on the exchange
     purchase_type: str            # autobuy | dca
     withdraw_immediately: bool    # derived: purchase_type == "autobuy" (compatibility)
     exchange_account_id: Optional[UUID] = None
     exchange: Optional[str] = None
+    exchange_key_removed: bool = False   # the key was deleted: the purchase cannot run again
     status: str
     failure_count: int
     last_error: Optional[str] = None
@@ -249,6 +253,15 @@ class RetryWithdrawalOut(BaseModel):
 
 # --------------------------------------------------------------------------- helpers
 
+def _tx_out(t: PurchaseTransaction) -> TransactionOut:
+    """API view of a row (executor vocabulary): a dry-run withdrawal shows "simulated"."""
+    from api.services.history import is_simulated
+    out = TransactionOut.model_validate(t)
+    if is_simulated(t):
+        out.status = "simulated"
+    return out
+
+
 def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
     txs = list(p.transactions or [])
     txs.sort(key=lambda t: t.created_at, reverse=True)
@@ -258,13 +271,14 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
         purchase_type=p.purchase_type, withdraw_immediately=p.purchase_type == "autobuy",
         exchange_account_id=p.exchange_account_id,
         exchange=p.exchange_account.exchange if p.exchange_account else None,
+        exchange_key_removed=p.exchange_account is None,
         status=p.status, failure_count=p.failure_count, last_error=p.last_error,
         next_execution=p.next_execution, created_at=p.created_at, updated_at=p.updated_at,
-        latest_transaction=TransactionOut.model_validate(txs[0]) if txs else None,
+        latest_transaction=_tx_out(txs[0]) if txs else None,
         travel_rule_info=TravelRuleInfo(**p.travel_rule_dict()) if p.travel_rule_dict() else None,
     )
     if detail:
-        return PurchaseDetailOut(**base, transactions=[TransactionOut.model_validate(t) for t in txs])
+        return PurchaseDetailOut(**base, transactions=[_tx_out(t) for t in txs])
     return PurchaseOut(**base)
 
 
@@ -319,8 +333,9 @@ async def _validate_against_exchange(account: APIKey, crypto: str, amount_usd: f
     except bitget_market.PurchaseValidationError as exc:
         raise _reject(exc.error, exc.details)
     except bitget_market.MarketDataUnavailable as exc:
+        logger.warning("purchase validation: market data unavailable for %s: %s", crypto, exc)
         raise HTTPException(status_code=503, detail={"error": "exchange_data_unavailable",
-                                                    "details": {"message": f"Cannot validate against Bitget right now: {exc}"}})
+                                                    "details": {"message": bitget_market.UNAVAILABLE_MESSAGE}})
     return None
 
 
@@ -408,7 +423,7 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
         # switching ON withdraw-immediately: real address + network + typed confirmation, every time
         address = payload.wallet_address
-        network = payload.blockchain_network or p.blockchain_network
+        network = payload.blockchain_network or p.blockchain_network or DEFAULT_CHAIN_FOR_COIN.get(p.crypto_symbol)
         if not address:
             raise _reject("wallet_address_required", {
                 "message": "Switching to withdraw immediately needs the wallet address the coins will be sent to"})
@@ -427,12 +442,16 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
         logger.info("purchase switched to dca", extra={"purchase_id": str(p.id), "user_id": str(current_user.id)})
     elif payload.wallet_address is not None:
         # changing the wallet on an existing purchase: same checks as creation
-        network = payload.blockchain_network or p.blockchain_network
+        network = payload.blockchain_network or p.blockchain_network or DEFAULT_CHAIN_FOR_COIN.get(p.crypto_symbol)
         _check_wallet(payload.wallet_address, network, p.crypto_symbol)
         if p.purchase_type == "autobuy" and payload.confirm_wallet_address != payload.wallet_address:
             raise _reject("wallet_confirmation_mismatch", {
                 "message": "Type the wallet address again in confirm_wallet_address to change where coins are sent"})
         p.wallet_address, p.blockchain_network = payload.wallet_address, network
+    if payload.status == "active" and p.status != "active" and p.exchange_account is None:
+        raise HTTPException(status_code=409, detail={
+            "error": "exchange_key_removed",
+            "details": {"message": "Exchange key removed. This purchase cannot run again; add an exchange key and create a new purchase."}})
     if payload.status == "active" and p.status == "paused":
         p.failure_count = 0
         p.last_error = None
@@ -483,7 +502,7 @@ async def retry_withdrawal(purchase_id: UUID, current_user: User = Depends(get_c
     logger.info("withdrawal retried", extra={"purchase_id": str(p.id), "user_id": str(current_user.id),
                                              "withdrawal_id": str(wd.id), "result": wd.status})
     return RetryWithdrawalOut(purchase_id=p.id, status=p.status, next_execution=p.next_execution,
-                              withdrawal=TransactionOut.model_validate(wd))
+                              withdrawal=_tx_out(wd))
 
 
 @router.delete("/{purchase_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
@@ -507,7 +526,7 @@ async def purchase_transactions(purchase_id: UUID, status_filter: Optional[str] 
     txs = sorted(p.transactions, key=lambda t: t.created_at, reverse=True)
     if status_filter:
         txs = [t for t in txs if t.status == status_filter.lower()]
-    return [TransactionOut.model_validate(t) for t in txs]
+    return [_tx_out(t) for t in txs]
 
 
 # re-export for tests
