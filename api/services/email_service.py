@@ -94,7 +94,8 @@ class EmailService:
         else:  # buy_failed
             subject = f"{prefix}✗ Purchase failed: {coin}"
             text = (f"We tried to buy {coin} for {p.amount_usd:.2f} USD on {event.exchange or 'your exchange'} "
-                    f"but it failed: {event.error}. Attempt {event.attempt}/{event.max_attempts}"
+                    f"but it failed: {event.error}. This buy did not happen and no money was spent. "
+                    f"Attempt {event.attempt}/{event.max_attempts}"
                     + ("; we will retry on the next run." if event.attempt < event.max_attempts
                        else "; the purchase is now marked failed."))
         category = "failure" if event.type in ("buy_failed", "withdrawal_failed", "withdrawal_needs_info") else "confirmation"

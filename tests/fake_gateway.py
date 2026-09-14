@@ -23,7 +23,8 @@ class FakeGateway:
 
     def __init__(self, *, fail_buy=False, place_raises_after_sending=False, fill_unavailable=False,
                  lookup_raises=False, lookup_state=None, fail_withdrawal=False, withdrawal_needs_info=False,
-                 withdrawal_state="pending", status_raises=False):
+                 withdrawal_state="pending", status_raises=False, fill_factor=1.0, fill_override=None,
+                 unfilled=False, reference_price=None):
         self.fail_buy = fail_buy
         self.place_raises_after_sending = place_raises_after_sending
         self.fill_unavailable = fill_unavailable
@@ -33,6 +34,10 @@ class FakeGateway:
         self.withdrawal_needs_info = withdrawal_needs_info
         self.withdrawal_state = withdrawal_state
         self.status_raises = status_raises
+        self.fill_factor = fill_factor          # scale the reported amount (0 = zero fill, 0.5 = half)
+        self.fill_override = fill_override or {}  # fields forced onto every fill
+        self.unfilled = unfilled                # order detail says "live", not filled
+        self.reference_price = reference_price  # returned by place_buy (None = no reference)
         self.status_calls: list = []
         self.placed: list = []       # (client_oid, purchase_id, dry_run) — orders that reached the "exchange"
         self.lookups: list = []
@@ -41,10 +46,12 @@ class FakeGateway:
 
     # -- helpers ------------------------------------------------------------
     def _fill_for(self, purchase, order_id):
-        amount = purchase.amount_usd / self.PRICE
-        return {"order_id": order_id, "filled": True, "raw_status": "filled",
+        amount = purchase.amount_usd / self.PRICE * self.fill_factor
+        fill = {"order_id": order_id, "filled": not self.unfilled, "raw_status": "live" if self.unfilled else "filled",
                 "amount_crypto": amount, "exchange_rate": self.PRICE, "cost_usdt": purchase.amount_usd,
                 "fee": amount * self.FEE_RATE, "fee_currency": purchase.crypto_symbol}
+        fill.update(self.fill_override)
+        return fill
 
     @property
     def calls(self):
@@ -59,7 +66,7 @@ class FakeGateway:
         self.placed.append((client_oid, purchase.id, dry_run))
         if self.place_raises_after_sending:
             raise ps.ExecutionError("NETWORK: read timed out after the order was sent", stage="buy", code="NETWORK")
-        return {"order_id": f"ORD-{self.n}", "dry_run": dry_run}
+        return {"order_id": f"ORD-{self.n}", "dry_run": dry_run, "reference_price": self.reference_price}
 
     def fetch_fill(self, account, purchase, order_id, client_oid, dry_run):
         if self.fill_unavailable:

@@ -77,7 +77,7 @@ async def test_filters_and_pagination(db, user, rows):
 async def test_stats_holdings_monthly_average(db, user, rows):
     st = await history.stats(db, user.id)
     assert st == {"total_transactions": 4, "total_invested_usdt": 300.0, "average_purchase_usdt": 150.0,
-                  "completed_count": 2, "failed_count": 1, "pending_count": 1}
+                  "completed_count": 2, "failed_count": 1, "pending_count": 1, "needs_review_count": 0}
     assert await history.holdings(db, user.id) == [("BTC", pytest.approx(0.003), 300.0)]
     assert await history.monthly_average(db, user.id) == 300.0
     assert await history.completed_count_and_total(db, user.id) == (2, 300.0)

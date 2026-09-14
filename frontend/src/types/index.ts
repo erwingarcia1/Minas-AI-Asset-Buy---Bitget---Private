@@ -122,10 +122,13 @@ export interface TransactionList {
 }
 
 export interface TransactionStats {
+  /** Every row in the history table (buys, failed attempts, withdrawals). */
   total_transactions: number;
+  /** These three are computed over successful buys only. */
   total_invested_usdt: number;
   average_purchase_usdt: number;
   [key: string]: number;
+  needs_review_count: number;
 }
 
 export interface QuickStats {

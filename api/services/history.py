@@ -103,8 +103,10 @@ def _row(tx: PurchaseTransaction, p: Purchase, exchange: Optional[str]) -> Histo
     amount = float(tx.amount_executed or 0.0)
     if tx.cost_usd is not None:
         cost = tx.cost_usd
+    elif tx.tx_type in BUY_TYPES and tx.status == DB_SUCCESS:
+        cost = float(p.amount_usd)   # older successful buys without a recorded quote
     else:
-        cost = float(p.amount_usd) if tx.tx_type in BUY_TYPES else 0.0
+        cost = 0.0   # a failed or pending attempt spent nothing
     return HistoryRow(
         id=tx.id, purchase_id=p.id, user_id=p.user_id, crypto=p.crypto_symbol,
         purchase_type=p.purchase_type, tx_type=tx.tx_type, status=presented_status(tx),
@@ -182,6 +184,11 @@ async def completed_rows(db: AsyncSession, user_id, *, since: Optional[datetime]
 # ------------------------------------------------------------------ aggregates
 
 async def stats(db: AsyncSession, user_id) -> dict:
+    """The rule: total_invested_usdt, average_purchase_usdt and completed_count
+    are computed over the SAME set of rows — successful buys only. Failed and
+    pending attempts and withdrawal rows never add cost and are never averaged;
+    they are reported separately (failed_count, pending_count) and
+    total_transactions counts every row of every kind for the history table."""
     ok = (PurchaseTransaction.status == DB_SUCCESS) & PurchaseTransaction.tx_type.in_(BUY_TYPES)
     cost = func.coalesce(PurchaseTransaction.cost_usd, Purchase.amount_usd)
     row = (await db.execute(
@@ -189,13 +196,29 @@ async def stats(db: AsyncSession, user_id) -> dict:
                func.coalesce(func.sum(cost).filter(ok), 0.0),
                func.coalesce(func.avg(cost).filter(ok), 0.0),
                func.count(PurchaseTransaction.id).filter(ok),
-               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "failed"),
-               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "pending"))
+               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "failed",
+                                                          PurchaseTransaction.tx_type.in_(BUY_TYPES)),
+               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "pending"),
+               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "needs_review"))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
         .where(Purchase.user_id == user_id))).one()
     return {"total_transactions": row[0], "total_invested_usdt": round(float(row[1]), 8),
             "average_purchase_usdt": round(float(row[2]), 8), "completed_count": row[3],
-            "failed_count": row[4], "pending_count": row[5]}
+            "failed_count": row[4], "pending_count": row[5], "needs_review_count": row[6]}
+
+
+async def count_network_failures_since(db: AsyncSession, since: datetime) -> int:
+    """Failed buy attempts caused by the exchange being unreachable (DNS, timeouts,
+    connection errors) rather than by the order itself — a run that silently
+    could not happen."""
+    from sqlalchemy import or_
+    err = PurchaseTransaction.error_message
+    q = (select(func.count(PurchaseTransaction.id))
+         .where(PurchaseTransaction.status == "failed", PurchaseTransaction.tx_type.in_(BUY_TYPES),
+                PurchaseTransaction.created_at >= since,
+                or_(err.ilike("%NETWORK%"), err.ilike("%name resolution%"), err.ilike("%timed out%"),
+                    err.ilike("%ConnectionError%"), err.ilike("%unreachable%"))))
+    return int((await db.execute(q)).scalar_one())
 
 
 async def holdings(db: AsyncSession, user_id) -> List[Tuple[str, float, float]]:

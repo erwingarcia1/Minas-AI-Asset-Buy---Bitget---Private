@@ -307,6 +307,21 @@ recorded and never re-bought, "not found" is an ordinary failure (retried up to
 alert and no automatic retry. Before any retry, earlier attempts with an
 unknown outcome are reconciled the same way.
 
+A fill is recorded as a completed buy only when it passes `validate_fill`:
+marked filled, amount and cost both positive, cost within
+`FILL_TOLERANCE_PCT` (default 10%) of the amount requested, amount within
+the tolerance of cost / price (the reference price read just before the
+order, else the fill's own average) and internally consistent. Zero,
+partial and implausible fills — on the direct path and on reconciliation —
+park the attempt as `needs_review` with the Slack alert and never advance
+the schedule. A failed attempt never advances the schedule either, spends
+nothing, and carries no cost in the history: `total_invested_usdt`,
+`average_purchase_usdt` and `completed_count` are computed over successful
+buys only; `failed_count`, `pending_count` and `needs_review_count` are
+separate; `total_transactions` counts every row for the table. A buy whose
+amount is unknown or zero never reaches the withdrawal gateway: the
+withdrawal row is written as failed and the purchase parked.
+
 For withdraw-immediately purchases the withdrawal is its own row
 (`tx_type: withdrawal`, `parent_transaction_id` -> the buy) carrying the
 address, chain, withdrawal id, fee and tx hash; the tax CSV reports them on

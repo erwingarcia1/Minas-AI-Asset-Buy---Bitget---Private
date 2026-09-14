@@ -591,6 +591,7 @@ class TransactionStats(TypedDict):
     average_purchase_usdt: float
     completed_count: int
     failed_count: int
+    needs_review_count: NotRequired[int]
     pending_count: int
     total_invested_usdt: float
     total_transactions: int

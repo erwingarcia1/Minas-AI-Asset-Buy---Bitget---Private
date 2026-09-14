@@ -88,6 +88,7 @@ class TransactionStats(BaseModel):
     completed_count: int
     failed_count: int
     pending_count: int
+    needs_review_count: int = 0   # attempts parked for a human (implausible or unreadable fill)
 
 
 # --------------------------------------------------------------------------

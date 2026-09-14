@@ -139,7 +139,13 @@ class ExchangeClientGateway:
                                            bitget_market.get_symbol_sync(purchase.crypto_symbol))
             client = _client_for(account)
             symbol = client.spot_symbol(purchase.crypto_symbol, "USDT")
-            return client.place_buy(symbol, purchase.amount_usd, client_oid, dry_run=dry_run)
+            reference = None
+            try:   # the price the fill will be judged against; best effort, never blocks the buy
+                reference = float(client.get_price(symbol))
+            except Exception as exc:
+                logger.warning("no reference price for %s before the buy: %s", symbol, exc)
+            placed = client.place_buy(symbol, purchase.amount_usd, client_oid, dry_run=dry_run)
+            return {**placed, "reference_price": reference}
         except Exception as exc:
             raise self._wrap(exc, "buy") from exc
 
@@ -269,6 +275,41 @@ async def find_due_purchases(db: AsyncSession, now: datetime, limit: int = BATCH
     return list(rows)
 
 
+def validate_fill(fill: dict, requested_usd: float, reference_price: Optional[float] = None) -> Optional[str]:
+    """Why a fill must NOT be recorded as a completed buy, or None when it is sane.
+
+    A fill is accepted only when it is marked filled, both the amount and the
+    cost are positive, the cost is within FILL_TOLERANCE_PCT of the amount
+    requested, the amount is within the tolerance of cost / price (price = the
+    reference read at execution when available, else the fill's own average),
+    and the fill is internally consistent (amount x average ~= cost). Zero,
+    partial and implausible fills are all rejected the same way.
+    """
+    tol = max(float(settings.fill_tolerance_pct), 0.0) / 100.0
+    if not fill.get("filled"):
+        return f"order is {fill.get('raw_status') or 'unknown'} on the exchange, not filled"
+    amount = float(fill.get("amount_crypto") or 0.0)
+    cost = float(fill.get("cost_usdt") or 0.0)
+    rate = fill.get("exchange_rate")
+    rate = float(rate) if rate not in (None, "", 0) else None
+    if amount <= 0:
+        return f"fill reports amount {amount:g} (status {fill.get('raw_status')})"
+    if cost <= 0:
+        return f"fill reports cost {cost:g} USDT for {amount:.8f} coins"
+    if requested_usd and abs(cost - requested_usd) > tol * requested_usd:
+        return (f"cost {cost:.2f} USDT is outside ±{tol * 100:g}% of the {requested_usd:.2f} USDT requested "
+                f"(partial fill?)")
+    price = reference_price if reference_price and reference_price > 0 else rate
+    if price:
+        expected = cost / price
+        if abs(amount - expected) > tol * expected:
+            return (f"amount {amount:.8f} is outside ±{tol * 100:g}% of the {expected:.8f} expected for "
+                    f"{cost:.2f} USDT at {price:.8g} ({'reference' if reference_price else 'fill'} price)")
+    if rate and abs(amount * rate - cost) > tol * cost:
+        return f"fill is inconsistent: {amount:.8f} x {rate:.8g} = {amount * rate:.2f}, cost reported {cost:.2f}"
+    return None
+
+
 def _record_fill(tx: PurchaseTransaction, fill: dict, now: datetime) -> None:
     tx.status = "success"
     tx.raw_status = fill.get("raw_status")
@@ -340,6 +381,12 @@ async def _reconcile_unresolved(db: AsyncSession, purchase: Purchase, account: A
         if state == "filled":
             logger.warning("purchase %s: earlier attempt %s (client_oid=%s) had FILLED on the exchange; "
                            "recording it, not buying again", purchase.id, old.id, old.client_oid)
+            problem = validate_fill(found["fill"], float(purchase.amount_usd))
+            if problem:
+                _needs_review(purchase, old, f"earlier order {old.client_oid} filled but the fill is implausible: {problem}", now)
+                events.append(("buy_needs_review", problem, old))
+                await db.commit()
+                return old
             _record_fill(old, found["fill"], now)
             _advance(purchase, now)
             await db.commit()
@@ -428,9 +475,11 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
         return tx
 
     # 3. place the order
+    reference_price = None
     try:
         placed = await asyncio.to_thread(gateway.place_buy, account, purchase, tx.client_oid, dry_run)
         tx.order_id = placed.get("order_id")
+        reference_price = placed.get("reference_price")
         await db.commit()
     except Exception as exc:
         # The order may or may not have reached the exchange: ask before deciding.
@@ -445,6 +494,13 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
         if found.get("state") == "filled":
             logger.warning("purchase %s: buy raised (%s) but order %s had filled; recording, not re-buying",
                            purchase.id, exc, tx.client_oid)
+            problem = validate_fill(found["fill"], float(purchase.amount_usd), reference_price)
+            if problem:
+                _needs_review(purchase, tx, f"order {tx.client_oid} filled but the fill is implausible: {problem}", now)
+                await db.commit()
+                events.append(("buy_needs_review", problem, tx))
+                await emit_all()
+                return tx
             _record_fill(tx, found["fill"], now)
             _advance(purchase, now)
             await db.commit()
@@ -477,10 +533,12 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
             events.append(("buy_needs_review", str(exc), tx))
             await emit_all()
             return tx
-        if not fill.get("filled"):
-            _needs_review(purchase, tx, f"order {tx.order_id} is {fill.get('raw_status')} on the exchange, not filled", now)
+        problem = validate_fill(fill, float(purchase.amount_usd), reference_price)
+        if problem:
+            # zero, partial, implausible or simply not filled: a human looks, nothing is recorded as bought
+            _needs_review(purchase, tx, f"order {tx.order_id}: {problem}", now)
             await db.commit()
-            events.append(("buy_needs_review", fill.get("raw_status"), tx))
+            events.append(("buy_needs_review", problem, tx))
             await emit_all()
             return tx
         _record_fill(tx, fill, now)
@@ -512,6 +570,19 @@ async def _withdraw_after_buy(db: AsyncSession, purchase: Purchase, account: API
                              order_id=buy.order_id, fill_price=buy.fill_price)
     db.add(wd)
     await db.commit()
+    if not (buy.amount_executed and buy.amount_executed > 0) or amount <= 0:
+        # Never hand an unknown or zero amount to the exchange: park it, no call is made.
+        wd.status = "failed"
+        wd.executed_at = now
+        wd.error_message = (f"withdrawal not attempted: the buy recorded amount {buy.amount_executed!r}"
+                            f"{' (nothing left after the trading fee)' if buy.amount_executed and amount <= 0 else ''}")[:500]
+        purchase.status = "withdrawal_failed"
+        purchase.next_execution = None
+        purchase.last_error = wd.error_message
+        await db.commit()
+        logger.error("purchase %s: %s", purchase.id, wd.error_message)
+        events.append(("withdrawal_failed", wd.error_message, wd))
+        return wd
     try:
         result = await asyncio.to_thread(gateway.withdraw, account, purchase, amount, wd.client_oid, dry_run)
         wd.status = "success"

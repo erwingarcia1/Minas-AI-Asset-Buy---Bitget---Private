@@ -526,6 +526,7 @@ export interface TransactionStats {
   average_purchase_usdt: number;
   completed_count: number;
   failed_count: number;
+  needs_review_count?: number;
   pending_count: number;
   total_invested_usdt: number;
   total_transactions: number;

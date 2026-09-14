@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     # withdrawal before changing.
     bitget_withdraw_fee_mode: str = os.getenv("BITGET_WITHDRAW_FEE_MODE", "exclusive").strip().lower() or "exclusive"
 
+    # A recorded fill must be within this percentage of what the cost implies at the
+    # execution price (and the cost within it of the amount requested); anything
+    # outside is parked as needs_review instead of recorded as a completed buy.
+    fill_tolerance_pct: float = float(os.getenv("FILL_TOLERANCE_PCT", "10") or 10)
+
     # Admin alert + Slack notice when more than this many emails were given up on in one hour.
     email_failure_alert_threshold: int = int(os.getenv("EMAIL_FAILURE_ALERT_THRESHOLD", "5") or 5)
 

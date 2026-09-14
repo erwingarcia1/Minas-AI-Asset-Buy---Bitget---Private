@@ -3013,6 +3013,11 @@
             "title": "Failed Count",
             "type": "integer"
           },
+          "needs_review_count": {
+            "default": 0,
+            "title": "Needs Review Count",
+            "type": "integer"
+          },
           "pending_count": {
             "title": "Pending Count",
             "type": "integer"

@@ -424,6 +424,13 @@ async def alerts(admin: User = Depends(require_admin),
 
     # -- failed Auto-Buy execution attempts in the last 24h (purchase_transactions) --
     from api.services import history
+    network_1h = await history.count_network_failures_since(db, now - timedelta(hours=1))
+    items.append(AlertItem(
+        name="exchange_unreachable",
+        severity="critical" if network_1h >= 5 else "warning" if network_1h >= 2 else "ok",
+        value=str(network_1h),
+        detail=("Buy attempts in the last hour that failed because the exchange could not be reached "
+                "(DNS, timeout, connection): missed buys the customer is emailed about; warning at 2, critical at 5")))
     failed_24h = await history.count_failed_since(db, now - timedelta(days=1))
     items.append(AlertItem(
         name="failed_transactions_24h",

@@ -194,7 +194,7 @@ async def test_alerts_snapshot(admin):
         items = (await c.get("/api/admin/alerts", headers=H)).json()
     names = {a["name"] for a in items}
     assert names == {"schedulers_paused", "autobuy_run", "autobuy_consecutive_failures",
-                     "failed_transactions_24h", "email_delivery_failures"}
+                     "failed_transactions_24h", "email_delivery_failures", "exchange_unreachable"}
     assert all(a["severity"] in ("ok", "warning", "critical") for a in items)
 
 
