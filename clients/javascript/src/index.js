@@ -75,10 +75,8 @@ export class AutoBuyClient {
 
   /** `POST /api/auth/logout` — revoke the refresh token and clear local state. */
   async logout() {
-    const refresh_token = this.tokens?.refresh_token;
-    if (refresh_token) {
-      await this.auth.logout({ refresh_token }).catch(() => undefined);
-    }
+    const csrf = this.tokens?.csrf_token;
+    await this.transport.request("POST", "/api/auth/logout", { auth: false, headers: csrf ? { "X-CSRF-Token": csrf } : {} }).catch(() => undefined);
     this.transport.setTokens(null);
   }
 

@@ -1,5 +1,7 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { bootstrapSession } from "@/api/client";
+import { purgeLegacyTokenStorage } from "@/store/authStore";
 import { ErrorBoundary, Loading, ProtectedRoute, PublicOnlyRoute } from "@/components/Common";
 import { MainContainer } from "@/components/Layout";
 
@@ -16,6 +18,9 @@ const Admin = lazy(() => import("@/pages/Admin"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
 export default function App() {
+  // Session bootstrap: drop any tokens an older build left in localStorage, then
+  // try the httpOnly refresh cookie once. Route guards wait for the answer.
+  useEffect(() => { purgeLegacyTokenStorage(); void bootstrapSession(); }, []);
   return (
     <ErrorBoundary>
       <BrowserRouter>

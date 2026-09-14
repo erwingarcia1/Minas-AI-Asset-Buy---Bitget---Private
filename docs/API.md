@@ -42,14 +42,28 @@ curl -s $BASE/api/dashboard/ -H "$AUTH"
 
 ## Authentication
 
-JWT bearer tokens. `POST /api/auth/login` returns an **access token**
-(30 min) and a **refresh token** (7 days, revocable):
+JWT bearer tokens. `POST /api/auth/login` answers `{access_token,
+token_type, expires_in, csrf_token}` and sets two cookies scoped to
+`/api/auth` with `SameSite=Lax` (and `Secure` outside development):
+`autobuy_refresh` (the 7-day revocable **refresh token**, `HttpOnly`, never
+in a response body) and `autobuy_csrf` (readable). The 30-minute **access
+token** must be kept in memory only.
 
 - Send `Authorization: Bearer <access_token>` on every protected call.
-- On 401, exchange the refresh token at `POST /api/auth/refresh` for a new pair.
-- `POST /api/auth/logout` revokes a refresh token immediately.
+- On 401 or page load, `POST /api/auth/refresh` with no body and the header
+  `X-CSRF-Token: <csrf cookie value>`; the browser sends the refresh cookie.
+  Both cookies are rotated and the previous refresh token is revoked.
+  401 = no valid cookie (sign in again), 403 `csrf_failed` = header missing
+  or mismatched.
+- `POST /api/auth/logout` (same CSRF header) revokes the refresh token
+  server-side and clears both cookies. Always 204.
 - `POST /api/auth/change-password` invalidates **every** token issued before it.
-- Refresh tokens are rejected as access tokens and vice versa.
+- Refresh tokens are rejected as access tokens and vice versa; a refresh
+  token posted in a body is ignored.
+- Same-origin only: the Vite dev server proxies `/api` to the API and nginx
+  does the same in production, so the cookies are first-party in both.
+  Non-browser SDK clients need a cookie jar (the Python client's httpx has
+  one; plain Node `fetch` does not and must log in again instead).
 
 ## Endpoints by module
 

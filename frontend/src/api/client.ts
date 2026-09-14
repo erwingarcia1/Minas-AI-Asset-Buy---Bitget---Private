@@ -15,7 +15,19 @@ export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: { "Content-Type": "application/json" },
   timeout: 20_000,
+  withCredentials: true,   // the refresh token is an httpOnly cookie on /api/auth
 });
+
+export const CSRF_HEADER = "X-CSRF-Token";
+const CSRF_COOKIE = "autobuy_csrf";
+
+/** The CSRF token: from the last login/refresh response, else the readable cookie. */
+export function csrfToken(): string | null {
+  const inMemory = useAuthStore.getState().csrfToken;
+  if (inMemory) return inMemory;
+  const m = typeof document !== "undefined" ? document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]*)`)) : null;
+  return m ? decodeURIComponent(m[1]) : null;
+}
 
 // ---- request: attach the bearer token ---------------------------------------
 api.interceptors.request.use((config) => {
@@ -28,15 +40,29 @@ api.interceptors.request.use((config) => {
 type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
 let refreshing: Promise<string> | null = null;
 
-async function refreshAccessToken(): Promise<string> {
-  const { refreshToken, setTokens } = useAuthStore.getState();
-  if (!refreshToken) throw new Error("no refresh token");
-  // Plain axios: must not go through the interceptor that brought us here.
-  const { data } = await axios.post<TokenResponse>(`${API_BASE_URL}/auth/refresh`, {
-    refresh_token: refreshToken,
+/** Silent refresh from the httpOnly cookie. Plain axios: must not go through the interceptor. */
+export async function refreshAccessToken(): Promise<string> {
+  const csrf = csrfToken();
+  const { data } = await axios.post<TokenResponse>(`${API_BASE_URL}/auth/refresh`, undefined, {
+    withCredentials: true,
+    headers: csrf ? { [CSRF_HEADER]: csrf } : {},
   });
-  setTokens(data);
+  useAuthStore.getState().setTokens(data);
   return data.access_token;
+}
+
+/** On page load: try the cookie once; mark the session anonymous when there is none. */
+export async function bootstrapSession(): Promise<boolean> {
+  try {
+    refreshing = refreshing ?? refreshAccessToken();
+    await refreshing;
+    return true;
+  } catch {
+    useAuthStore.getState().setAnonymous();
+    return false;
+  } finally {
+    refreshing = null;
+  }
 }
 
 api.interceptors.response.use(undefined, async (error: AxiosError<ApiErrorBody>) => {
@@ -45,18 +71,15 @@ api.interceptors.response.use(undefined, async (error: AxiosError<ApiErrorBody>)
   const isAuthRoute = original?.url?.startsWith("/auth/");
 
   if (status === 401 && original && !original._retried && !isAuthRoute) {
-    const { refreshToken } = useAuthStore.getState();
-    if (refreshToken) {
-      try {
-        refreshing = refreshing ?? refreshAccessToken();
-        const token = await refreshing;
-        refreshing = null;
-        original._retried = true;
-        original.headers.Authorization = `Bearer ${token}`;
-        return api.request(original);
-      } catch {
-        refreshing = null;
-      }
+    try {
+      refreshing = refreshing ?? refreshAccessToken();
+      const token = await refreshing;
+      refreshing = null;
+      original._retried = true;
+      original.headers.Authorization = `Bearer ${token}`;
+      return api.request(original);
+    } catch {
+      refreshing = null;
     }
     useAuthStore.getState().logout("Your session has expired. Please sign in again.");
   }

@@ -1,10 +1,12 @@
 // Request/response shapes mirrored from the AutoBuy API OpenAPI spec.
 
+/** Login / refresh response. The refresh token never appears here: it lives in an
+ *  httpOnly cookie; `csrf_token` must be sent as X-CSRF-Token on refresh and logout. */
 export interface TokenResponse {
   access_token: string;
-  refresh_token: string;
   token_type: string;
   expires_in: number;
+  csrf_token: string;
 }
 
 export interface UserProfile {

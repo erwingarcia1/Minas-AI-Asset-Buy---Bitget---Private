@@ -240,10 +240,6 @@ export interface LoginRequest {
   password: string;
 }
 
-export interface LogoutRequest {
-  refresh_token: string;
-}
-
 export interface NotificationRow {
   channel: string;
   created_at: string;
@@ -403,10 +399,6 @@ export interface RecurringResponse {
   schedules: RecurringProjection[];
 }
 
-export interface RefreshRequest {
-  refresh_token: string;
-}
-
 export interface RegisterRequest {
   email: string;
   password: string;
@@ -463,10 +455,11 @@ export interface TimelineResponse {
   timeline: TimelinePoint[];
 }
 
+/** The access token is returned in the body and must be kept in memory only. The refresh token never appears in a body: it travels in an httpOnly cookie scoped to /api/auth, and `csrf_token` (also set as a readable cookie) must be echoed in the X-CSRF-Token header on /refresh and /logout. */
 export interface TokenResponse {
   access_token: string;
+  csrf_token: string;
   expires_in: number;
-  refresh_token: string;
   token_type?: string;
 }
 

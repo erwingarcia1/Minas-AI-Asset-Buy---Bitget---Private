@@ -74,9 +74,11 @@ async def test_verify_endpoint(client, user):
 
 
 async def test_refresh_with_invalid_token_401(client):
+    from api.routes.auth import CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE
     async with client as c:
-        r = await c.post("/api/auth/refresh", json={"refresh_token": "junk"})
-    assert r.status_code == 401
+        r = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: "junk", CSRF_COOKIE: "c"}, headers={CSRF_HEADER: "c"})
+        assert r.status_code == 401
+        assert (await c.post("/api/auth/refresh", json={"refresh_token": "junk"})).status_code == 403, "no CSRF header, no cookie: refused before anything else"
 
 
 async def test_expired_token_rejected(client, user):

@@ -20,6 +20,7 @@ from api.services.rate_limit import limiter, is_locked_out, register_failed_logi
 
 import hashlib
 import logging
+import secrets
 
 from api.integrations import resend
 from api.integrations.resend import ResendError
@@ -105,10 +106,14 @@ class UserOut(UTCModel):
 
 
 class TokenResponse(BaseModel):
+    """The access token is returned in the body and must be kept in memory only.
+    The refresh token never appears in a body: it travels in an httpOnly cookie
+    scoped to /api/auth, and `csrf_token` (also set as a readable cookie) must
+    be echoed in the X-CSRF-Token header on /refresh and /logout."""
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    csrf_token: str
 
 
 class VerifyRequest(BaseModel):
@@ -118,10 +123,6 @@ class VerifyRequest(BaseModel):
 class VerifyResponse(BaseModel):
     valid: bool
     user_id: Optional[str] = None
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
 
 
 # --------------------------------------------------------------------------
@@ -160,13 +161,61 @@ async def _revoke(jti: str, exp_ts: int) -> None:
     await get_redis().setex(REVOKED_PREFIX + jti, ttl, "1")
 
 
-def _token_pair(user_id: str) -> TokenResponse:
+# --------------------------------------------------------------------------
+# Session cookies
+# --------------------------------------------------------------------------
+# The refresh token lives in an httpOnly cookie (JavaScript cannot read it, so
+# an XSS cannot steal a long-lived credential); the CSRF token lives in a
+# readable cookie and must be echoed in X-CSRF-Token on the endpoints that use
+# the refresh cookie (double-submit: a cross-site form cannot read our cookie,
+# so it cannot forge the header). SameSite=Lax keeps the cookie off cross-site
+# POSTs as well. Both cookies are scoped to /api/auth and are only ever sent
+# same-origin: the Vite dev server proxies /api to the API, nginx does the
+# same in production. `Secure` is set outside development.
+
+REFRESH_COOKIE = "autobuy_refresh"
+CSRF_COOKIE = "autobuy_csrf"
+CSRF_HEADER = "X-CSRF-Token"
+COOKIE_PATH = "/api/auth"
+
+
+def _cookie_secure() -> bool:
+    return (settings.api_env or "").lower() not in ("development", "dev", "test", "testing", "local")
+
+
+def set_session_cookies(response: Response, refresh_token: str, csrf_token: str) -> None:
+    max_age = settings.refresh_token_expire_days * 24 * 3600
+    response.set_cookie(REFRESH_COOKIE, refresh_token, max_age=max_age, path=COOKIE_PATH,
+                        httponly=True, secure=_cookie_secure(), samesite="lax")
+    response.set_cookie(CSRF_COOKIE, csrf_token, max_age=max_age, path=COOKIE_PATH,
+                        httponly=False, secure=_cookie_secure(), samesite="lax")
+
+
+def clear_session_cookies(response: Response) -> None:
+    for name in (REFRESH_COOKIE, CSRF_COOKIE):
+        response.delete_cookie(name, path=COOKIE_PATH, httponly=name == REFRESH_COOKIE,
+                               secure=_cookie_secure(), samesite="lax")
+
+
+def _require_csrf(request: Request) -> None:
+    cookie = request.cookies.get(CSRF_COOKIE)
+    header = request.headers.get(CSRF_HEADER)
+    if not cookie or not header or not secrets.compare_digest(cookie, header):
+        raise HTTPException(status_code=403, detail={"error": "csrf_failed",
+                                                    "details": {"message": f"Missing or mismatched {CSRF_HEADER} header"}})
+
+
+def _start_session(response: Response, user_id: str) -> TokenResponse:
+    """Access token for the body (memory only) + refresh/CSRF cookies."""
     access: Token = create_access_token(user_id)
-    return TokenResponse(
-        access_token=access.access_token,
-        refresh_token=_create_refresh_token(user_id),
-        expires_in=access.expires_in,
-    )
+    csrf = secrets.token_urlsafe(32)
+    set_session_cookies(response, _create_refresh_token(user_id), csrf)
+    return TokenResponse(access_token=access.access_token, expires_in=access.expires_in, csrf_token=csrf)
+
+
+def _token_pair(user_id: str) -> TokenResponse:   # kept for callers/tests that only need an access token
+    access: Token = create_access_token(user_id)
+    return TokenResponse(access_token=access.access_token, expires_in=access.expires_in, csrf_token="")
 
 
 # --------------------------------------------------------------------------
@@ -195,7 +244,9 @@ async def register(request: Request, response: Response, payload: RegisterReques
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("5/minute")
 async def login(request: Request, response: Response, payload: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Authenticate with email/password and receive access + refresh tokens."""
+    """Authenticate with email/password. The body carries the short-lived access
+    token (keep it in memory) and a CSRF token; the refresh token is set as an
+    httpOnly cookie scoped to /api/auth."""
     locked_for = await is_locked_out(payload.email)
     if locked_for:
         raise HTTPException(
@@ -214,7 +265,7 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
             headers={"WWW-Authenticate": "Bearer"},
         )
     await clear_failed_logins(payload.email)
-    return _token_pair(str(user.id))
+    return _start_session(response, str(user.id))
 
 
 @router.post("/verify", response_model=VerifyResponse)
@@ -229,18 +280,24 @@ async def verify(request: Request, response: Response, payload: VerifyRequest):
 
 @router.post("/refresh", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def refresh(request: Request, response: Response, payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    """Exchange a valid refresh token for a new access + refresh token pair."""
+async def refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    """Silent session refresh: needs the refresh cookie and the X-CSRF-Token
+    header matching the CSRF cookie. Answers a new access token and rotates
+    both cookies (the previous refresh token is revoked). 401 without a valid
+    cookie, 403 without a valid CSRF header."""
     invalid = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired refresh token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    _require_csrf(request)
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if not raw:
+        raise invalid
     try:
-        decoded = jwt.decode(
-            payload.refresh_token, settings.secret_key, algorithms=[settings.algorithm]
-        )
+        decoded = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
     except JWTError:
+        clear_session_cookies(response)
         raise invalid
     if decoded.get("type") != "refresh" or not decoded.get("sub"):
         raise invalid
@@ -261,26 +318,34 @@ async def refresh(request: Request, response: Response, payload: RefreshRequest,
     if user.password_changed_at is not None and decoded.get("iat") is not None:
         issued = datetime.fromtimestamp(decoded["iat"], tz=timezone.utc)
         if issued < user.password_changed_at:
+            clear_session_cookies(response)
             raise invalid
-    return _token_pair(str(user_id))
+    if jti:   # rotation: the cookie just used cannot be replayed
+        try:
+            await _revoke(jti, int(decoded.get("exp", 0)))
+        except Exception:
+            logger.warning("could not revoke the rotated refresh token (Redis down)")
+    return _start_session(response, str(user_id))
 
 
-class LogoutRequest(BaseModel):
-    refresh_token: str
-
-
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 @limiter.limit("10/minute")
-async def logout(request: Request, response: Response, payload: LogoutRequest):
-    """Revoke a refresh token. The short-lived access token simply expires."""
-    try:
-        decoded = jwt.decode(
-            payload.refresh_token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    if decoded.get("type") != "refresh" or not decoded.get("jti"):
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    await _revoke(decoded["jti"], int(decoded.get("exp", 0)))
+async def logout(request: Request, response: Response):
+    """Sign out: revoke the refresh token from the cookie server-side and clear
+    both session cookies. Needs the X-CSRF-Token header. The short-lived access
+    token simply expires. Always 204, even when no cookie was sent."""
+    _require_csrf(request)
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if raw:
+        try:
+            decoded = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
+            if decoded.get("type") == "refresh" and decoded.get("jti"):
+                await _revoke(decoded["jti"], int(decoded.get("exp", 0)))
+        except JWTError:
+            pass   # nothing valid to revoke; the cookie is cleared anyway
+    out = Response(status_code=status.HTTP_204_NO_CONTENT)
+    clear_session_cookies(out)
+    return out
 
 
 class ChangePasswordRequest(BaseModel):

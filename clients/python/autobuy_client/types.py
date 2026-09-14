@@ -278,11 +278,6 @@ class LoginRequest(TypedDict):
     password: str
 
 
-class LogoutRequest(TypedDict):
-    """LogoutRequest."""
-    refresh_token: str
-
-
 class NotificationRow(TypedDict):
     """NotificationRow."""
     channel: str
@@ -456,11 +451,6 @@ class RecurringResponse(TypedDict):
     schedules: List[RecurringProjection]
 
 
-class RefreshRequest(TypedDict):
-    """RefreshRequest."""
-    refresh_token: str
-
-
 class RegisterRequest(TypedDict):
     """RegisterRequest."""
     email: str
@@ -528,10 +518,10 @@ class TimelineResponse(TypedDict):
 
 
 class TokenResponse(TypedDict):
-    """TokenResponse."""
+    """The access token is returned in the body and must be kept in memory only. The refresh token never appears in a body: it travels in an httpOnly cookie scoped to /api/auth, and `csrf_token` (also set as a readable cookie) must be echoed in the X-CSRF-Token header on /refresh and /logout."""
     access_token: str
+    csrf_token: str
     expires_in: int
-    refresh_token: str
     token_type: NotRequired[str]
 
 

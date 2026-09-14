@@ -7,11 +7,22 @@
  * browsers, Deno, Bun); a custom `fetch` can be injected for tests.
  */
 
+/** Login/refresh body. The refresh token is an httpOnly cookie (never in the body);
+ *  `csrf_token` must be echoed as X-CSRF-Token on /refresh and /logout. */
 export interface TokenPair {
   access_token: string;
-  refresh_token: string;
   token_type?: string;
   expires_in?: number;
+  csrf_token?: string;
+}
+
+export const CSRF_HEADER = "X-CSRF-Token";
+const CSRF_COOKIE = "autobuy_csrf";
+
+function csrfFromDocumentCookie(): string | undefined {
+  const doc = (globalThis as { document?: { cookie?: string } }).document;
+  const m = doc?.cookie?.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : undefined;
 }
 
 export interface RequestOptions {
@@ -130,12 +141,14 @@ export class FetchTransport implements HttpTransport {
     return this.refreshing;
   }
 
+  /** Browsers send the httpOnly refresh cookie themselves (`credentials: "include"`);
+   *  runtimes without a cookie jar (plain Node fetch) cannot refresh and must log in again. */
   private async doRefresh(): Promise<TokenPair> {
-    const refresh_token = this.tokens?.refresh_token;
-    if (!refresh_token) throw new Error("No refresh token available");
+    const csrf = this.tokens?.csrf_token ?? csrfFromDocumentCookie();
+    if (!csrf) throw new Error("No session cookie available: log in again");
     const pair = await this.request<TokenPair>("POST", this.refreshPath, {
-      body: { refresh_token },
       auth: false,
+      headers: { [CSRF_HEADER]: csrf },
     });
     this.setTokens(pair);
     return pair;
@@ -144,7 +157,7 @@ export class FetchTransport implements HttpTransport {
   async request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
     const auth = opts.auth ?? true;
     const first = await this.send(method, path, opts, auth);
-    if (first.status === 401 && auth && this.tokens?.refresh_token) {
+    if (first.status === 401 && auth && (this.tokens?.csrf_token || csrfFromDocumentCookie())) {
       try {
         await this.refresh();
       } catch {
@@ -179,7 +192,7 @@ export class FetchTransport implements HttpTransport {
       headers["Content-Type"] = "application/json";
       body = JSON.stringify(opts.body);
     }
-    return this.fetchImpl(this.buildUrl(path, opts.query), { method, headers, body, signal: opts.signal });
+    return this.fetchImpl(this.buildUrl(path, opts.query), { method, headers, body, signal: opts.signal, credentials: "include" });
   }
 
   private async finish<T>(res: Response, method: string, path: string): Promise<T> {

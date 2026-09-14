@@ -1,3 +1,4 @@
+import { CSRF_HEADER } from "./http";
 /**
  * AutoBuy Crypto API — TypeScript client.
  *
@@ -75,12 +76,10 @@ export class AutoBuyClient {
     return this.transport.refresh();
   }
 
-  /** `POST /api/auth/logout` — revoke the refresh token and clear local state. */
+  /** `POST /api/auth/logout` — revoke the refresh cookie server-side and clear local state. */
   async logout(): Promise<void> {
-    const refresh_token = this.tokens?.refresh_token;
-    if (refresh_token) {
-      await this.api.auth.logout({ refresh_token }).catch(() => undefined);
-    }
+    const csrf = this.tokens?.csrf_token;
+    await this.transport.request("POST", "/api/auth/logout", { auth: false, headers: csrf ? { [CSRF_HEADER]: csrf } : {} }).catch(() => undefined);
     this.transport.setTokens(null);
   }
 

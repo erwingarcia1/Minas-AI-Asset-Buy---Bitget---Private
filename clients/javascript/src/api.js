@@ -227,20 +227,18 @@ export class AuthApi {
 
   /**
    * Logout — `POST /api/auth/logout`
-   * @param {import('./types.js').LogoutRequest} body
    * @returns {Promise<unknown>}
    */
-  logout(body) {
-    return this.http.request("POST", "/api/auth/logout", { body, auth: false });
+  logout() {
+    return this.http.request("POST", "/api/auth/logout", { auth: false });
   }
 
   /**
    * Refresh — `POST /api/auth/refresh`
-   * @param {import('./types.js').RefreshRequest} body
    * @returns {Promise<import('./types.js').TokenResponse>}
    */
-  refresh(body) {
-    return this.http.request("POST", "/api/auth/refresh", { body, auth: false });
+  refresh() {
+    return this.http.request("POST", "/api/auth/refresh", { auth: false });
   }
 
   /**

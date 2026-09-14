@@ -15,7 +15,10 @@ import httpx
 
 from .errors import ApiError, AuthenticationError, RateLimitError, ValidationError
 
-TokenPair = Dict[str, Any]  # {"access_token", "refresh_token", "token_type", "expires_in"}
+TokenPair = Dict[str, Any]  # {"access_token", "token_type", "expires_in", "csrf_token"}
+CSRF_COOKIE = "autobuy_csrf"
+CSRF_HEADER = "X-CSRF-Token"
+REFRESH_COOKIE = "autobuy_refresh"
 TokensCallback = Callable[[Optional[TokenPair]], None]
 
 DEFAULT_REFRESH_PATH = "/api/auth/refresh"
@@ -81,9 +84,16 @@ class _BaseTransport:
         if self._on_tokens_changed:
             self._on_tokens_changed(self._tokens)
 
+    # The refresh token is an httpOnly cookie set by /login; httpx keeps it in
+    # the client's cookie jar. /refresh and /logout need the CSRF cookie value
+    # echoed in the X-CSRF-Token header.
     @property
-    def _refresh_token(self) -> Optional[str]:
-        return (self._tokens or {}).get("refresh_token")
+    def _can_refresh(self) -> bool:
+        return bool(self._client.cookies.get(REFRESH_COOKIE))
+
+    def _csrf_headers(self) -> Dict[str, str]:
+        csrf = (self._tokens or {}).get("csrf_token") or self._client.cookies.get(CSRF_COOKIE)
+        return {CSRF_HEADER: csrf} if csrf else {}
 
     # -- request building -----------------------------------------------------
     def _prepare(self, method: str, path: str, *, body: Any, query: Optional[Mapping[str, Any]],
@@ -119,17 +129,16 @@ class SyncTransport(_BaseTransport):
     def refresh(self) -> TokenPair:
         """Exchange the refresh token for a new pair (thread-safe)."""
         with self._lock:
-            rt = self._refresh_token
-            if not rt:
-                raise AuthenticationError(401, "POST", self._refresh_path, "No refresh token available", "", {})
-            pair = self.request("POST", self._refresh_path, body={"refresh_token": rt}, auth=False)
+            if not self._can_refresh:
+                raise AuthenticationError(401, "POST", self._refresh_path, "No refresh cookie available", "", {})
+            pair = self.request("POST", self._refresh_path, auth=False, headers=self._csrf_headers())
             self.set_tokens(pair)
             return pair
 
     def request(self, method: str, path: str, *, body: Any = None, query: Optional[Mapping[str, Any]] = None,
                 auth: bool = True, headers: Optional[Mapping[str, str]] = None) -> Any:
         res = self._client.request(**self._prepare(method, path, body=body, query=query, auth=auth, headers=headers))
-        if res.status_code == 401 and auth and self._refresh_token:
+        if res.status_code == 401 and auth and self._can_refresh:
             try:
                 self.refresh()
             except ApiError:
@@ -166,17 +175,16 @@ class AsyncTransport(_BaseTransport):
         return await self._refreshing
 
     async def _do_refresh(self) -> TokenPair:
-        rt = self._refresh_token
-        if not rt:
-            raise AuthenticationError(401, "POST", self._refresh_path, "No refresh token available", "", {})
-        pair = await self.request("POST", self._refresh_path, body={"refresh_token": rt}, auth=False)
+        if not self._can_refresh:
+            raise AuthenticationError(401, "POST", self._refresh_path, "No refresh cookie available", "", {})
+        pair = await self.request("POST", self._refresh_path, auth=False, headers=self._csrf_headers())
         self.set_tokens(pair)
         return pair
 
     async def request(self, method: str, path: str, *, body: Any = None, query: Optional[Mapping[str, Any]] = None,
                       auth: bool = True, headers: Optional[Mapping[str, str]] = None) -> Any:
         res = await self._client.request(**self._prepare(method, path, body=body, query=query, auth=auth, headers=headers))
-        if res.status_code == 401 and auth and self._refresh_token:
+        if res.status_code == 401 and auth and self._can_refresh:
             try:
                 await self.refresh()
             except ApiError:

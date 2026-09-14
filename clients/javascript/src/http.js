@@ -6,6 +6,13 @@
  */
 
 /** Any non-2xx response. `detail` is the parsed JSON `detail`, `body` the raw text. */
+export const CSRF_HEADER = "X-CSRF-Token";
+const CSRF_COOKIE = "autobuy_csrf";
+function csrfFromDocumentCookie() {
+  const m = globalThis.document?.cookie?.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : undefined;
+}
+
 export class ApiError extends Error {
   /**
    * @param {number} status
@@ -101,10 +108,12 @@ export class FetchTransport {
     return this._refreshing;
   }
 
+  /** The refresh token is an httpOnly cookie: browsers send it themselves (credentials: "include");
+   *  runtimes without a cookie jar cannot refresh and must log in again. */
   async _doRefresh() {
-    const refresh_token = this._tokens?.refresh_token;
-    if (!refresh_token) throw new Error("No refresh token available");
-    const pair = await this.request("POST", this._refreshPath, { body: { refresh_token }, auth: false });
+    const csrf = this._tokens?.csrf_token ?? csrfFromDocumentCookie();
+    if (!csrf) throw new Error("No session cookie available: log in again");
+    const pair = await this.request("POST", this._refreshPath, { auth: false, headers: { [CSRF_HEADER]: csrf } });
     this.setTokens(pair);
     return pair;
   }
@@ -118,7 +127,7 @@ export class FetchTransport {
   async request(method, path, opts = {}) {
     const auth = opts.auth ?? true;
     const first = await this._send(method, path, opts, auth);
-    if (first.status === 401 && auth && this._tokens?.refresh_token) {
+    if (first.status === 401 && auth && (this._tokens?.csrf_token || csrfFromDocumentCookie())) {
       try {
         await this.refresh();
       } catch {
@@ -156,7 +165,7 @@ export class FetchTransport {
       headers["Content-Type"] = "application/json";
       body = JSON.stringify(opts.body);
     }
-    return this._fetch(this._buildUrl(path, opts.query), { method, headers, body, signal: opts.signal });
+    return this._fetch(this._buildUrl(path, opts.query), { method, headers, body, signal: opts.signal, credentials: "include" });
   }
 
   /** @param {Response} res @param {string} method @param {string} path */

@@ -28,7 +28,6 @@ from .types import (
     KycOverride,
     LiftWalletHold,
     LoginRequest,
-    LogoutRequest,
     PerformanceResponse,
     PlatformStats,
     PreferencesPayload,
@@ -41,7 +40,6 @@ from .types import (
     PurchaseUpdateRequest,
     QuickStats,
     RecurringResponse,
-    RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
     ResetTokenRequest,
@@ -282,13 +280,13 @@ class AuthApi:
         """Login — ``POST /api/auth/login``."""
         return self._http.request("POST", "/api/auth/login", auth=False, body=body)
 
-    def logout(self, body: LogoutRequest) -> Any:
+    def logout(self) -> Any:
         """Logout — ``POST /api/auth/logout``."""
-        return self._http.request("POST", "/api/auth/logout", auth=False, body=body)
+        return self._http.request("POST", "/api/auth/logout", auth=False)
 
-    def refresh(self, body: RefreshRequest) -> TokenResponse:
+    def refresh(self) -> TokenResponse:
         """Refresh — ``POST /api/auth/refresh``."""
-        return self._http.request("POST", "/api/auth/refresh", auth=False, body=body)
+        return self._http.request("POST", "/api/auth/refresh", auth=False)
 
     def register(self, body: RegisterRequest) -> UserOut:
         """Register — ``POST /api/auth/register``."""
@@ -325,13 +323,13 @@ class AsyncAuthApi:
         """Login — ``POST /api/auth/login``."""
         return await self._http.request("POST", "/api/auth/login", auth=False, body=body)
 
-    async def logout(self, body: LogoutRequest) -> Any:
+    async def logout(self) -> Any:
         """Logout — ``POST /api/auth/logout``."""
-        return await self._http.request("POST", "/api/auth/logout", auth=False, body=body)
+        return await self._http.request("POST", "/api/auth/logout", auth=False)
 
-    async def refresh(self, body: RefreshRequest) -> TokenResponse:
+    async def refresh(self) -> TokenResponse:
         """Refresh — ``POST /api/auth/refresh``."""
-        return await self._http.request("POST", "/api/auth/refresh", auth=False, body=body)
+        return await self._http.request("POST", "/api/auth/refresh", auth=False)
 
     async def register(self, body: RegisterRequest) -> UserOut:
         """Register — ``POST /api/auth/register``."""

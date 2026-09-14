@@ -92,13 +92,11 @@ class AutoBuyClient:
         return self.transport.refresh()
 
     def logout(self) -> None:
-        """``POST /api/auth/logout`` — revoke the refresh token and clear local state."""
-        rt = (self.tokens or {}).get("refresh_token")
-        if rt:
-            try:
-                self.auth.logout({"refresh_token": rt})
-            except ApiError:
-                pass
+        """``POST /api/auth/logout`` — revoke the refresh cookie server-side and clear local state."""
+        try:
+            self.transport.request("POST", "/api/auth/logout", auth=False, headers=self.transport._csrf_headers())
+        except ApiError:
+            pass
         self.transport.set_tokens(None)
 
     def me(self) -> UserProfile:
@@ -164,12 +162,10 @@ class AsyncAutoBuyClient:
         return await self.transport.refresh()
 
     async def logout(self) -> None:
-        rt = (self.tokens or {}).get("refresh_token")
-        if rt:
-            try:
-                await self.auth.logout({"refresh_token": rt})
-            except ApiError:
-                pass
+        try:
+            await self.transport.request("POST", "/api/auth/logout", auth=False, headers=self.transport._csrf_headers())
+        except ApiError:
+            pass
         self.transport.set_tokens(None)
 
     async def me(self) -> UserProfile:

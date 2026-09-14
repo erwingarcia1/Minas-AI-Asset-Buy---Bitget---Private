@@ -25,7 +25,6 @@ import type {
   KycOverride,
   LiftWalletHold,
   LoginRequest,
-  LogoutRequest,
   PerformanceResponse,
   PlatformStats,
   PreferencesPayload,
@@ -38,7 +37,6 @@ import type {
   PurchaseUpdateRequest,
   QuickStats,
   RecurringResponse,
-  RefreshRequest,
   RegisterRequest,
   ResetPasswordRequest,
   ResetTokenRequest,
@@ -199,13 +197,13 @@ export class AuthApi {
   }
 
   /** Logout — `POST /api/auth/logout` */
-  logout(body: LogoutRequest): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/auth/logout", { body, auth: false });
+  logout(): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/auth/logout", { auth: false });
   }
 
   /** Refresh — `POST /api/auth/refresh` */
-  refresh(body: RefreshRequest): Promise<TokenResponse> {
-    return this.http.request<TokenResponse>("POST", "/api/auth/refresh", { body, auth: false });
+  refresh(): Promise<TokenResponse> {
+    return this.http.request<TokenResponse>("POST", "/api/auth/refresh", { auth: false });
   }
 
   /** Register — `POST /api/auth/register` */

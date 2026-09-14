@@ -49,21 +49,22 @@ async def test_init_db_skipped_in_production(monkeypatch):
 # ---------------------------------------------------------------- auth refresh
 
 async def test_refresh_happy_path_rotates_tokens(client, user):
-    from api.routes.auth import _create_refresh_token
+    from api.routes.auth import CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE, _create_refresh_token
     refresh = _create_refresh_token(str(user.id))
     async with client as c:
-        r = await c.post("/api/auth/refresh", json={"refresh_token": refresh})
+        r = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: refresh, CSRF_COOKIE: "c1"}, headers={CSRF_HEADER: "c1"})
     assert r.status_code == 200
     body = r.json()
-    assert body["access_token"] and body["refresh_token"]
+    assert body["access_token"] and body["csrf_token"] and "refresh_token" not in body
+    assert r.cookies.get(REFRESH_COOKIE) not in (None, refresh), "rotated"
 
 
 async def test_refresh_for_deleted_user_401(client):
-    from api.routes.auth import _create_refresh_token
+    from api.routes.auth import CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE, _create_refresh_token
     refresh = _create_refresh_token(str(uuid.uuid4()))
     async with client as c:
-        assert (await c.post("/api/auth/refresh",
-                             json={"refresh_token": refresh})).status_code == 401
+        assert (await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: refresh, CSRF_COOKIE: "c1"},
+                             headers={CSRF_HEADER: "c1"})).status_code == 401
 
 
 async def test_token_without_sub_and_bad_uuid_rejected(client, user):

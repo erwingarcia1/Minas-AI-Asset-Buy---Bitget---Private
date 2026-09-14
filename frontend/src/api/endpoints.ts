@@ -1,4 +1,4 @@
-import { api } from "./client";
+import { api, CSRF_HEADER, csrfToken } from "./client";
 import type {
   AdminAlert, AdminStats, AdminTxRow, AdminUserRow, ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate,
   AutoBuyPurchaseCreated, AutoBuyPurchaseUpdate, AutoBuyTransaction, CoinMarket, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
@@ -14,9 +14,10 @@ export const authAPI = {
     data<UserProfile>(api.post("/auth/register", { email, password })),
   login: (email: string, password: string) =>
     data<TokenResponse>(api.post("/auth/login", { email, password })),
-  refresh: (refresh_token: string) =>
-    data<TokenResponse>(api.post("/auth/refresh", { refresh_token })),
-  logout: (refresh_token: string) => api.post("/auth/logout", { refresh_token }),
+  /** From the httpOnly cookie; the CSRF header is added here. */
+  refresh: () => data<TokenResponse>(api.post("/auth/refresh", undefined, { headers: { [CSRF_HEADER]: csrfToken() ?? "" } })),
+  /** Revokes the refresh cookie server-side and clears it. */
+  logout: () => api.post("/auth/logout", undefined, { headers: { [CSRF_HEADER]: csrfToken() ?? "" } }),
   changePassword: (current_password: string, new_password: string) =>
     api.post("/auth/change-password", { current_password, new_password }),
   /** Always resolves `{sent: true}`; the API never reveals whether the email has an account. */

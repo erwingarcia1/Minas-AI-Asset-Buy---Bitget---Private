@@ -1236,19 +1236,6 @@
         "title": "LoginRequest",
         "type": "object"
       },
-      "LogoutRequest": {
-        "properties": {
-          "refresh_token": {
-            "title": "Refresh Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "refresh_token"
-        ],
-        "title": "LogoutRequest",
-        "type": "object"
-      },
       "NotificationRow": {
         "properties": {
           "channel": {
@@ -2258,19 +2245,6 @@
         "title": "RecurringResponse",
         "type": "object"
       },
-      "RefreshRequest": {
-        "properties": {
-          "refresh_token": {
-            "title": "Refresh Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "refresh_token"
-        ],
-        "title": "RefreshRequest",
-        "type": "object"
-      },
       "RegisterRequest": {
         "properties": {
           "email": {
@@ -2529,18 +2503,19 @@
         "type": "object"
       },
       "TokenResponse": {
+        "description": "The access token is returned in the body and must be kept in memory only.\nThe refresh token never appears in a body: it travels in an httpOnly cookie\nscoped to /api/auth, and `csrf_token` (also set as a readable cookie) must\nbe echoed in the X-CSRF-Token header on /refresh and /logout.",
         "properties": {
           "access_token": {
             "title": "Access Token",
             "type": "string"
           },
+          "csrf_token": {
+            "title": "Csrf Token",
+            "type": "string"
+          },
           "expires_in": {
             "title": "Expires In",
             "type": "integer"
-          },
-          "refresh_token": {
-            "title": "Refresh Token",
-            "type": "string"
           },
           "token_type": {
             "default": "bearer",
@@ -2550,8 +2525,8 @@
         },
         "required": [
           "access_token",
-          "refresh_token",
-          "expires_in"
+          "expires_in",
+          "csrf_token"
         ],
         "title": "TokenResponse",
         "type": "object"
@@ -4579,7 +4554,7 @@
     },
     "/api/auth/login": {
       "post": {
-        "description": "Authenticate with email/password and receive access + refresh tokens.",
+        "description": "Authenticate with email/password. The body carries the short-lived access\ntoken (keep it in memory) and a CSRF token; the refresh token is set as an\nhttpOnly cookie scoped to /api/auth.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -4621,31 +4596,11 @@
     },
     "/api/auth/logout": {
       "post": {
-        "description": "Revoke a refresh token. The short-lived access token simply expires.",
+        "description": "Sign out: revoke the refresh token from the cookie server-side and clear\nboth session cookies. Needs the X-CSRF-Token header. The short-lived access\ntoken simply expires. Always 204, even when no cookie was sent.",
         "operationId": "logout_api_auth_logout_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LogoutRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Logout",
@@ -4656,18 +4611,8 @@
     },
     "/api/auth/refresh": {
       "post": {
-        "description": "Exchange a valid refresh token for a new access + refresh token pair.",
+        "description": "Silent session refresh: needs the refresh cookie and the X-CSRF-Token\nheader matching the CSRF cookie. Answers a new access token and rotates\nboth cookies (the previous refresh token is revoked). 401 without a valid\ncookie, 403 without a valid CSRF header.",
         "operationId": "refresh_api_auth_refresh_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -4678,16 +4623,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Refresh",

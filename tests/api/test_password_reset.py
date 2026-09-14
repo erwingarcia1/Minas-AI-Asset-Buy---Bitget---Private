@@ -73,6 +73,8 @@ async def test_reset_token_cannot_be_used_as_a_login(client, account):
 async def test_reset_password_flow(client, db, account, sent):
     async with client as c:
         old_session = (await c.post("/api/auth/login", json={"email": account.email, "password": OLD})).json()
+        from api.routes.auth import CSRF_COOKIE, REFRESH_COOKIE
+        old_refresh = c.cookies[REFRESH_COOKIE]
         assert (await c.get("/api/user/profile", headers={"Authorization": f"Bearer {old_session['access_token']}"})).status_code == 200
         await c.post("/api/auth/forgot-password", json={"email": account.email})
         token = link_token(sent[0])
@@ -84,7 +86,10 @@ async def test_reset_password_flow(client, db, account, sent):
         assert (await c.post("/api/auth/login", json={"email": account.email, "password": OLD})).status_code == 401
         # every session issued before the reset is signed out
         assert (await c.get("/api/user/profile", headers={"Authorization": f"Bearer {old_session['access_token']}"})).status_code == 401
-        assert (await c.post("/api/auth/refresh", json={"refresh_token": old_session["refresh_token"]})).status_code == 401
+        from api.routes.auth import CSRF_HEADER
+        assert (await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: old_refresh, CSRF_COOKIE: old_session["csrf_token"]},
+                             headers={CSRF_HEADER: old_session["csrf_token"]})).status_code == 401, \
+            "the pre-reset refresh cookie is rejected"
         # the token is single-use
         r = await c.post("/api/auth/reset-password", json={"token": token, "new_password": "Third-Passw0rd!"})
         assert r.status_code == 400 and "Invalid or expired" in r.json()["detail"]

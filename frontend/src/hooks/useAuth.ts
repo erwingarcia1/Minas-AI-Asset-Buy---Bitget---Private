@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 /** Login / signup / logout flows on top of the auth store. */
 export function useAuth() {
   const navigate = useNavigate();
-  const { setTokens, setUser, logout: clear, refreshToken, user } = useAuthStore();
+  const { setTokens, setUser, logout: clear, user } = useAuthStore();
 
   const login = useCallback(async (email: string, password: string) => {
     const tokens = await authAPI.login(email, password);
@@ -22,10 +22,10 @@ export function useAuth() {
   }, [login]);
 
   const logout = useCallback(async () => {
-    if (refreshToken) await authAPI.logout(refreshToken).catch(() => undefined);
+    await authAPI.logout().catch(() => undefined);   // server-side revocation + cookie cleared
     clear();
     navigate("/login", { replace: true });
-  }, [refreshToken, clear, navigate]);
+  }, [clear, navigate]);
 
   const refreshProfile = useCallback(async () => {
     const profile = await userAPI.profile();
