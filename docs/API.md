@@ -322,6 +322,32 @@ separate; `total_transactions` counts every row for the table. A buy whose
 amount is unknown or zero never reaches the withdrawal gateway: the
 withdrawal row is written as failed and the purchase parked.
 
+Warning band: a fill inside the parking tolerance but deviating more than
+`FILL_WARN_PCT` (default 3%) from the expected amount is still recorded as a
+successful buy, logged with expected vs actual figures, and counted in Redis
+for a day; the `fill_deviations` admin alert is warning at 3 and critical at
+10 in 24 h, details at `GET /api/admin/fills/deviations`.
+
+Retry policy: a failed attempt leaves `next_execution` in the past, so the
+next scheduler tick (5 min) retries; after 3 failed attempts in a cycle a
+recurring purchase MISSES that cycle and moves on to its next normal
+interval (`last_error` says so, the customer's email says the next attempt
+time, Slack says "cycle MISSED"); after 3 missed cycles in a row it is
+stopped (status `failed`, `last_error` "PURCHASE STOPPED", Slack and the
+`stopped_purchases` admin alert). A one-time purchase is stopped after its 3
+attempts. A success resets the streak. `missed_cycles` and
+`purchases_needing_review` are admin alerts too.
+
+Way out of `needs_review`: `GET /api/admin/purchases?status=needs_review`
+lists parked purchases with their attempts; `GET /api/admin/purchases/{id}/review`
+asks the exchange, by our client id, what became of each order (state, fill,
+and whether the fill passes the guard); `POST /api/admin/purchases/{id}/resolve`
+with `{action, note}` records the fill (only when the exchange shows FILLED
+and the guard passes; withdraw-immediately purchases then withdraw), marks it
+not sent (only when NOT FOUND or CANCELLED; the purchase is due again) or
+cancels. Every resolution is audited. `force-retry` refuses `needs_review`
+purchases because re-arming could buy twice.
+
 For withdraw-immediately purchases the withdrawal is its own row
 (`tx_type: withdrawal`, `parent_transaction_id` -> the buy) carrying the
 address, chain, withdrawal id, fee and tx hash; the tax CSV reports them on

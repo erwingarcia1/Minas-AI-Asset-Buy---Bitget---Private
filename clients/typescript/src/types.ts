@@ -35,6 +35,27 @@ export interface ActivePurchase {
   purchase_type?: string;
 }
 
+export interface AdminPurchaseList {
+  items: AdminPurchaseRow[];
+  total: number;
+}
+
+export interface AdminPurchaseRow {
+  amount_usd: number;
+  crypto_symbol: string;
+  email?: string | null;
+  failure_count: number;
+  frequency: string;
+  id: string;
+  last_error?: string | null;
+  next_execution?: string | null;
+  parked_attempts?: ParkedAttempt[];
+  purchase_type: string;
+  status: string;
+  updated_at: string;
+  user_id: string;
+}
+
 export interface AdminTransactionList {
   items: AdminTransactionRow[];
   total: number;
@@ -171,6 +192,28 @@ export interface EmailSentResponse {
   sent: boolean;
 }
 
+export interface ExchangeLookup {
+  attempt_id: string;
+  client_oid?: string | null;
+  error?: string | null;
+  fill?: Record<string, unknown> | null;
+  state?: string | null;
+  verdict?: string | null;
+}
+
+export interface FillDeviation {
+  actual_amount: number;
+  at: number;
+  coin: string;
+  cost_usd: number;
+  deviation_pct: number;
+  expected_amount: number;
+  price?: number | null;
+  purchase_id: string;
+  requested_usd: number;
+  user_id: string;
+}
+
 export interface ForgotPasswordRequest {
   email: string;
 }
@@ -247,6 +290,16 @@ export interface NotificationRow {
   status: string;
   subject: string;
   template: string;
+}
+
+export interface ParkedAttempt {
+  client_oid?: string | null;
+  created_at: string;
+  error_message?: string | null;
+  executed_at?: string | null;
+  id: string;
+  order_id?: string | null;
+  status: string;
 }
 
 export interface PerformanceResponse {
@@ -366,6 +419,12 @@ export interface PurchaseOut {
   withdraw_immediately: boolean;
 }
 
+export interface PurchaseReview {
+  actions: string[];
+  lookups: ExchangeLookup[];
+  purchase: AdminPurchaseRow;
+}
+
 export interface PurchaseUpdateRequest {
   amount_usd?: number | null;
   blockchain_network?: string | null;
@@ -415,6 +474,12 @@ export interface ResetTokenRequest {
 
 export interface ResetTokenValidity {
   valid: boolean;
+}
+
+export interface ResolvePurchase {
+  action: string;
+  attempt_id?: string | null;
+  note: string;
 }
 
 export interface RetryWithdrawalOut {

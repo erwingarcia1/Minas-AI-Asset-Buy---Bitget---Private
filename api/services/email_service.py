@@ -18,6 +18,21 @@ import logging
 logger = logging.getLogger("autobuy.email")
 
 
+def _failure_outcome(event) -> str:
+    """What happens next after a failed attempt, from the executor's cycle info."""
+    x = getattr(event, "extra", None) or {}
+    if x.get("stopped"):
+        return ("; this purchase has now been STOPPED after repeated failures. It will not run again until you "
+                "recreate it or contact support.")
+    if x.get("cycle_exhausted"):
+        nxt = x.get("next_execution")
+        when = nxt.strftime("%Y-%m-%d %H:%M UTC") if hasattr(nxt, "strftime") else "the next scheduled time"
+        return f"; this buy was missed for this cycle. The next attempt is at {when}."
+    if event.attempt < event.max_attempts:
+        return "; we will retry on the next run in a few minutes."
+    return "; the purchase is now marked failed."
+
+
 class EmailService:
     def __init__(self, api_key: str = "", from_email: str = "") -> None:
         # Accepted only for compatibility with existing test doubles. The key
@@ -95,9 +110,7 @@ class EmailService:
             subject = f"{prefix}✗ Purchase failed: {coin}"
             text = (f"We tried to buy {coin} for {p.amount_usd:.2f} USD on {event.exchange or 'your exchange'} "
                     f"but it failed: {event.error}. This buy did not happen and no money was spent. "
-                    f"Attempt {event.attempt}/{event.max_attempts}"
-                    + ("; we will retry on the next run." if event.attempt < event.max_attempts
-                       else "; the purchase is now marked failed."))
+                    f"Attempt {event.attempt}/{event.max_attempts}" + _failure_outcome(event))
         category = "failure" if event.type in ("buy_failed", "withdrawal_failed", "withdrawal_needs_info") else "confirmation"
         return await self.queue(user_email, subject, f"<p>{text}</p>", text, template="purchase",
                                 category=category, user_id=getattr(event.user, "id", None))

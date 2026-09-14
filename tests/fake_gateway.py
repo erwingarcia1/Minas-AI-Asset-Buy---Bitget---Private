@@ -20,6 +20,18 @@ from api.tasks import purchase_scheduler as ps
 class FakeGateway:
     PRICE = 50_000.0
     FEE_RATE = 0.001
+    # Exchange ids are unique per test across gateway instances (exchange_tx_id is
+    # unique in the database); tests/conftest.py resets these before every test.
+    _orders = 0
+    _withdrawals = 0
+    _token = "0000"   # per-test suffix so ids never collide with rows a crashed test left behind
+
+    @classmethod
+    def reset_ids(cls):
+        import secrets
+        cls._orders = 0
+        cls._withdrawals = 0
+        cls._token = secrets.token_hex(3)
 
     def __init__(self, *, fail_buy=False, place_raises_after_sending=False, fill_unavailable=False,
                  lookup_raises=False, lookup_state=None, fail_withdrawal=False, withdrawal_needs_info=False,
@@ -40,6 +52,7 @@ class FakeGateway:
         self.reference_price = reference_price  # returned by place_buy (None = no reference)
         self.status_calls: list = []
         self.placed: list = []       # (client_oid, purchase_id, dry_run) — orders that reached the "exchange"
+        self.order_ids: dict = {}    # client_oid -> order id
         self.lookups: list = []
         self.withdrawals: list = []
         self.n = 0
@@ -63,10 +76,13 @@ class FakeGateway:
         if self.fail_buy:
             raise ps.ExecutionError("MIN_NOTIONAL: too small", stage="buy", code="MIN_NOTIONAL")
         self.n += 1
+        FakeGateway._orders += 1
+        order_id = f"ORD-{FakeGateway._orders}-{FakeGateway._token}"
         self.placed.append((client_oid, purchase.id, dry_run))
+        self.order_ids[client_oid] = order_id
         if self.place_raises_after_sending:
             raise ps.ExecutionError("NETWORK: read timed out after the order was sent", stage="buy", code="NETWORK")
-        return {"order_id": f"ORD-{self.n}", "dry_run": dry_run, "reference_price": self.reference_price}
+        return {"order_id": order_id, "dry_run": dry_run, "reference_price": self.reference_price}
 
     def fetch_fill(self, account, purchase, order_id, client_oid, dry_run):
         if self.fill_unavailable:
@@ -81,11 +97,9 @@ class FakeGateway:
             state = self.lookup_state
             fill = self._fill_for(purchase, f"ORD-{client_oid[-4:]}") if state == "filled" else None
             return {"state": state, "fill": fill}
-        sent = [p for p in self.placed if p[0] == client_oid]
-        if not sent:
+        if client_oid not in self.order_ids:
             return {"state": "not_found", "fill": None}
-        idx = self.placed.index(sent[0]) + 1
-        return {"state": "filled", "fill": self._fill_for(purchase, f"ORD-{idx}")}
+        return {"state": "filled", "fill": self._fill_for(purchase, self.order_ids[client_oid])}
 
     def withdraw(self, account, purchase, amount, client_oid, dry_run):
         self.withdrawals.append((client_oid, purchase.id, amount, dry_run))
@@ -94,8 +108,9 @@ class FakeGateway:
                                     stage="withdraw", code="40053")
         if self.fail_withdrawal:
             raise ps.ExecutionError("WITHDRAW_UNSUPPORTED: exchange said no", stage="withdraw", code="WITHDRAW_UNSUPPORTED")
-        n = len(self.withdrawals)
-        return {"withdrawal_id": f"WD-{n}", "chain": purchase.blockchain_network, "withdrawal_fee": 0.0001,
+        FakeGateway._withdrawals += 1
+        n = FakeGateway._withdrawals
+        return {"withdrawal_id": f"WD-{n}-{FakeGateway._token}", "chain": purchase.blockchain_network, "withdrawal_fee": 0.0001,
                 "withdrawal_fee_currency": purchase.crypto_symbol, "tx_hash": "0xhash" if not dry_run else None,
                 "raw_status": "simulated" if dry_run else "submitted"}
 

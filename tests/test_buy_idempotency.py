@@ -45,7 +45,7 @@ async def test_client_oid_is_stored_before_the_order_is_sent(db, user, binance_k
     await ps.execute_due_purchases(db, now=NOW, gateway=Peeking(), dry_run=True)
     rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.client_oid == seen["client_oid"]))).scalars().all()
     assert len(rows) == 1 and rows[0].purchase_id == p.id and rows[0].tx_type == "buy"
-    assert rows[0].status == "success" and rows[0].order_id == "ORD-1"
+    assert rows[0].status == "success" and rows[0].order_id.startswith("ORD-1-")
 
 
 async def test_place_order_returns_only_order_id_and_fill_comes_from_order_detail(db, user, binance_key):
@@ -71,7 +71,7 @@ async def test_timeout_after_sending_is_reconciled_without_a_second_order(db, us
     assert counts["executed"] == 1
     assert len(gw.placed) == 1 and gw.lookups == [gw.placed[0][0]], "looked up by client id, not re-sent"
     (buy,) = await tx_for(db, p)
-    assert buy.status == "success" and buy.order_id == "ORD-1"
+    assert buy.status == "success" and buy.order_id.startswith("ORD-1-")
     await db.refresh(p)
     assert p.failure_count == 0 and p.next_execution > NOW
     assert any("had filled; recording, not re-buying" in r.getMessage() for r in caplog.records)

@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import Admin from "@/pages/Admin";
 
 vi.mock("@/api/endpoints", () => ({
-  adminAPI: { stats: vi.fn(), users: vi.fn(), suspend: vi.fn(), unsuspend: vi.fn(), removeUser: vi.fn(), transactions: vi.fn(), alerts: vi.fn(), liftWalletHold: vi.fn() },
+  adminAPI: { stats: vi.fn(), users: vi.fn(), suspend: vi.fn(), unsuspend: vi.fn(), removeUser: vi.fn(), transactions: vi.fn(), alerts: vi.fn(), liftWalletHold: vi.fn(),
+              purchases: vi.fn(), reviewPurchase: vi.fn(), resolvePurchase: vi.fn() },
 }));
 const authUser = { current: { id: "a1", email: "admin@example.com", kyc_status: "verified", role: "admin", created_at: "" } as Record<string, unknown> };
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: authUser.current }) }));
@@ -113,5 +114,36 @@ describe("Admin: wallet-change hold override", () => {
     await openUsers();
     await screen.findByText("maria@example.com");
     expect(screen.queryByRole("button", { name: "Lift wallet hold" })).toBeNull();
+  });
+});
+
+describe("Admin: review queue for parked purchases", () => {
+  const PARKED = { id: "pp1", user_id: "u1", email: "maria@example.com", crypto_symbol: "BTC", amount_usd: 50, frequency: "weekly", purchase_type: "dca",
+    status: "needs_review", failure_count: 0, last_error: "order ORD-9: fill reports amount 0", next_execution: null, updated_at: "2026-09-14T10:00:00Z",
+    parked_attempts: [{ id: "t1", client_oid: "ab-1", order_id: "ORD-9", status: "needs_review", error_message: "fill reports amount 0", created_at: "2026-09-14T10:00:00Z", executed_at: null }] };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authUser.current = { id: "a1", email: "admin@example.com", kyc_status: "verified", role: "admin", created_at: "" };
+    vi.mocked(adminAPI.stats).mockResolvedValue(STATS as never);
+    vi.mocked(adminAPI.purchases).mockResolvedValue({ items: [PARKED], total: 1 } as never);
+  });
+
+  it("checks the exchange, shows the verdict, requires a note, then resolves", async () => {
+    vi.mocked(adminAPI.reviewPurchase).mockResolvedValue({ purchase: PARKED, actions: ["record_fill", "mark_not_sent", "cancel"],
+      lookups: [{ attempt_id: "t1", client_oid: "ab-1", state: "filled", fill: { amount_crypto: 0.001, cost_usdt: 50, exchange_rate: 50000, raw_status: "filled" }, verdict: "ok", error: null }] } as never);
+    vi.mocked(adminAPI.resolvePurchase).mockResolvedValue({ ...PARKED, status: "active" } as never);
+    mount();
+    await waitFor(() => expect(screen.getByTestId("admin-overview")).toHaveTextContent("12"));
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(await screen.findByTestId("review-row")).toHaveTextContent(/fill reports amount 0/);
+    fireEvent.click(screen.getByRole("button", { name: "Check exchange" }));
+    expect(await screen.findByTestId("verdict")).toHaveTextContent("fill passes the guard");
+    fireEvent.click(screen.getByRole("button", { name: "Record fill" }));
+    expect(await screen.findByText(/Write what you checked/)).toBeInTheDocument();
+    expect(adminAPI.resolvePurchase).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/What did you check/), { target: { value: "Bitget order history shows ORD-9 filled" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record fill" }));
+    await waitFor(() => expect(adminAPI.resolvePurchase).toHaveBeenCalledWith("pp1", "record_fill", "Bitget order history shows ORD-9 filled"));
+    expect(await screen.findByText(/resolved: now active/)).toBeInTheDocument();
   });
 });

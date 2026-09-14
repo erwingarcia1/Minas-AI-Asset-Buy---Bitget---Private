@@ -5,7 +5,7 @@ import type {
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
   PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
- RetryWithdrawalResult, NotificationPreferences } from "@/types";
+ RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
 
@@ -131,6 +131,12 @@ export const adminAPI = {
   transactions: (params: { status_filter?: string; user_id?: string; limit?: number; offset?: number } = {}) =>
     data<{ items: AdminTxRow[]; total: number }>(api.get("/admin/transactions", { params })),
   alerts: () => data<AdminAlert[]>(api.get("/admin/alerts")),
+  /** Parked (needs_review) purchases with their attempts. */
+  purchases: (status = "needs_review") => data<{ items: AdminPurchaseRow[]; total: number }>(api.get("/admin/purchases", { params: { status } })),
+  /** Live exchange lookup of each parked attempt (read-only). */
+  reviewPurchase: (id: string) => data<PurchaseReview>(api.get(`/admin/purchases/${id}/review`)),
+  resolvePurchase: (id: string, action: "record_fill" | "mark_not_sent" | "cancel", note: string, attempt_id?: string) =>
+    data<AdminPurchaseRow>(api.post(`/admin/purchases/${id}/resolve`, { action, note, attempt_id })),
 };
 
 /** Bitget market data for the purchase form: pair status and withdrawal chains with fee/minimum. */

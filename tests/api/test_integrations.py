@@ -161,8 +161,8 @@ async def test_purchase_flow_fires_webhooks(db, user, binance_key, capture_deliv
     events = [json.loads(r.content)["event"] for r in delivered]
     assert events == ["purchase.buy_executed", "purchase.withdrawal_sent"]
     buy, wd = (json.loads(r.content)["data"] for r in delivered)
-    assert buy["order_id"] == "ORD-1" and buy["tx_type"] == "buy" and buy["dry_run"] is True
-    assert wd["withdrawal_id"] == "WD-1" and wd["tx_type"] == "withdrawal" and wd["wallet_address"]
+    assert buy["order_id"].startswith("ORD-1-") and buy["tx_type"] == "buy" and buy["dry_run"] is True
+    assert wd["withdrawal_id"].startswith("WD-1-") and wd["tx_type"] == "withdrawal" and wd["wallet_address"]
 
 
 async def test_integrations_listing(db, user, binance_key):

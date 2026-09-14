@@ -189,6 +189,125 @@
         "title": "ActivePurchase",
         "type": "object"
       },
+      "AdminPurchaseList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPurchaseRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "AdminPurchaseList",
+        "type": "object"
+      },
+      "AdminPurchaseRow": {
+        "properties": {
+          "amount_usd": {
+            "title": "Amount Usd",
+            "type": "number"
+          },
+          "crypto_symbol": {
+            "title": "Crypto Symbol",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "failure_count": {
+            "title": "Failure Count",
+            "type": "integer"
+          },
+          "frequency": {
+            "title": "Frequency",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "next_execution": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Execution"
+          },
+          "parked_attempts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ParkedAttempt"
+            },
+            "title": "Parked Attempts",
+            "type": "array"
+          },
+          "purchase_type": {
+            "title": "Purchase Type",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "crypto_symbol",
+          "amount_usd",
+          "frequency",
+          "purchase_type",
+          "status",
+          "failure_count",
+          "updated_at"
+        ],
+        "title": "AdminPurchaseRow",
+        "type": "object"
+      },
       "AdminTransactionList": {
         "properties": {
           "items": {
@@ -901,6 +1020,139 @@
         "title": "EmailSentResponse",
         "type": "object"
       },
+      "ExchangeLookup": {
+        "properties": {
+          "attempt_id": {
+            "format": "uuid",
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "client_oid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Oid"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "fill": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fill"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "required": [
+          "attempt_id"
+        ],
+        "title": "ExchangeLookup",
+        "type": "object"
+      },
+      "FillDeviation": {
+        "properties": {
+          "actual_amount": {
+            "title": "Actual Amount",
+            "type": "number"
+          },
+          "at": {
+            "title": "At",
+            "type": "number"
+          },
+          "coin": {
+            "title": "Coin",
+            "type": "string"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "deviation_pct": {
+            "title": "Deviation Pct",
+            "type": "number"
+          },
+          "expected_amount": {
+            "title": "Expected Amount",
+            "type": "number"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "purchase_id": {
+            "title": "Purchase Id",
+            "type": "string"
+          },
+          "requested_usd": {
+            "title": "Requested Usd",
+            "type": "number"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purchase_id",
+          "user_id",
+          "coin",
+          "deviation_pct",
+          "expected_amount",
+          "actual_amount",
+          "requested_usd",
+          "cost_usd",
+          "at"
+        ],
+        "title": "FillDeviation",
+        "type": "object"
+      },
       "ForgotPasswordRequest": {
         "properties": {
           "email": {
@@ -1274,6 +1526,76 @@
           "created_at"
         ],
         "title": "NotificationRow",
+        "type": "object"
+      },
+      "ParkedAttempt": {
+        "properties": {
+          "client_oid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Oid"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executed At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "ParkedAttempt",
         "type": "object"
       },
       "PerformanceResponse": {
@@ -2057,6 +2379,34 @@
         "title": "PurchaseOut",
         "type": "object"
       },
+      "PurchaseReview": {
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "lookups": {
+            "items": {
+              "$ref": "#/components/schemas/ExchangeLookup"
+            },
+            "title": "Lookups",
+            "type": "array"
+          },
+          "purchase": {
+            "$ref": "#/components/schemas/AdminPurchaseRow"
+          }
+        },
+        "required": [
+          "purchase",
+          "lookups",
+          "actions"
+        ],
+        "title": "PurchaseReview",
+        "type": "object"
+      },
       "PurchaseUpdateRequest": {
         "properties": {
           "amount_usd": {
@@ -2314,6 +2664,39 @@
           "valid"
         ],
         "title": "ResetTokenValidity",
+        "type": "object"
+      },
+      "ResolvePurchase": {
+        "properties": {
+          "action": {
+            "pattern": "^(record_fill|mark_not_sent|cancel)$",
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
+          "note": {
+            "maxLength": 500,
+            "minLength": 5,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "note"
+        ],
+        "title": "ResolvePurchase",
         "type": "object"
       },
       "RetryWithdrawalOut": {
@@ -3843,6 +4226,140 @@
         ]
       }
     },
+    "/api/admin/fills/deviations": {
+      "get": {
+        "description": "Recent successful buys whose fill deviated beyond FILL_WARN_PCT (newest first).",
+        "operationId": "fill_deviations_api_admin_fills_deviations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FillDeviation"
+                  },
+                  "title": "Response Fill Deviations Api Admin Fills Deviations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Fill Deviations",
+        "tags": [
+          "user"
+        ]
+      }
+    },
+    "/api/admin/purchases": {
+      "get": {
+        "description": "Purchases by status (default: the parked ones), with their parked attempts.",
+        "operationId": "list_purchases_api_admin_purchases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "needs_review",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPurchaseList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Purchases",
+        "tags": [
+          "user"
+        ]
+      }
+    },
     "/api/admin/purchases/{purchase_id}/force-retry": {
       "post": {
         "description": "Make an Auto-Buy purchase due immediately (the next execute_purchases\nrun picks it up). A failed purchase is re-armed: status back to active and\nthe attempt counter reset. Refused for withdrawal_failed / needs_info:\nthose buys already filled and re-arming would buy again \u2014 the owner (or\nan admin acting as them) must use retry-withdrawal instead.",
@@ -3880,6 +4397,114 @@
           }
         ],
         "summary": "Force Retry",
+        "tags": [
+          "user"
+        ]
+      }
+    },
+    "/api/admin/purchases/{purchase_id}/resolve": {
+      "post": {
+        "description": "Clear a needs_review purchase after checking the exchange:\n\n- record_fill: the exchange shows the order FILLED and the fill passes the\n  guard -> recorded as the buy (never re-bought), schedule resumes, and for\n  withdraw-immediately purchases the withdrawal is sent now;\n- mark_not_sent: the exchange shows NOT FOUND or CANCELLED -> the attempt is\n  marked failed and the purchase is due again (a new buy, after the usual\n  reconciliation);\n- cancel: stop the purchase; the attempt stays on record.\nEvery resolution is audited with the admin's note.",
+        "operationId": "resolve_purchase_api_admin_purchases__purchase_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Purchase Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolvePurchase"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPurchaseRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve Purchase",
+        "tags": [
+          "user"
+        ]
+      }
+    },
+    "/api/admin/purchases/{purchase_id}/review": {
+      "get": {
+        "description": "Inspect a parked purchase: its attempts and, live from the exchange, what\nbecame of each order (state, fill, and whether the fill would pass the\nguard). Read-only. Then POST /resolve.",
+        "operationId": "review_purchase_api_admin_purchases__purchase_id__review_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Purchase Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Purchase",
         "tags": [
           "user"
         ]

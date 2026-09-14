@@ -401,3 +401,11 @@ export interface NotificationPreferences {
   phone_number?: string | null;
   has_device_token: boolean;
 }
+
+export interface ParkedAttempt { id: string; client_oid: string | null; order_id: string | null; status: string; error_message: string | null; created_at: string; executed_at: string | null }
+export interface AdminPurchaseRow {
+  id: string; user_id: string; email: string | null; crypto_symbol: string; amount_usd: number; frequency: string; purchase_type: string;
+  status: string; failure_count: number; last_error: string | null; next_execution: string | null; updated_at: string; parked_attempts: ParkedAttempt[];
+}
+export interface ExchangeLookup { attempt_id: string; client_oid: string | null; state: string | null; fill: Record<string, unknown> | null; verdict: string | null; error: string | null }
+export interface PurchaseReview { purchase: AdminPurchaseRow; lookups: ExchangeLookup[]; actions: string[] }

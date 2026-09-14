@@ -50,12 +50,49 @@ export class AdminApi {
   }
 
   /**
+   * Fill Deviations — `GET /api/admin/fills/deviations`
+   * @param {{ limit?: number }} [query]
+   * @returns {Promise<import('./types.js').FillDeviation[]>}
+   */
+  fillDeviations(query) {
+    return this.http.request("GET", "/api/admin/fills/deviations", { query, auth: true });
+  }
+
+  /**
+   * List Purchases — `GET /api/admin/purchases`
+   * @param {{ status?: string | null; limit?: number; offset?: number }} [query]
+   * @returns {Promise<import('./types.js').AdminPurchaseList>}
+   */
+  listPurchases(query) {
+    return this.http.request("GET", "/api/admin/purchases", { query, auth: true });
+  }
+
+  /**
    * Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry`
    * @param {string} purchaseId
    * @returns {Promise<unknown>}
    */
   forceRetry(purchaseId) {
     return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
+  }
+
+  /**
+   * Resolve Purchase — `POST /api/admin/purchases/{purchase_id}/resolve`
+   * @param {string} purchaseId
+   * @param {import('./types.js').ResolvePurchase} body
+   * @returns {Promise<import('./types.js').AdminPurchaseRow>}
+   */
+  resolvePurchase(purchaseId, body) {
+    return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/resolve", { body, auth: true });
+  }
+
+  /**
+   * Review Purchase — `GET /api/admin/purchases/{purchase_id}/review`
+   * @param {string} purchaseId
+   * @returns {Promise<import('./types.js').PurchaseReview>}
+   */
+  reviewPurchase(purchaseId) {
+    return this.http.request("GET", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/review", { auth: true });
   }
 
   /**

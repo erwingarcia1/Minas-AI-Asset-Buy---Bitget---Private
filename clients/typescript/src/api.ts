@@ -4,6 +4,8 @@ import type { HttpTransport } from "./http.js";
 import type {
   APIKeyCreate,
   APIKeyResponse,
+  AdminPurchaseList,
+  AdminPurchaseRow,
   AdminTransactionList,
   AdminUserList,
   AlertItem,
@@ -16,6 +18,7 @@ import type {
   DashboardResponse,
   EmailOutboxView,
   EmailSentResponse,
+  FillDeviation,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
   HistoryResponse,
@@ -34,6 +37,7 @@ import type {
   PurchaseCreatedOut,
   PurchaseDetailOut,
   PurchaseOut,
+  PurchaseReview,
   PurchaseUpdateRequest,
   QuickStats,
   RecurringResponse,
@@ -41,6 +45,7 @@ import type {
   ResetPasswordRequest,
   ResetTokenRequest,
   ResetTokenValidity,
+  ResolvePurchase,
   RetryWithdrawalOut,
   SendNotificationRequest,
   SendVerificationRequest,
@@ -94,9 +99,29 @@ export class AdminApi {
     return this.http.request<EmailOutboxView>("GET", "/api/admin/emails/undelivered", { query, auth: true });
   }
 
+  /** Fill Deviations — `GET /api/admin/fills/deviations` */
+  fillDeviations(query?: { limit?: number }): Promise<FillDeviation[]> {
+    return this.http.request<FillDeviation[]>("GET", "/api/admin/fills/deviations", { query, auth: true });
+  }
+
+  /** List Purchases — `GET /api/admin/purchases` */
+  listPurchases(query?: { status?: string | null; limit?: number; offset?: number }): Promise<AdminPurchaseList> {
+    return this.http.request<AdminPurchaseList>("GET", "/api/admin/purchases", { query, auth: true });
+  }
+
   /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
   forceRetry(purchaseId: string): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
+  }
+
+  /** Resolve Purchase — `POST /api/admin/purchases/{purchase_id}/resolve` */
+  resolvePurchase(purchaseId: string, body: ResolvePurchase): Promise<AdminPurchaseRow> {
+    return this.http.request<AdminPurchaseRow>("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/resolve", { body, auth: true });
+  }
+
+  /** Review Purchase — `GET /api/admin/purchases/{purchase_id}/review` */
+  reviewPurchase(purchaseId: string): Promise<PurchaseReview> {
+    return this.http.request<PurchaseReview>("GET", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/review", { auth: true });
   }
 
   /** Pause Scheduler — `POST /api/admin/scheduler/pause` */

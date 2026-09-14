@@ -47,7 +47,8 @@ from api.services.history import BUY_TYPES
 
 logger = logging.getLogger("autobuy.tasks.purchases")
 
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 3          # attempts per cycle, one per scheduler tick (5 min apart)
+MAX_MISSED_CYCLES = 3     # a recurring purchase that misses this many cycles in a row is stopped (alerted)
 BATCH_LIMIT = 200
 # Session-level Postgres advisory lock held for the whole run: with one
 # scheduler per gunicorn worker, only the first worker to reach a window
@@ -310,6 +311,35 @@ def validate_fill(fill: dict, requested_usd: float, reference_price: Optional[fl
     return None
 
 
+def fill_deviation(fill: dict, requested_usd: float, reference_price: Optional[float] = None) -> dict:
+    """How far a (valid) fill is from the naive expectation, in percent, with the
+    figures behind it: {pct, expected_amount, actual_amount, cost, requested, price}."""
+    amount = float(fill.get("amount_crypto") or 0.0)
+    cost = float(fill.get("cost_usdt") or 0.0)
+    rate = fill.get("exchange_rate")
+    price = reference_price if reference_price and reference_price > 0 else (float(rate) if rate else None)
+    expected = cost / price if price else amount
+    pct = 0.0
+    if expected:
+        pct = abs(amount - expected) / expected * 100
+    if requested_usd:
+        pct = max(pct, abs(cost - requested_usd) / requested_usd * 100)
+    return {"pct": pct, "expected_amount": expected, "actual_amount": amount, "cost": cost,
+            "requested": requested_usd, "price": price}
+
+
+async def _watch_fill(purchase: Purchase, fill: dict, reference_price: Optional[float]) -> None:
+    """Warning band: inside the parking tolerance, outside FILL_WARN_PCT."""
+    try:
+        d = fill_deviation(fill, float(purchase.amount_usd), reference_price)
+        if d["pct"] >= float(settings.fill_warn_pct):
+            from api.services import fill_watch
+            await fill_watch.record(purchase.id, purchase.user_id, purchase.crypto_symbol, d["pct"], d["expected_amount"],
+                                    d["actual_amount"], d["requested"], d["cost"], d["price"])
+    except Exception:
+        logger.exception("fill deviation watch failed for purchase %s", purchase.id)
+
+
 def _record_fill(tx: PurchaseTransaction, fill: dict, now: datetime) -> None:
     tx.status = "success"
     tx.raw_status = fill.get("raw_status")
@@ -334,18 +364,49 @@ def _advance(purchase: Purchase, now: datetime) -> None:
         purchase.next_execution = nxt
 
 
-def _fail_attempt(purchase: Purchase, tx: PurchaseTransaction, message: str, now: datetime) -> None:
+def attempt_in_cycle(failure_count: int) -> int:
+    """1..MAX_ATTEMPTS: which attempt of the current cycle a failure count is."""
+    return ((max(failure_count, 1) - 1) % MAX_ATTEMPTS) + 1
+
+
+def _fail_attempt(purchase: Purchase, tx: PurchaseTransaction, message: str, now: datetime) -> dict:
+    """Record a failed attempt. Attempts within a cycle come one scheduler tick
+    apart (next_execution is left in the past). When a cycle's attempts are
+    exhausted a recurring purchase MISSES that cycle and moves on to its next
+    normal interval — it never stalls silently — until MAX_MISSED_CYCLES in a
+    row, when it is stopped (status failed) and alerted. A one-time purchase
+    has no next interval and is stopped after its attempts.
+    Returns {"attempt", "cycle_exhausted", "missed_cycles", "stopped", "next_execution"} for the event."""
     tx.status = "failed"
     tx.error_message = message[:500]
     tx.executed_at = now
     purchase.failure_count = (purchase.failure_count or 0) + 1
     purchase.last_error = tx.error_message
-    if purchase.failure_count >= MAX_ATTEMPTS:
+    attempt = attempt_in_cycle(purchase.failure_count)
+    info = {"attempt": attempt, "cycle_exhausted": False, "missed_cycles": purchase.failure_count // MAX_ATTEMPTS,
+            "stopped": False, "next_execution": purchase.next_execution}
+    if attempt < MAX_ATTEMPTS:
+        logger.warning("purchase %s attempt %s/%s failed: %s", purchase.id, attempt, MAX_ATTEMPTS, message)
+        return info
+    info["cycle_exhausted"] = True
+    nxt = add_frequency(now, purchase.frequency)
+    if nxt is None or info["missed_cycles"] >= MAX_MISSED_CYCLES:
         purchase.status = "failed"
         purchase.next_execution = None
-        logger.error("purchase %s marked failed after %s attempts: %s", purchase.id, purchase.failure_count, message)
+        info["stopped"] = True
+        missed = info["missed_cycles"]
+        tail = "" if nxt is None else f" ({missed} cycles missed in a row)"
+        purchase.last_error = f"PURCHASE STOPPED after {purchase.failure_count} failed attempts{tail}: {message}"[:500]
+        logger.error("purchase %s STOPPED after %s attempts (%s cycle(s) missed): %s", purchase.id,
+                     purchase.failure_count, info["missed_cycles"], message)
     else:
-        logger.warning("purchase %s attempt %s/%s failed: %s", purchase.id, purchase.failure_count, MAX_ATTEMPTS, message)
+        purchase.next_execution = nxt
+        info["next_execution"] = nxt
+        purchase.last_error = (f"missed this cycle ({info['missed_cycles']} of {MAX_MISSED_CYCLES} in a row) after "
+                               f"{MAX_ATTEMPTS} attempts; next attempt {nxt.isoformat()}: {message}")[:500]
+        logger.error("purchase %s MISSED a cycle (%s in a row) after %s attempts; next attempt %s: %s",
+                     purchase.id, info["missed_cycles"], MAX_ATTEMPTS, nxt.isoformat(), message)
+    return info
 
 
 def _needs_review(purchase: Purchase, tx: PurchaseTransaction, message: str, now: datetime) -> None:
@@ -430,13 +491,16 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
     exchange_name = account.exchange if account is not None else None
     events: list = []   # (event type, error, tx) emitted after the commit
 
+    fail_info: dict = {}   # filled by the last _fail_attempt of this execution
+
     async def emit_all() -> None:
         try:
             from api.services.purchase_events import PurchaseEvent, emit
             for kind, error, tx in events:
                 await emit(db, PurchaseEvent(type=kind, user=user, purchase=purchase, tx=tx, dry_run=dry_run,
-                                             error=error, attempt=purchase.failure_count or 1,
-                                             max_attempts=MAX_ATTEMPTS, exchange=exchange_name))
+                                             error=error, attempt=attempt_in_cycle(purchase.failure_count or 1),
+                                             max_attempts=MAX_ATTEMPTS, exchange=exchange_name,
+                                             extra=dict(fail_info) if kind == "buy_failed" else {}))
         except Exception:
             logger.exception("purchase %s: event emission failed", purchase.id)
 
@@ -468,7 +532,7 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
         await emit_all()
         return tx
     if not account.verified:
-        _fail_attempt(purchase, tx, f"{account.exchange} API key not verified — verify it under Exchange settings", now)
+        fail_info.update(_fail_attempt(purchase, tx, f"{account.exchange} API key not verified — verify it under Exchange settings", now))
         await db.commit()
         events.append(("buy_failed", tx.error_message, tx))
         await emit_all()
@@ -504,9 +568,10 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
             _record_fill(tx, found["fill"], now)
             _advance(purchase, now)
             await db.commit()
+            await _watch_fill(purchase, found["fill"], reference_price)
             events.append(("buy_executed", None, tx))
         elif found.get("state") in ("not_found", "cancelled"):
-            _fail_attempt(purchase, tx, str(exc), now)
+            fail_info.update(_fail_attempt(purchase, tx, str(exc), now))
             await db.commit()
             events.append(("buy_failed", str(exc), tx))
             await emit_all()
@@ -523,7 +588,7 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
             fill = await asyncio.to_thread(gateway.fetch_fill, account, purchase, tx.order_id, tx.client_oid, dry_run)
         except Exception as exc:
             if dry_run:   # nothing was sent: a simulated fill that cannot be priced is an ordinary failure
-                _fail_attempt(purchase, tx, str(exc), now)
+                fail_info.update(_fail_attempt(purchase, tx, str(exc), now))
                 await db.commit()
                 events.append(("buy_failed", str(exc), tx))
                 await emit_all()
@@ -544,6 +609,7 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
         _record_fill(tx, fill, now)
         _advance(purchase, now)
         await db.commit()
+        await _watch_fill(purchase, fill, reference_price)
         logger.info("purchase %s executed (%s %s @ %s, fee %s %s, order %s, dry_run=%s)", purchase.id,
                     tx.amount_executed, purchase.crypto_symbol, tx.fill_price, tx.fee, tx.fee_currency,
                     tx.order_id, dry_run)

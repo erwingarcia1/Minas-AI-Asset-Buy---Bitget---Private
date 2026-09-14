@@ -45,6 +45,29 @@ class ActivePurchase(TypedDict):
     purchase_type: NotRequired[str]
 
 
+class AdminPurchaseList(TypedDict):
+    """AdminPurchaseList."""
+    items: List[AdminPurchaseRow]
+    total: int
+
+
+class AdminPurchaseRow(TypedDict):
+    """AdminPurchaseRow."""
+    amount_usd: float
+    crypto_symbol: str
+    email: NotRequired[Optional[str]]
+    failure_count: int
+    frequency: str
+    id: str
+    last_error: NotRequired[Optional[str]]
+    next_execution: NotRequired[Optional[str]]
+    parked_attempts: NotRequired[List[ParkedAttempt]]
+    purchase_type: str
+    status: str
+    updated_at: str
+    user_id: str
+
+
 class AdminTransactionList(TypedDict):
     """AdminTransactionList."""
     items: List[AdminTransactionRow]
@@ -198,6 +221,30 @@ class EmailSentResponse(TypedDict):
     sent: bool
 
 
+class ExchangeLookup(TypedDict):
+    """ExchangeLookup."""
+    attempt_id: str
+    client_oid: NotRequired[Optional[str]]
+    error: NotRequired[Optional[str]]
+    fill: NotRequired[Optional[Dict[str, Any]]]
+    state: NotRequired[Optional[str]]
+    verdict: NotRequired[Optional[str]]
+
+
+class FillDeviation(TypedDict):
+    """FillDeviation."""
+    actual_amount: float
+    at: float
+    coin: str
+    cost_usd: float
+    deviation_pct: float
+    expected_amount: float
+    price: NotRequired[Optional[float]]
+    purchase_id: str
+    requested_usd: float
+    user_id: str
+
+
 class ForgotPasswordRequest(TypedDict):
     """ForgotPasswordRequest."""
     email: str
@@ -286,6 +333,17 @@ class NotificationRow(TypedDict):
     status: str
     subject: str
     template: str
+
+
+class ParkedAttempt(TypedDict):
+    """ParkedAttempt."""
+    client_oid: NotRequired[Optional[str]]
+    created_at: str
+    error_message: NotRequired[Optional[str]]
+    executed_at: NotRequired[Optional[str]]
+    id: str
+    order_id: NotRequired[Optional[str]]
+    status: str
 
 
 class PerformanceResponse(TypedDict):
@@ -414,6 +472,13 @@ class PurchaseOut(TypedDict):
     withdraw_immediately: bool
 
 
+class PurchaseReview(TypedDict):
+    """PurchaseReview."""
+    actions: List[str]
+    lookups: List[ExchangeLookup]
+    purchase: AdminPurchaseRow
+
+
 class PurchaseUpdateRequest(TypedDict):
     """PurchaseUpdateRequest."""
     amount_usd: NotRequired[Optional[float]]
@@ -471,6 +536,13 @@ class ResetTokenRequest(TypedDict):
 class ResetTokenValidity(TypedDict):
     """ResetTokenValidity."""
     valid: bool
+
+
+class ResolvePurchase(TypedDict):
+    """ResolvePurchase."""
+    action: str
+    attempt_id: NotRequired[Optional[str]]
+    note: str
 
 
 class RetryWithdrawalOut(TypedDict):

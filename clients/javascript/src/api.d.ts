@@ -4,6 +4,8 @@ import type { HttpTransport } from "./http.js";
 import type {
   APIKeyCreate,
   APIKeyResponse,
+  AdminPurchaseList,
+  AdminPurchaseRow,
   AdminTransactionList,
   AdminUserList,
   AlertItem,
@@ -16,6 +18,7 @@ import type {
   DashboardResponse,
   EmailOutboxView,
   EmailSentResponse,
+  FillDeviation,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
   HistoryResponse,
@@ -34,6 +37,7 @@ import type {
   PurchaseCreatedOut,
   PurchaseDetailOut,
   PurchaseOut,
+  PurchaseReview,
   PurchaseUpdateRequest,
   QuickStats,
   RecurringResponse,
@@ -41,6 +45,7 @@ import type {
   ResetPasswordRequest,
   ResetTokenRequest,
   ResetTokenValidity,
+  ResolvePurchase,
   RetryWithdrawalOut,
   SendNotificationRequest,
   SendVerificationRequest,
@@ -80,8 +85,16 @@ export declare class AdminApi {
   alerts(): Promise<AlertItem[]>;
   /** Undelivered Emails — `GET /api/admin/emails/undelivered` */
   undeliveredEmails(query?: { limit?: number }): Promise<EmailOutboxView>;
+  /** Fill Deviations — `GET /api/admin/fills/deviations` */
+  fillDeviations(query?: { limit?: number }): Promise<FillDeviation[]>;
+  /** List Purchases — `GET /api/admin/purchases` */
+  listPurchases(query?: { status?: string | null; limit?: number; offset?: number }): Promise<AdminPurchaseList>;
   /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
   forceRetry(purchaseId: string): Promise<unknown>;
+  /** Resolve Purchase — `POST /api/admin/purchases/{purchase_id}/resolve` */
+  resolvePurchase(purchaseId: string, body: ResolvePurchase): Promise<AdminPurchaseRow>;
+  /** Review Purchase — `GET /api/admin/purchases/{purchase_id}/review` */
+  reviewPurchase(purchaseId: string): Promise<PurchaseReview>;
   /** Pause Scheduler — `POST /api/admin/scheduler/pause` */
   pauseScheduler(): Promise<unknown>;
   /** Resume Scheduler — `POST /api/admin/scheduler/resume` */

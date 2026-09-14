@@ -3,13 +3,14 @@ import { Navigate } from "react-router-dom";
 import { adminAPI } from "@/api/endpoints";
 import AlertMonitor from "@/components/Admin/AlertMonitor";
 import TransactionLog from "@/components/Admin/TransactionLog";
+import ReviewQueue from "@/components/Admin/ReviewQueue";
 import UserManagement from "@/components/Admin/UserManagement";
 import { Alert, Loading } from "@/components/Common";
 import { useAsync } from "@/hooks/useAsync";
 import { useAuth } from "@/hooks/useAuth";
 import { fmtUsdt } from "@/utils/format";
 
-const TABS = ["Overview", "Users", "Transactions", "Alerts"] as const;
+const TABS = ["Overview", "Users", "Transactions", "Review", "Alerts"] as const;
 type Tab = (typeof TABS)[number];
 
 /**
@@ -36,6 +37,7 @@ export default function Admin() {
       {tab === "Overview" && <Overview />}
       {tab === "Users" && <UserManagement />}
       {tab === "Transactions" && <TransactionLog />}
+      {tab === "Review" && <ReviewQueue />}
       {tab === "Alerts" && <AlertMonitor />}
     </div>
   );

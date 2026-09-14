@@ -193,7 +193,7 @@ async def test_retry_endpoint(db, user, other_user, bitget_key, client, events, 
     assert again.status_code == 409 and again.json()["detail"]["error"] == "not_retryable"
     detail = (await c.get(f"/api/v2/purchases/{p.id}", headers=auth(user))).json()
     assert [t["tx_type"] for t in detail["transactions"]] == ["withdrawal", "withdrawal", "buy"]
-    assert detail["transactions"][0]["tx_hash"] is None and detail["transactions"][2]["order_id"] == "ORD-1"
+    assert detail["transactions"][0]["tx_hash"] is None and detail["transactions"][2]["order_id"].startswith("ORD-1-")
 
 
 async def test_retry_endpoint_rejects_when_bitget_data_says_no(db, user, bitget_key, client, events, monkeypatch):

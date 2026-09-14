@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # execution price (and the cost within it of the amount requested); anything
     # outside is parked as needs_review instead of recorded as a completed buy.
     fill_tolerance_pct: float = float(os.getenv("FILL_TOLERANCE_PCT", "10") or 10)
+    # Deviations between this and the tolerance still record as successful buys but are
+    # logged with expected/actual figures and counted for the fill_deviations admin alert.
+    fill_warn_pct: float = float(os.getenv("FILL_WARN_PCT", "3") or 3)
 
     # Admin alert + Slack notice when more than this many emails were given up on in one hour.
     email_failure_alert_threshold: int = int(os.getenv("EMAIL_FAILURE_ALERT_THRESHOLD", "5") or 5)

@@ -150,10 +150,14 @@ async def _slack(db, event: PurchaseEvent) -> None:
                          "the purchase will not be retried automatically.")
         return
     if event.type in FAILURE_EVENTS:
+        x = event.extra or {}
+        outcome = (" :octagonal_sign: PURCHASE STOPPED — needs a human" if x.get("stopped")
+                   else f" :warning: cycle MISSED ({x.get('missed_cycles')} in a row), next attempt {x.get('next_execution')}"
+                   if x.get("cycle_exhausted") else "")
         await send_slack(f":x: AutoBuy {event.type.replace('_', ' ')}: {p.crypto_symbol} "
                          f"{p.amount_usd:.2f} USD via {event.exchange or '?'} for user {event.user.id} "
                          f"(attempt {event.attempt}/{event.max_attempts}{', dry run' if event.dry_run else ''}): "
-                         f"{str(event.error or '')[:200]}")
+                         f"{str(event.error or '')[:200]}{outcome}")
     elif event.type == "withdrawal_sent" and not event.dry_run:
         await send_slack(f":outbox_tray: AutoBuy withdrawal sent: {fmt_amount(event.tx.amount_executed or 0)} "
                          f"{p.crypto_symbol} to {p.wallet_address} ({p.blockchain_network}) "

@@ -41,6 +41,10 @@ ADMIN_ROUTES = [
     ("post", "/api/admin/purchases/{uid}/force-retry"),
     ("get", "/api/admin/alerts"),
     ("get", "/api/admin/emails/undelivered"),
+    ("get", "/api/admin/purchases"),
+    ("get", "/api/admin/purchases/{uid}/review"),
+    ("post", "/api/admin/purchases/{uid}/resolve"),
+    ("get", "/api/admin/fills/deviations"),
     ("post", "/api/admin/scheduler/pause"),
     ("post", "/api/admin/scheduler/resume"),
 ]
@@ -194,7 +198,8 @@ async def test_alerts_snapshot(admin):
         items = (await c.get("/api/admin/alerts", headers=H)).json()
     names = {a["name"] for a in items}
     assert names == {"schedulers_paused", "autobuy_run", "autobuy_consecutive_failures",
-                     "failed_transactions_24h", "email_delivery_failures", "exchange_unreachable"}
+                     "failed_transactions_24h", "email_delivery_failures", "exchange_unreachable",
+                     "fill_deviations", "stopped_purchases", "missed_cycles", "purchases_needing_review"}
     assert all(a["severity"] in ("ok", "warning", "critical") for a in items)
 
 

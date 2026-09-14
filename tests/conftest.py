@@ -174,3 +174,11 @@ def stub_bitget_market(monkeypatch):
     monkeypatch.setattr(bm, "_cached_sync", _cached_sync)
     monkeypatch.setattr(bm, "_cached", _cached)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_gateway_ids():
+    """Exchange ids from the fake gateway restart at ORD-1 / WD-1 for every test."""
+    from tests.fake_gateway import FakeGateway
+    FakeGateway.reset_ids()
+    yield

@@ -12,7 +12,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import Purchase, User
+from api.config import settings
+from api.models import Purchase, PurchaseTransaction, User
 from api.routes.user import UTCModel, get_current_user
 
 logger = logging.getLogger("autobuy.admin")
@@ -206,6 +207,211 @@ async def lift_wallet_hold(
     await wallet_hold.notify_hold_lifted(db, user, admin, payload.reason, until, lifted_at)
 
 
+# ------------------------------------------------------------------ parked purchases (needs_review)
+
+class ParkedAttempt(UTCModel):
+    id: UUID
+    client_oid: Optional[str] = None
+    order_id: Optional[str] = None
+    status: str
+    error_message: Optional[str] = None
+    created_at: datetime
+    executed_at: Optional[datetime] = None
+
+
+class AdminPurchaseRow(UTCModel):
+    id: UUID
+    user_id: UUID
+    email: Optional[str] = None
+    crypto_symbol: str
+    amount_usd: float
+    frequency: str
+    purchase_type: str
+    status: str
+    failure_count: int
+    last_error: Optional[str] = None
+    next_execution: Optional[datetime] = None
+    updated_at: datetime
+    parked_attempts: List[ParkedAttempt] = []
+
+
+class AdminPurchaseList(BaseModel):
+    items: List[AdminPurchaseRow]
+    total: int
+
+
+def _purchase_row(p: Purchase) -> AdminPurchaseRow:
+    parked = [t for t in (p.transactions or []) if t.status == "needs_review"]
+    return AdminPurchaseRow(id=p.id, user_id=p.user_id, email=p.user.email if p.user else None, crypto_symbol=p.crypto_symbol,
+                            amount_usd=p.amount_usd, frequency=p.frequency, purchase_type=p.purchase_type, status=p.status,
+                            failure_count=p.failure_count or 0, last_error=p.last_error, next_execution=p.next_execution,
+                            updated_at=p.updated_at,
+                            parked_attempts=[ParkedAttempt.model_validate(t) for t in sorted(parked, key=lambda t: t.created_at)])
+
+
+async def _load_purchase(db: AsyncSession, purchase_id: UUID) -> Purchase:
+    from sqlalchemy.orm import selectinload
+    p = (await db.execute(select(Purchase).options(selectinload(Purchase.transactions), selectinload(Purchase.user),
+                                                    selectinload(Purchase.exchange_account))
+                          .execution_options(populate_existing=True).where(Purchase.id == purchase_id))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    return p
+
+
+@router.get("/purchases", response_model=AdminPurchaseList)
+async def list_purchases(status: Optional[str] = Query("needs_review"), limit: int = Query(50, ge=1, le=200),
+                         offset: int = Query(0, ge=0), admin: User = Depends(require_admin),
+                         db: AsyncSession = Depends(get_db)):
+    """Purchases by status (default: the parked ones), with their parked attempts."""
+    from sqlalchemy.orm import selectinload
+    filters = [Purchase.status == status] if status else []
+    total = (await db.execute(select(func.count(Purchase.id)).where(*filters))).scalar_one()
+    rows = (await db.execute(select(Purchase).options(selectinload(Purchase.transactions), selectinload(Purchase.user))
+                             .where(*filters).order_by(Purchase.updated_at.desc()).limit(limit).offset(offset))).scalars().all()
+    return AdminPurchaseList(items=[_purchase_row(p) for p in rows], total=total)
+
+
+class ExchangeLookup(BaseModel):
+    attempt_id: UUID
+    client_oid: Optional[str] = None
+    state: Optional[str] = None          # filled | open | cancelled | not_found | error
+    fill: Optional[dict] = None
+    verdict: Optional[str] = None        # "ok" when the fill could be recorded, else why not
+    error: Optional[str] = None
+
+
+class PurchaseReview(BaseModel):
+    purchase: AdminPurchaseRow
+    lookups: List[ExchangeLookup]
+    actions: List[str]
+
+
+def _gateway():
+    from api.tasks.purchase_scheduler import ExchangeClientGateway
+    return ExchangeClientGateway()
+
+
+async def _lookup_parked(p: Purchase) -> List[ExchangeLookup]:
+    """Ask the exchange, by our client id, what became of each parked attempt."""
+    import asyncio
+    from api.tasks.purchase_scheduler import validate_fill
+    out = []
+    gw = _gateway()
+    for t in sorted((t for t in (p.transactions or []) if t.status == "needs_review"), key=lambda t: t.created_at):
+        row = ExchangeLookup(attempt_id=t.id, client_oid=t.client_oid)
+        if p.exchange_account is None or not t.client_oid:
+            row.state, row.error = "error", "no exchange key or client id to look up"
+        else:
+            try:
+                found = await asyncio.to_thread(gw.lookup_order, p.exchange_account, p, t.client_oid)
+                row.state, row.fill = found.get("state"), found.get("fill")
+                if row.state == "filled":
+                    problem = validate_fill(found["fill"], float(p.amount_usd))
+                    row.verdict = "ok" if problem is None else problem
+            except Exception as exc:
+                row.state, row.error = "error", str(exc)[:300]
+        out.append(row)
+    return out
+
+
+@router.get("/purchases/{purchase_id}/review", response_model=PurchaseReview)
+async def review_purchase(purchase_id: UUID, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Inspect a parked purchase: its attempts and, live from the exchange, what
+    became of each order (state, fill, and whether the fill would pass the
+    guard). Read-only. Then POST /resolve."""
+    p = await _load_purchase(db, purchase_id)
+    return PurchaseReview(purchase=_purchase_row(p), lookups=await _lookup_parked(p),
+                          actions=["record_fill", "mark_not_sent", "cancel"])
+
+
+class ResolvePurchase(BaseModel):
+    action: str = Field(pattern="^(record_fill|mark_not_sent|cancel)$")
+    note: str = Field(min_length=5, max_length=500)    # what was checked on the exchange
+    attempt_id: Optional[UUID] = None                   # which parked attempt (default: the latest)
+
+
+@router.post("/purchases/{purchase_id}/resolve", response_model=AdminPurchaseRow)
+async def resolve_purchase(purchase_id: UUID, payload: ResolvePurchase, admin: User = Depends(require_admin),
+                           db: AsyncSession = Depends(get_db)):
+    """Clear a needs_review purchase after checking the exchange:
+
+    - record_fill: the exchange shows the order FILLED and the fill passes the
+      guard -> recorded as the buy (never re-bought), schedule resumes, and for
+      withdraw-immediately purchases the withdrawal is sent now;
+    - mark_not_sent: the exchange shows NOT FOUND or CANCELLED -> the attempt is
+      marked failed and the purchase is due again (a new buy, after the usual
+      reconciliation);
+    - cancel: stop the purchase; the attempt stays on record.
+    Every resolution is audited with the admin's note."""
+    import asyncio
+    from api.tasks import purchase_scheduler as ps
+    p = await _load_purchase(db, purchase_id)
+    if p.status != "needs_review":
+        raise HTTPException(status_code=409, detail=f"purchase is {p.status}, not needs_review")
+    parked = sorted((t for t in p.transactions if t.status == "needs_review"), key=lambda t: t.created_at)
+    if not parked:
+        raise HTTPException(status_code=409, detail="no parked attempt on this purchase")
+    tx = next((t for t in parked if payload.attempt_id and t.id == payload.attempt_id), parked[-1])
+    now = datetime.now(timezone.utc)
+    lookups = {l.attempt_id: l for l in await _lookup_parked(p)}
+    look = lookups.get(tx.id)
+    if payload.action == "cancel":
+        p.status = "cancelled"
+        p.next_execution = None
+        p.last_error = f"cancelled by admin after review: {payload.note}"[:500]
+        tx.error_message = f"{tx.error_message or ''} [admin: cancelled — {payload.note}]"[:500]
+    elif payload.action == "record_fill":
+        if look is None or look.state != "filled":
+            raise HTTPException(status_code=409, detail=f"the exchange reports the order as {look.state if look else 'unknown'}"
+                                                        f"{': ' + look.error if look and look.error else ''}; only a FILLED order can be recorded")
+        if look.verdict != "ok":
+            raise HTTPException(status_code=409, detail=f"the fill does not pass the guard: {look.verdict}")
+        ps._record_fill(tx, look.fill, now)
+        p.status = "active"
+        ps._advance(p, now)
+        tx.error_message = f"{tx.error_message or ''} [admin: fill recorded — {payload.note}]"[:500]
+        await db.commit()
+        if p.purchase_type == "autobuy" and p.exchange_account is not None:
+            events: list = []
+            await ps._withdraw_after_buy(db, p, p.exchange_account, tx, _gateway(), now, settings.autobuy_dry_run, events)
+    else:  # mark_not_sent
+        if look is None or look.state not in ("not_found", "cancelled"):
+            raise HTTPException(status_code=409, detail=f"the exchange reports the order as {look.state if look else 'unknown'}"
+                                                        f"{': ' + look.error if look and look.error else ''}; only NOT FOUND or CANCELLED can be marked not sent")
+        tx.status = "failed"
+        tx.raw_status = look.state
+        tx.error_message = f"{tx.error_message or ''} [admin: not sent ({look.state}) — {payload.note}]"[:500]
+        p.status = "active"
+        p.failure_count = 0
+        p.last_error = None
+        p.next_execution = now
+    await db.commit()
+    audit(admin, "purchase_review_resolved", purchase_id=str(p.id), attempt_id=str(tx.id), resolution=payload.action,
+          exchange_state=look.state if look else None, note=payload.note)
+    return _purchase_row(await _load_purchase(db, purchase_id))
+
+
+class FillDeviation(BaseModel):
+    purchase_id: str
+    user_id: str
+    coin: str
+    deviation_pct: float
+    expected_amount: float
+    actual_amount: float
+    requested_usd: float
+    cost_usd: float
+    price: Optional[float] = None
+    at: float
+
+
+@router.get("/fills/deviations", response_model=List[FillDeviation])
+async def fill_deviations(limit: int = Query(50, ge=1, le=100), admin: User = Depends(require_admin)):
+    """Recent successful buys whose fill deviated beyond FILL_WARN_PCT (newest first)."""
+    from api.services import fill_watch
+    return [FillDeviation(**d) for d in await fill_watch.recent(limit)]
+
+
 class KycOverride(BaseModel):
     status: str
     note: str = Field(min_length=5, max_length=500)
@@ -293,6 +499,9 @@ async def force_retry(
     if p.status in ("withdrawal_failed", "needs_info"):
         raise HTTPException(status_code=409, detail=f"purchase is {p.status}: its buy filled and the coins are on the "
                                                     "exchange; retry the withdrawal (POST /api/v2/purchases/{id}/retry-withdrawal), never the buy")
+    if p.status == "needs_review":
+        raise HTTPException(status_code=409, detail="purchase is needs_review: its buy outcome is unknown, re-arming it could buy "
+                                                    "twice; inspect GET /api/admin/purchases/{id}/review and POST /resolve instead")
     p.status = "active"
     p.failure_count = 0
     p.next_execution = datetime.now(timezone.utc)
@@ -424,6 +633,43 @@ async def alerts(admin: User = Depends(require_admin),
 
     # -- failed Auto-Buy execution attempts in the last 24h (purchase_transactions) --
     from api.services import history
+    # -- fill deviations (warning band) --
+    from api.services import fill_watch
+    deviations = await fill_watch.count_24h()
+    items.append(AlertItem(
+        name="fill_deviations",
+        severity=("warning" if deviations is None else "critical" if deviations >= fill_watch.CRITICAL_ALERT_THRESHOLD
+                  else "warning" if deviations >= fill_watch.WARN_ALERT_THRESHOLD else "ok"),
+        value="unknown" if deviations is None else str(deviations),
+        detail=(f"Successful buys in the last day whose fill deviated more than FILL_WARN_PCT ({settings.fill_warn_pct:g}%) "
+                f"from the expected amount (warning at {fill_watch.WARN_ALERT_THRESHOLD}, critical at "
+                f"{fill_watch.CRITICAL_ALERT_THRESHOLD}); details at GET /api/admin/fills/deviations")))
+
+    # -- stalled / missed recurring purchases --
+    from api.tasks.purchase_scheduler import MAX_ATTEMPTS
+    stopped = (await db.execute(select(func.count(Purchase.id)).where(
+        Purchase.status == "failed", Purchase.failure_count >= MAX_ATTEMPTS,
+        Purchase.updated_at >= now - timedelta(days=7)))).scalar_one()
+    items.append(AlertItem(
+        name="stopped_purchases",
+        severity="critical" if stopped else "ok", value=str(stopped),
+        detail="Purchases stopped in the last 7 days after repeated failed attempts (one-time after 3 attempts, "
+               "recurring after 3 missed cycles): the customer has stopped buying and must recreate or be re-armed"))
+    missed = (await db.execute(select(func.count(Purchase.id)).where(
+        Purchase.status == "active", Purchase.failure_count >= MAX_ATTEMPTS,
+        Purchase.updated_at >= now - timedelta(days=1)))).scalar_one()
+    items.append(AlertItem(
+        name="missed_cycles",
+        severity="warning" if missed else "ok", value=str(missed),
+        detail="Recurring purchases that missed a whole cycle in the last day (3 failed attempts) and moved on to their "
+               "next interval; they stop after 3 missed cycles in a row"))
+    parked = (await db.execute(select(func.count(Purchase.id)).where(Purchase.status == "needs_review"))).scalar_one()
+    items.append(AlertItem(
+        name="purchases_needing_review",
+        severity="critical" if parked else "ok", value=str(parked),
+        detail="Purchases parked as needs_review (buy outcome unknown or fill implausible): resolve them at "
+               "GET /api/admin/purchases?status=needs_review -> /review -> /resolve; they never retry on their own"))
+
     network_1h = await history.count_network_failures_since(db, now - timedelta(hours=1))
     items.append(AlertItem(
         name="exchange_unreachable",

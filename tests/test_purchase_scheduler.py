@@ -65,12 +65,12 @@ async def test_creates_buy_and_withdrawal_rows(db, user, binance_key):
     txs = await tx_for(db, p)
     assert [t.tx_type for t in txs] == ["buy", "withdrawal"]
     buy, wd = txs
-    assert buy.status == "success" and buy.order_id == "ORD-1" and buy.exchange_tx_id == "ORD-1"
+    assert buy.status == "success" and buy.order_id.startswith("ORD-1-") and buy.exchange_tx_id == buy.order_id
     assert buy.client_oid.startswith("ab-") and gw.placed[0][0] == buy.client_oid, "client id stored before sending"
     assert buy.amount_executed == pytest.approx(100 / 50_000) and buy.fill_price == 50_000.0 and buy.cost_usd == 100
     assert buy.fee == pytest.approx(100 / 50_000 * 0.001) and buy.fee_currency == "BTC"
     assert buy.executed_at == NOW and buy.error_message is None
-    assert wd.status == "success" and wd.parent_transaction_id == buy.id and wd.withdrawal_id == "WD-1"
+    assert wd.status == "success" and wd.parent_transaction_id == buy.id and wd.withdrawal_id.startswith("WD-1-")
     assert wd.amount_executed == pytest.approx(100 / 50_000 * 0.999), "buy fee in the base coin is deducted"
     assert wd.withdrawal_fee == 0.0001 and wd.withdrawal_fee_currency == "BTC" and wd.client_oid.startswith("abw-")
 
@@ -106,8 +106,10 @@ async def test_skips_unverified_or_suspended_users(db, user, other_user, binance
 
 # --------------------------------------------------------------------------- failures
 
-async def test_failure_records_attempts_and_marks_failed_after_three(db, user, binance_key):
-    p = await make_purchase(db, user, binance_key, next_execution=NOW)
+async def test_failure_records_attempts_and_misses_the_cycle_after_three(db, user, binance_key):
+    """Three attempts one tick apart; then a recurring purchase moves on to its next
+    interval (it never stalls) and reports the missed cycle."""
+    p = await make_purchase(db, user, binance_key, next_execution=NOW)   # daily
     gw = BuyFails()
     for attempt in (1, 2):
         counts = await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=5 * attempt), gateway=gw, dry_run=True)
@@ -117,8 +119,9 @@ async def test_failure_records_attempts_and_marks_failed_after_three(db, user, b
         assert p.next_execution == NOW, "stays due for the retry"
     await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=15), gateway=gw, dry_run=True)
     await db.refresh(p)
-    assert p.status == "failed" and p.failure_count == 3 and p.next_execution is None
-    assert "MIN_NOTIONAL" in p.last_error
+    assert p.status == "active" and p.failure_count == 3
+    assert p.next_execution == NOW + timedelta(minutes=15) + timedelta(days=1), "next normal interval, not stalled"
+    assert "missed this cycle (1 of 3 in a row)" in p.last_error and "MIN_NOTIONAL" in p.last_error
     txs = await tx_for(db, p)
     assert [t.status for t in txs] == ["failed"] * 3 and all(t.error_message for t in txs)
     assert all(t.tx_type == "buy" and t.client_oid for t in txs)

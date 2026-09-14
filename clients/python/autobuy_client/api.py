@@ -7,6 +7,8 @@ from ._http import AsyncTransport, SyncTransport, _q
 from .types import (
     APIKeyCreate,
     APIKeyResponse,
+    AdminPurchaseList,
+    AdminPurchaseRow,
     AdminTransactionList,
     AdminUserList,
     AlertItem,
@@ -19,6 +21,7 @@ from .types import (
     DashboardResponse,
     EmailOutboxView,
     EmailSentResponse,
+    FillDeviation,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     HistoryResponse,
@@ -37,6 +40,7 @@ from .types import (
     PurchaseCreatedOut,
     PurchaseDetailOut,
     PurchaseOut,
+    PurchaseReview,
     PurchaseUpdateRequest,
     QuickStats,
     RecurringResponse,
@@ -44,6 +48,7 @@ from .types import (
     ResetPasswordRequest,
     ResetTokenRequest,
     ResetTokenValidity,
+    ResolvePurchase,
     RetryWithdrawalOut,
     SendNotificationRequest,
     SendVerificationRequest,
@@ -112,9 +117,25 @@ class AdminApi:
         """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
         return self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
 
+    def fill_deviations(self, *, limit: Optional[int] = None) -> List[FillDeviation]:
+        """Fill Deviations — ``GET /api/admin/fills/deviations``."""
+        return self._http.request("GET", "/api/admin/fills/deviations", auth=True, query={"limit": limit})
+
+    def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
+        """List Purchases — ``GET /api/admin/purchases``."""
+        return self._http.request("GET", "/api/admin/purchases", auth=True, query={"status": status, "limit": limit, "offset": offset})
+
     def force_retry(self, purchase_id: str) -> Any:
         """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
         return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
+
+    def resolve_purchase(self, purchase_id: str, body: ResolvePurchase) -> AdminPurchaseRow:
+        """Resolve Purchase — ``POST /api/admin/purchases/{purchase_id}/resolve``."""
+        return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/resolve", auth=True, body=body)
+
+    def review_purchase(self, purchase_id: str) -> PurchaseReview:
+        """Review Purchase — ``GET /api/admin/purchases/{purchase_id}/review``."""
+        return self._http.request("GET", "/api/admin/purchases/" + _q(purchase_id) + "/review", auth=True)
 
     def pause_scheduler(self) -> Any:
         """Pause Scheduler — ``POST /api/admin/scheduler/pause``."""
@@ -171,9 +192,25 @@ class AsyncAdminApi:
         """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
         return await self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
 
+    async def fill_deviations(self, *, limit: Optional[int] = None) -> List[FillDeviation]:
+        """Fill Deviations — ``GET /api/admin/fills/deviations``."""
+        return await self._http.request("GET", "/api/admin/fills/deviations", auth=True, query={"limit": limit})
+
+    async def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
+        """List Purchases — ``GET /api/admin/purchases``."""
+        return await self._http.request("GET", "/api/admin/purchases", auth=True, query={"status": status, "limit": limit, "offset": offset})
+
     async def force_retry(self, purchase_id: str) -> Any:
         """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
         return await self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
+
+    async def resolve_purchase(self, purchase_id: str, body: ResolvePurchase) -> AdminPurchaseRow:
+        """Resolve Purchase — ``POST /api/admin/purchases/{purchase_id}/resolve``."""
+        return await self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/resolve", auth=True, body=body)
+
+    async def review_purchase(self, purchase_id: str) -> PurchaseReview:
+        """Review Purchase — ``GET /api/admin/purchases/{purchase_id}/review``."""
+        return await self._http.request("GET", "/api/admin/purchases/" + _q(purchase_id) + "/review", auth=True)
 
     async def pause_scheduler(self) -> Any:
         """Pause Scheduler — ``POST /api/admin/scheduler/pause``."""
