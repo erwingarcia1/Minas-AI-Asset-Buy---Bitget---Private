@@ -175,6 +175,7 @@ def sent_emails(monkeypatch):
         seen.append({"to": to, "subject": subject, "text": text})
         return True
     monkeypatch.setattr(email_service, "_send", fake)
+    monkeypatch.setattr(email_service, "queue", fake)   # purchase emails are queued, not sent inline
     return seen
 
 

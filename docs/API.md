@@ -223,6 +223,18 @@ alerts and outbound user webhooks (`purchase.<event>`, HMAC-signed) all hang
 off those events. Dry-run emails are prefixed `[DRY RUN]`. The weekly digest
 runs on the Auto-Buy scheduler (Mondays 09:00 UTC, one worker via advisory lock).
 
+## Purchase emails are queued
+
+The executor never waits on the email provider. Purchase confirmations,
+failures and campaign emails are rendered on the purchase path and pushed
+onto a Redis outbox (`autobuy:email:outbox`, shared by all workers, survives
+restarts); the scheduler sends them after each run and every minute
+(`drain_email_outbox`), 20 s budget per drain and 10 s per email. A timed-out
+or rejected email is logged and dropped; it never fails, retries or delays a
+purchase. If Redis is unavailable, one 5-second inline attempt is made.
+Security emails (password reset / changed) are sent directly by the request
+that triggers them.
+
 ## Dry-run pricing
 
 With `AUTOBUY_DRY_RUN=1` nothing is sent to the exchange, but each attempt is

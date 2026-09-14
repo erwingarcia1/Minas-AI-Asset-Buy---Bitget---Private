@@ -13,9 +13,16 @@ class CapturingEmail(EmailService):
                           "template": template})
         return True
 
+    async def queue(self, to, subject, html, text, template="generic"):
+        """Queued (outbox) mail is captured the same way as direct sends."""
+        return await self._send(to, subject, html, text, template)
+
 
 class ExplodingEmail(EmailService):
     async def _send(self, to, subject, html, text, template="generic"):
+        raise RuntimeError("resend is down")
+
+    async def queue(self, to, subject, html, text, template="generic"):
         raise RuntimeError("resend is down")
 
 

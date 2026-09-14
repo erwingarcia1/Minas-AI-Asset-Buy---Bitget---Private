@@ -793,9 +793,26 @@ async def _run_once() -> dict:
     engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-            return await execute_due_purchases(session)
+            counts = await execute_due_purchases(session)
     finally:
         await engine.dispose()
+    # Emails queued by the run go out now, after every purchase is committed and
+    # the heartbeat recorded, under a time budget: a slow provider cannot stall
+    # the run and a failed email never touches a purchase.
+    from api.services import email_outbox
+    await email_outbox.drain()
+    return counts
+
+
+def drain_email_outbox() -> dict:
+    """APScheduler entry point (every minute): send emails queued by the API
+    workers or left over from a previous run's budget."""
+    from api.services import email_outbox
+    try:
+        return asyncio.run(email_outbox.drain())
+    except Exception:
+        logger.exception("email outbox drain failed")
+        return {}
 
 
 def execute_purchases() -> dict:
@@ -877,6 +894,8 @@ def build_scheduler():
                   max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE_SECONDS)
     sched.add_job(poll_withdrawals_job, "interval", minutes=WITHDRAWAL_POLL_INTERVAL_MINUTES, id="poll_withdrawals",
                   max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE_SECONDS)
+    sched.add_job(drain_email_outbox, "interval", minutes=1, id="drain_email_outbox",
+                  max_instances=1, coalesce=True, misfire_grace_time=55)
     sched.add_job(send_weekly_digest, "cron", day_of_week="mon", hour=9, minute=0, id="weekly_digest",
                   max_instances=1, coalesce=True, misfire_grace_time=3600)
     sched.add_listener(job_event_listener, EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR)

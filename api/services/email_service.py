@@ -29,8 +29,21 @@ class EmailService:
         except ResendError:
             return False  # logged by the integration
 
+    async def queue(self, to: str, subject: str, html: str, text: str, template: str = "generic") -> bool:
+        """Off the critical path: push to the outbox (sent by the scheduler).
+        If the outbox is unavailable, one short inline attempt; never raises."""
+        import asyncio
+        from api.services import email_outbox
+        if await email_outbox.enqueue(to, subject, html, text, template):
+            return True
+        try:
+            return await asyncio.wait_for(self._send(to, subject, html, text, template), 5.0)
+        except Exception:
+            return False
+
     async def send_purchase_event_email(self, user_email: str, event) -> bool:
-        """One email per Auto-Buy attempt outcome (see purchase_events)."""
+        """One email per Auto-Buy attempt outcome (see purchase_events). Queued,
+        not sent inline: the executor never waits on the email provider."""
         p, tx = event.purchase, event.tx
         coin = p.crypto_symbol
         amount = tx.amount_executed or 0.0
@@ -74,7 +87,7 @@ class EmailService:
                     f"but it failed: {event.error}. Attempt {event.attempt}/{event.max_attempts}"
                     + ("; we will retry on the next run." if event.attempt < event.max_attempts
                        else "; the purchase is now marked failed."))
-        return await self._send(user_email, subject, f"<p>{text}</p>", text, template="purchase")
+        return await self.queue(user_email, subject, f"<p>{text}</p>", text, template="purchase")
 
     async def send_kyc_notification(self, user_email: str, kyc_status: str) -> bool:
         if kyc_status == "verified":
