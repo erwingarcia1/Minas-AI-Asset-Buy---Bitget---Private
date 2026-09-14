@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # withdrawal before changing.
     bitget_withdraw_fee_mode: str = os.getenv("BITGET_WITHDRAW_FEE_MODE", "exclusive").strip().lower() or "exclusive"
 
+    # Admin alert + Slack notice when more than this many emails were given up on in one hour.
+    email_failure_alert_threshold: int = int(os.getenv("EMAIL_FAILURE_ALERT_THRESHOLD", "5") or 5)
+
     @property
     def supported_exchanges(self) -> List[str]:
         raw = [x.strip().lower() for x in self.supported_exchanges_csv.split(",")]

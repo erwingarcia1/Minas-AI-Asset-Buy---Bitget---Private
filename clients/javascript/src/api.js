@@ -41,6 +41,15 @@ export class AdminApi {
   }
 
   /**
+   * Undelivered Emails — `GET /api/admin/emails/undelivered`
+   * @param {{ limit?: number }} [query]
+   * @returns {Promise<import('./types.js').EmailOutboxView>}
+   */
+  undeliveredEmails(query) {
+    return this.http.request("GET", "/api/admin/emails/undelivered", { query, auth: true });
+  }
+
+  /**
    * Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry`
    * @param {string} purchaseId
    * @returns {Promise<unknown>}

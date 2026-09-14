@@ -32,12 +32,15 @@ class EmailService:
         except ResendError:
             return False  # logged by the integration
 
-    async def queue(self, to: str, subject: str, html: str, text: str, template: str = "generic") -> bool:
-        """Off the critical path: push to the outbox (sent by the scheduler).
+    async def queue(self, to: str, subject: str, html: str, text: str, template: str = "generic",
+                    category: str = "confirmation", user_id=None) -> bool:
+        """Off the critical path: push to the outbox (sent by the scheduler with
+        retries; `category` failure/security gets more attempts than confirmation).
         If the outbox is unavailable, one short inline attempt; never raises."""
         import asyncio
         from api.services import email_outbox
-        if await email_outbox.enqueue(to, subject, html, text, template):
+        if await email_outbox.enqueue(to, subject, html, text, template, category=category,
+                                      user_id=str(user_id) if user_id else None):
             return True
         try:
             ok = await asyncio.wait_for(self._send(to, subject, html, text, template), 5.0)
@@ -94,7 +97,9 @@ class EmailService:
                     f"but it failed: {event.error}. Attempt {event.attempt}/{event.max_attempts}"
                     + ("; we will retry on the next run." if event.attempt < event.max_attempts
                        else "; the purchase is now marked failed."))
-        return await self.queue(user_email, subject, f"<p>{text}</p>", text, template="purchase")
+        category = "failure" if event.type in ("buy_failed", "withdrawal_failed", "withdrawal_needs_info") else "confirmation"
+        return await self.queue(user_email, subject, f"<p>{text}</p>", text, template="purchase",
+                                category=category, user_id=getattr(event.user, "id", None))
 
     async def send_kyc_notification(self, user_email: str, kyc_status: str) -> bool:
         if kyc_status == "verified":

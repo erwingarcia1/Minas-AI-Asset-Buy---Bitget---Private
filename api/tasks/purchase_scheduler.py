@@ -812,7 +812,7 @@ def drain_email_outbox() -> dict:
         return asyncio.run(email_outbox.drain())
     except Exception:
         logger.exception("email outbox drain failed")
-        return {}
+        return {"sent": 0, "retried": 0, "gave_up": 0, "remaining": 0}
 
 
 def execute_purchases() -> dict:

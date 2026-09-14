@@ -14,6 +14,7 @@ import type {
   CreateApplicantRequest,
   CreateApplicantResponse,
   DashboardResponse,
+  EmailOutboxView,
   EmailSentResponse,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
@@ -88,6 +89,11 @@ export class AdminApi {
   /** Alerts — `GET /api/admin/alerts` */
   alerts(): Promise<AlertItem[]> {
     return this.http.request<AlertItem[]>("GET", "/api/admin/alerts", { auth: true });
+  }
+
+  /** Undelivered Emails — `GET /api/admin/emails/undelivered` */
+  undeliveredEmails(query?: { limit?: number }): Promise<EmailOutboxView> {
+    return this.http.request<EmailOutboxView>("GET", "/api/admin/emails/undelivered", { query, auth: true });
   }
 
   /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */

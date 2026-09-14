@@ -253,11 +253,18 @@ failures and campaign emails are rendered on the purchase path and pushed
 onto a Redis outbox (`autobuy:email:outbox`, shared by all workers, survives
 restarts); the scheduler sends them after each run and every minute
 (`drain_email_outbox`), 20 s budget per drain and 10 s per email. A timed-out
-or rejected email is logged at ERROR with recipient and template and dropped;
-it never fails, retries or delays a purchase. If Redis is unavailable, one
-5-second inline attempt is made and a loss is logged at ERROR. The list is
-capped at 10,000 messages (oldest dropped, logged). Draining ignores the
-admin pause switch: pausing stops trading, not notifications.
+or rejected email is re-scheduled with backoff (30 s, 1, 2, 4, 8 min — about
+15 minutes in total): confirmations get 4 attempts, failure and security
+emails 6. When the attempts are exhausted the message is logged at ERROR
+with recipient and template, listed at `GET /api/admin/emails/undelivered`
+(with the messages still retrying), recorded in the user's notification
+history as `failed`, and counted towards the `email_delivery_failures`
+admin alert (critical above `EMAIL_FAILURE_ALERT_THRESHOLD`, default 5 per
+hour; one Slack notice per hour). Nothing in this path ever fails, retries
+or delays a purchase. If Redis is unavailable, one 5-second inline attempt
+is made and a loss is logged at ERROR. The queue is capped at 10,000
+messages (earliest-due dropped, logged). Draining ignores the admin pause
+switch: pausing stops trading, not notifications.
 Security emails (password reset / changed) are sent directly by the request
 that triggers them.
 

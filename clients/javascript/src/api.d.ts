@@ -14,6 +14,7 @@ import type {
   CreateApplicantRequest,
   CreateApplicantResponse,
   DashboardResponse,
+  EmailOutboxView,
   EmailSentResponse,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
@@ -79,6 +80,8 @@ export declare class AdminApi {
   constructor(http: HttpTransport);
   /** Alerts — `GET /api/admin/alerts` */
   alerts(): Promise<AlertItem[]>;
+  /** Undelivered Emails — `GET /api/admin/emails/undelivered` */
+  undeliveredEmails(query?: { limit?: number }): Promise<EmailOutboxView>;
   /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
   forceRetry(purchaseId: string): Promise<unknown>;
   /** Pause Scheduler — `POST /api/admin/scheduler/pause` */

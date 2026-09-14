@@ -302,6 +302,38 @@ async def force_retry(
 
 # ------------------------------------------------------------------ alerts
 
+class UndeliveredEmail(BaseModel):
+    id: Optional[str] = None
+    to: str
+    subject: str
+    template: Optional[str] = None
+    category: Optional[str] = None
+    user_id: Optional[str] = None
+    attempts: int = 0
+    last_error: Optional[str] = None
+    queued_at: Optional[float] = None
+    gave_up_at: Optional[float] = None
+
+
+class EmailOutboxView(BaseModel):
+    queued: int                               # messages waiting or scheduled for retry
+    failures_this_hour: Optional[int] = None  # give-ups in the current UTC hour
+    alert_threshold: int
+    pending: List[dict]                       # queued messages with attempts / next_attempt_at (no bodies)
+    undelivered: List[UndeliveredEmail]       # gave up after all retries, newest first
+
+
+@router.get("/emails/undelivered", response_model=EmailOutboxView)
+async def undelivered_emails(limit: int = Query(100, ge=1, le=500), admin: User = Depends(require_admin)):
+    """What the email outbox could not deliver (and what is still retrying)."""
+    from api.services import email_outbox
+    return EmailOutboxView(queued=await email_outbox.length() or 0,
+                           failures_this_hour=await email_outbox.failures_this_hour(),
+                           alert_threshold=email_outbox.failure_alert_threshold(),
+                           pending=await email_outbox.pending(limit),
+                           undelivered=[UndeliveredEmail(**u) for u in await email_outbox.undelivered(limit)])
+
+
 class AlertItem(BaseModel):
     name: str
     severity: str  # ok | warning | critical
@@ -350,6 +382,17 @@ async def alerts(admin: User = Depends(require_admin),
         items.append(AlertItem(
             name="schedulers_paused", severity="critical", value="unknown",
             detail="Redis unreadable: the Auto-Buy job fails closed and skips every run until it is back"))
+
+    # -- email delivery (outbox give-ups this hour) --
+    from api.services import email_outbox
+    failed_emails = await email_outbox.failures_this_hour()
+    threshold = email_outbox.failure_alert_threshold()
+    items.append(AlertItem(
+        name="email_delivery_failures",
+        severity="warning" if failed_emails is None else "critical" if failed_emails > threshold else "ok",
+        value="unknown" if failed_emails is None else str(failed_emails),
+        detail=(f"Emails given up on after all retries this hour (critical above {threshold}); "
+                "see GET /api/admin/emails/undelivered")))
 
     # -- Auto-Buy execute_purchases job --
     ab = await scheduler_state.status("autobuy")

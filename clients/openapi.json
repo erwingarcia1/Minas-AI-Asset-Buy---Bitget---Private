@@ -832,6 +832,51 @@
         "title": "DashboardResponse",
         "type": "object"
       },
+      "EmailOutboxView": {
+        "properties": {
+          "alert_threshold": {
+            "title": "Alert Threshold",
+            "type": "integer"
+          },
+          "failures_this_hour": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failures This Hour"
+          },
+          "pending": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Pending",
+            "type": "array"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "undelivered": {
+            "items": {
+              "$ref": "#/components/schemas/UndeliveredEmail"
+            },
+            "title": "Undelivered",
+            "type": "array"
+          }
+        },
+        "required": [
+          "queued",
+          "alert_threshold",
+          "pending",
+          "undelivered"
+        ],
+        "title": "EmailOutboxView",
+        "type": "object"
+      },
       "EmailSentResponse": {
         "properties": {
           "email_id": {
@@ -3096,6 +3141,106 @@
         "title": "TravelRuleInfo",
         "type": "object"
       },
+      "UndeliveredEmail": {
+        "properties": {
+          "attempts": {
+            "default": 0,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "gave_up_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gave Up At"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "to",
+          "subject"
+        ],
+        "title": "UndeliveredEmail",
+        "type": "object"
+      },
       "UpcomingPurchase": {
         "properties": {
           "amount_usdt": {
@@ -3662,6 +3807,57 @@
           }
         ],
         "summary": "Alerts",
+        "tags": [
+          "user"
+        ]
+      }
+    },
+    "/api/admin/emails/undelivered": {
+      "get": {
+        "description": "What the email outbox could not deliver (and what is still retrying).",
+        "operationId": "undelivered_emails_api_admin_emails_undelivered_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailOutboxView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Undelivered Emails",
         "tags": [
           "user"
         ]

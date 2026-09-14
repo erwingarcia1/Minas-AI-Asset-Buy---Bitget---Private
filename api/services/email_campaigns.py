@@ -48,14 +48,14 @@ async def on_buy_executed(db, user: User, tx, purchase) -> None:
             exchange_rate=f"{tx.fill_price:.2f}" if tx.fill_price else "market",
             order_id=tx.order_id or "-")
         await email_service.queue(user.email, "🎉 Your first automated purchase",
-                                  html, text, template="first_purchase")
+                                  html, text, template="first_purchase", user_id=user.id)
         return
     crossed = [m for m in MILESTONES_USDT if total >= m and total - cost < m]
     if crossed:
         milestone = f"{max(crossed):,}"
         html, text = render("milestone", name=_name(user), milestone=milestone)
         await email_service.queue(user.email, f"🏆 {milestone} USDT invested",
-                                  html, text, template="milestone")
+                                  html, text, template="milestone", user_id=user.id)
 
 
 async def send_weekly_summaries() -> int:

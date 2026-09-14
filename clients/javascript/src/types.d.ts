@@ -158,6 +158,14 @@ export interface DashboardResponse {
   upcoming_purchases: UpcomingPurchase[];
 }
 
+export interface EmailOutboxView {
+  alert_threshold: number;
+  failures_this_hour?: number | null;
+  pending: Record<string, unknown>[];
+  queued: number;
+  undelivered: UndeliveredEmail[];
+}
+
 export interface EmailSentResponse {
   email_id?: string | null;
   sent: boolean;
@@ -538,6 +546,19 @@ export interface TravelRuleInfo {
   identity_type?: string | null;
   last_name?: string | null;
   member_code?: string | null;
+}
+
+export interface UndeliveredEmail {
+  attempts?: number;
+  category?: string | null;
+  gave_up_at?: number | null;
+  id?: string | null;
+  last_error?: string | null;
+  queued_at?: number | null;
+  subject: string;
+  template?: string | null;
+  to: string;
+  user_id?: string | null;
 }
 
 export interface UpcomingPurchase {

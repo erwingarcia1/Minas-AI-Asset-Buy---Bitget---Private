@@ -183,6 +183,15 @@ class DashboardResponse(TypedDict):
     upcoming_purchases: List[UpcomingPurchase]
 
 
+class EmailOutboxView(TypedDict):
+    """EmailOutboxView."""
+    alert_threshold: int
+    failures_this_hour: NotRequired[Optional[int]]
+    pending: List[Dict[str, Any]]
+    queued: int
+    undelivered: List[UndeliveredEmail]
+
+
 class EmailSentResponse(TypedDict):
     """EmailSentResponse."""
     email_id: NotRequired[Optional[str]]
@@ -605,6 +614,20 @@ class TravelRuleInfo(TypedDict):
     identity_type: NotRequired[Optional[str]]
     last_name: NotRequired[Optional[str]]
     member_code: NotRequired[Optional[str]]
+
+
+class UndeliveredEmail(TypedDict):
+    """UndeliveredEmail."""
+    attempts: NotRequired[int]
+    category: NotRequired[Optional[str]]
+    gave_up_at: NotRequired[Optional[float]]
+    id: NotRequired[Optional[str]]
+    last_error: NotRequired[Optional[str]]
+    queued_at: NotRequired[Optional[float]]
+    subject: str
+    template: NotRequired[Optional[str]]
+    to: str
+    user_id: NotRequired[Optional[str]]
 
 
 class UpcomingPurchase(TypedDict):

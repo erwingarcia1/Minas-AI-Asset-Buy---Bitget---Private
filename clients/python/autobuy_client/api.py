@@ -17,6 +17,7 @@ from .types import (
     CreateApplicantRequest,
     CreateApplicantResponse,
     DashboardResponse,
+    EmailOutboxView,
     EmailSentResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -109,6 +110,10 @@ class AdminApi:
         """Alerts — ``GET /api/admin/alerts``."""
         return self._http.request("GET", "/api/admin/alerts", auth=True)
 
+    def undelivered_emails(self, *, limit: Optional[int] = None) -> EmailOutboxView:
+        """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
+        return self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
+
     def force_retry(self, purchase_id: str) -> Any:
         """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
         return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
@@ -163,6 +168,10 @@ class AsyncAdminApi:
     async def alerts(self) -> List[AlertItem]:
         """Alerts — ``GET /api/admin/alerts``."""
         return await self._http.request("GET", "/api/admin/alerts", auth=True)
+
+    async def undelivered_emails(self, *, limit: Optional[int] = None) -> EmailOutboxView:
+        """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
+        return await self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
 
     async def force_retry(self, purchase_id: str) -> Any:
         """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
