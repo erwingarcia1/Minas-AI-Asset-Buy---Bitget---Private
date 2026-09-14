@@ -103,6 +103,16 @@ async def _notification_email(db, event: PurchaseEvent) -> None:
         if not Preferences.for_user(event.user).wants_email("email_purchase_confirmations"):
             logger.info("purchase confirmation email skipped (opted out): user=%s", event.user.id)
             return
+    if event.type == "buy_failed":
+        # One email per failed CYCLE, not per attempt: nothing on attempts 1 and 2 (they retry
+        # minutes later); one email when the cycle is exhausted (missed, next attempt named)
+        # and a distinct one when the purchase is stopped. A one-time purchase exhausts its
+        # attempts within ~15 minutes, so it still hears the same day.
+        x = event.extra or {}
+        if not (x.get("cycle_exhausted") or x.get("stopped")):
+            logger.info("buy_failed email withheld until the cycle is exhausted: purchase=%s attempt %s/%s",
+                        event.purchase.id, event.attempt, event.max_attempts)
+            return
     # failure emails (buy_failed, withdrawal_failed, withdrawal_needs_info) are never optional
     await email_service.send_purchase_event_email(event.user.email, event)
 
@@ -149,15 +159,20 @@ async def _slack(db, event: PurchaseEvent) -> None:
                          f"{str(event.error or '')[:200]}. Check the exchange before doing anything; "
                          "the purchase will not be retried automatically.")
         return
-    if event.type in FAILURE_EVENTS:
+    if event.type == "buy_failed":
+        # per-attempt buy failures are collapsed into one Slack line per scheduler run
+        # (see purchase_scheduler.execute_due_purchases); a stopped purchase is worth its own line
         x = event.extra or {}
-        outcome = (" :octagonal_sign: PURCHASE STOPPED — needs a human" if x.get("stopped")
-                   else f" :warning: cycle MISSED ({x.get('missed_cycles')} in a row), next attempt {x.get('next_execution')}"
-                   if x.get("cycle_exhausted") else "")
+        if x.get("stopped"):
+            await send_slack(f":octagonal_sign: AutoBuy PURCHASE STOPPED: {p.crypto_symbol} {p.amount_usd:.2f} USD "
+                             f"via {event.exchange or '?'} for user {event.user.id} after {p.failure_count} failed attempts"
+                             f"{', dry run' if event.dry_run else ''}: {str(event.error or '')[:200]} — needs a human "
+                             "(admin force-retry after fixing the cause, or the customer recreates it)")
+        return
+    if event.type in FAILURE_EVENTS:
         await send_slack(f":x: AutoBuy {event.type.replace('_', ' ')}: {p.crypto_symbol} "
-                         f"{p.amount_usd:.2f} USD via {event.exchange or '?'} for user {event.user.id} "
-                         f"(attempt {event.attempt}/{event.max_attempts}{', dry run' if event.dry_run else ''}): "
-                         f"{str(event.error or '')[:200]}{outcome}")
+                         f"{p.amount_usd:.2f} USD via {event.exchange or '?'} for user {event.user.id}"
+                         f"{', dry run' if event.dry_run else ''}: {str(event.error or '')[:200]}")
     elif event.type == "withdrawal_sent" and not event.dry_run:
         await send_slack(f":outbox_tray: AutoBuy withdrawal sent: {fmt_amount(event.tx.amount_executed or 0)} "
                          f"{p.crypto_symbol} to {p.wallet_address} ({p.blockchain_network}) "

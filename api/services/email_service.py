@@ -19,18 +19,13 @@ logger = logging.getLogger("autobuy.email")
 
 
 def _failure_outcome(event) -> str:
-    """What happens next after a failed attempt, from the executor's cycle info."""
+    """What happens next, from the executor's cycle info (the email is only sent once a cycle is exhausted)."""
     x = getattr(event, "extra", None) or {}
-    if x.get("stopped"):
-        return ("; this purchase has now been STOPPED after repeated failures. It will not run again until you "
-                "recreate it or contact support.")
-    if x.get("cycle_exhausted"):
-        nxt = x.get("next_execution")
-        when = nxt.strftime("%Y-%m-%d %H:%M UTC") if hasattr(nxt, "strftime") else "the next scheduled time"
-        return f"; this buy was missed for this cycle. The next attempt is at {when}."
-    if event.attempt < event.max_attempts:
-        return "; we will retry on the next run in a few minutes."
-    return "; the purchase is now marked failed."
+    nxt = x.get("next_execution")
+    if nxt is not None:
+        when = nxt.strftime("%Y-%m-%d %H:%M UTC") if hasattr(nxt, "strftime") else str(nxt)
+        return f". This buy was missed for this cycle; the next attempt is at {when}."
+    return ". The next scheduled run will try again."
 
 
 class EmailService:
@@ -106,11 +101,18 @@ class EmailService:
                     f"{p.wallet_address} until more information is provided: {event.error}. "
                     f"The coins remain on {event.exchange or 'the exchange'}; nothing will be retried automatically. "
                     "Contact support to add the required details, then retry the withdrawal.")
-        else:  # buy_failed
-            subject = f"{prefix}✗ Purchase failed: {coin}"
-            text = (f"We tried to buy {coin} for {p.amount_usd:.2f} USD on {event.exchange or 'your exchange'} "
-                    f"but it failed: {event.error}. This buy did not happen and no money was spent. "
-                    f"Attempt {event.attempt}/{event.max_attempts}" + _failure_outcome(event))
+        elif event.type == "buy_failed" and (getattr(event, "extra", None) or {}).get("stopped"):
+            subject = f"{prefix}⛔ Your {coin} purchase has been stopped"
+            text = (f"We could not buy {coin} for {p.amount_usd:.2f} USD on {event.exchange or 'your exchange'} after "
+                    f"{p.failure_count} attempts (last error: {event.error}). This buy did not happen and no money was "
+                    f"spent. The purchase has now been STOPPED and will not run again on its own. Fix the cause (for "
+                    f"example the exchange key or your balance) and create it again, or contact "
+                    f"{settings.support_email or 'support'} to have it re-armed.")
+        else:  # buy_failed: the cycle's attempts are exhausted (a one-time purchase reaches this within ~15 min)
+            subject = f"{prefix}✗ Purchase missed: {coin}"
+            text = (f"We tried {event.max_attempts} times to buy {coin} for {p.amount_usd:.2f} USD on "
+                    f"{event.exchange or 'your exchange'}; the last error was: {event.error}. This buy did not happen "
+                    f"and no money was spent" + _failure_outcome(event))
         category = "failure" if event.type in ("buy_failed", "withdrawal_failed", "withdrawal_needs_info") else "confirmation"
         return await self.queue(user_email, subject, f"<p>{text}</p>", text, template="purchase",
                                 category=category, user_id=getattr(event.user, "id", None))

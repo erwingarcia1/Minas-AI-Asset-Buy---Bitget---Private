@@ -309,10 +309,11 @@ async def test_outbox_unavailable_falls_back_to_one_short_inline_attempt(working
 
 async def test_purchase_failure_emails_are_queued_as_failure_category(db, user, binance_key):
     from tests.fake_gateway import BuyFails
-    await make_purchase(db, user, binance_key, purchase_type="dca", next_execution=NOW)
-    await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
+    await make_purchase(db, user, binance_key, purchase_type="dca", frequency="one_time", next_execution=NOW)
+    for _ in range(3):   # the failure email goes out once the cycle is exhausted (here: the stop)
+        await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     (m,) = await queued()
-    assert m["category"] == "failure" and m["user_id"] == str(user.id) and "Purchase failed" in m["subject"]
+    assert m["category"] == "failure" and m["user_id"] == str(user.id) and "has been stopped" in m["subject"]
 
 
 def test_scheduler_has_the_outbox_job():

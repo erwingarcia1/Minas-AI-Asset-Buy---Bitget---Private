@@ -4146,7 +4146,7 @@
     },
     "/api/admin/alerts": {
       "get": {
-        "description": "Live evaluation of the docs/ALERTING.md conditions the app can see for\nthe Auto-Buy execute_purchases job. Heartbeats come from Redis, so they\ndescribe whichever worker actually ran, not the one answering.",
+        "description": "Live evaluation of the docs/ALERTING.md conditions (see api/services/admin_alerts.py).",
         "operationId": "alerts_api_admin_alerts_get",
         "responses": {
           "200": {

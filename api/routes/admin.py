@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
 from api.config import settings
+from api.services.admin_alerts import AlertItem, compute_alerts
 from api.models import Purchase, PurchaseTransaction, User
 from api.routes.user import UTCModel, get_current_user
 
@@ -543,147 +544,11 @@ async def undelivered_emails(limit: int = Query(100, ge=1, le=500), admin: User 
                            undelivered=[UndeliveredEmail(**u) for u in await email_outbox.undelivered(limit)])
 
 
-class AlertItem(BaseModel):
-    name: str
-    severity: str  # ok | warning | critical
-    value: str
-    detail: str
-
-
-def _parse_iso(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def _severity_for_failures(fails: Optional[int]) -> str:
-    if fails is None:
-        return "warning"
-    return "critical" if fails >= 5 else "warning" if fails >= 2 else "ok"
-
-
 @router.get("/alerts", response_model=List[AlertItem])
 async def alerts(admin: User = Depends(require_admin),
                  db: AsyncSession = Depends(get_db)):
-    """Live evaluation of the docs/ALERTING.md conditions the app can see for
-    the Auto-Buy execute_purchases job. Heartbeats come from Redis, so they
-    describe whichever worker actually ran, not the one answering."""
-    from api.services import scheduler_state
-    from api.tasks.purchase_scheduler import INTERVAL_MINUTES, MISFIRE_GRACE_SECONDS
-
-    now = datetime.now(timezone.utc)
-    items = []
-
-    # -- pause switch (both schedulers) --
-    try:
-        pause = await scheduler_state.pause_info()
-        items.append(AlertItem(
-            name="schedulers_paused",
-            severity="warning" if pause["paused"] else "ok",
-            value="paused" if pause["paused"] else "running",
-            detail=("Admin pause switch for the Auto-Buy job"
-                    + (f"; paused by {pause['by']} since {pause['since']}" if pause["paused"] else ""))))
-    except scheduler_state.PauseStateUnavailable:
-        pause = {"paused": None}
-        items.append(AlertItem(
-            name="schedulers_paused", severity="critical", value="unknown",
-            detail="Redis unreadable: the Auto-Buy job fails closed and skips every run until it is back"))
-
-    # -- email delivery (outbox give-ups this hour) --
-    from api.services import email_outbox
-    failed_emails = await email_outbox.failures_this_hour()
-    threshold = email_outbox.failure_alert_threshold()
-    items.append(AlertItem(
-        name="email_delivery_failures",
-        severity="warning" if failed_emails is None else "critical" if failed_emails > threshold else "ok",
-        value="unknown" if failed_emails is None else str(failed_emails),
-        detail=(f"Emails given up on after all retries this hour (critical above {threshold}); "
-                "see GET /api/admin/emails/undelivered")))
-
-    # -- Auto-Buy execute_purchases job --
-    ab = await scheduler_state.status("autobuy")
-    ab_fails = ab["consecutive_failures"]
-    items.append(AlertItem(
-        name="autobuy_consecutive_failures",
-        severity=_severity_for_failures(ab_fails),
-        value="unknown" if ab_fails is None else str(ab_fails),
-        detail="Auto-Buy job: consecutive runs that raised or failed every due purchase (critical at 5)"))
-
-    overdue_after = timedelta(minutes=INTERVAL_MINUTES * 2, seconds=MISFIRE_GRACE_SECONDS)
-    ab_last = _parse_iso(ab["last_run_at"])
-    if ab_last is None:
-        ab_sev = "warning"
-    elif now - ab_last > overdue_after:
-        ab_sev = "critical"
-    elif ab["last_result"] in ("error", "failed"):
-        ab_sev = "warning"
-    else:
-        ab_sev = "ok"
-    items.append(AlertItem(
-        name="autobuy_run",
-        severity=ab_sev,
-        value=ab["last_run_at"] or "never",
-        detail=(f"Auto-Buy job: last execute_purchases run (every {INTERVAL_MINUTES} min; "
-                f"critical if silent >{int(overdue_after.total_seconds() // 60)} min)"
-                + (f"; last result {ab['last_result']}" if ab["last_result"] else "")
-                + (f" {ab['last_counts']}" if ab["last_counts"] else ""))))
-
-    # -- failed Auto-Buy execution attempts in the last 24h (purchase_transactions) --
-    from api.services import history
-    # -- fill deviations (warning band) --
-    from api.services import fill_watch
-    deviations = await fill_watch.count_24h()
-    items.append(AlertItem(
-        name="fill_deviations",
-        severity=("warning" if deviations is None else "critical" if deviations >= fill_watch.CRITICAL_ALERT_THRESHOLD
-                  else "warning" if deviations >= fill_watch.WARN_ALERT_THRESHOLD else "ok"),
-        value="unknown" if deviations is None else str(deviations),
-        detail=(f"Successful buys in the last day whose fill deviated more than FILL_WARN_PCT ({settings.fill_warn_pct:g}%) "
-                f"from the expected amount (warning at {fill_watch.WARN_ALERT_THRESHOLD}, critical at "
-                f"{fill_watch.CRITICAL_ALERT_THRESHOLD}); details at GET /api/admin/fills/deviations")))
-
-    # -- stalled / missed recurring purchases --
-    from api.tasks.purchase_scheduler import MAX_ATTEMPTS
-    stopped = (await db.execute(select(func.count(Purchase.id)).where(
-        Purchase.status == "failed", Purchase.failure_count >= MAX_ATTEMPTS,
-        Purchase.updated_at >= now - timedelta(days=7)))).scalar_one()
-    items.append(AlertItem(
-        name="stopped_purchases",
-        severity="critical" if stopped else "ok", value=str(stopped),
-        detail="Purchases stopped in the last 7 days after repeated failed attempts (one-time after 3 attempts, "
-               "recurring after 3 missed cycles): the customer has stopped buying and must recreate or be re-armed"))
-    missed = (await db.execute(select(func.count(Purchase.id)).where(
-        Purchase.status == "active", Purchase.failure_count >= MAX_ATTEMPTS,
-        Purchase.updated_at >= now - timedelta(days=1)))).scalar_one()
-    items.append(AlertItem(
-        name="missed_cycles",
-        severity="warning" if missed else "ok", value=str(missed),
-        detail="Recurring purchases that missed a whole cycle in the last day (3 failed attempts) and moved on to their "
-               "next interval; they stop after 3 missed cycles in a row"))
-    parked = (await db.execute(select(func.count(Purchase.id)).where(Purchase.status == "needs_review"))).scalar_one()
-    items.append(AlertItem(
-        name="purchases_needing_review",
-        severity="critical" if parked else "ok", value=str(parked),
-        detail="Purchases parked as needs_review (buy outcome unknown or fill implausible): resolve them at "
-               "GET /api/admin/purchases?status=needs_review -> /review -> /resolve; they never retry on their own"))
-
-    network_1h = await history.count_network_failures_since(db, now - timedelta(hours=1))
-    items.append(AlertItem(
-        name="exchange_unreachable",
-        severity="critical" if network_1h >= 5 else "warning" if network_1h >= 2 else "ok",
-        value=str(network_1h),
-        detail=("Buy attempts in the last hour that failed because the exchange could not be reached "
-                "(DNS, timeout, connection): missed buys the customer is emailed about; warning at 2, critical at 5")))
-    failed_24h = await history.count_failed_since(db, now - timedelta(days=1))
-    items.append(AlertItem(
-        name="failed_transactions_24h",
-        severity="warning" if failed_24h > 10 else "ok",
-        value=str(failed_24h), detail="Auto-Buy job: failed execution attempts in the last 24h"))
-
-    return items
+    """Live evaluation of the docs/ALERTING.md conditions (see api/services/admin_alerts.py)."""
+    return await compute_alerts(db)
 
 
 # ------------------------------------------------------------------ control

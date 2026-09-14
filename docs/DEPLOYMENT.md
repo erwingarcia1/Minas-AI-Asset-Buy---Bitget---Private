@@ -140,3 +140,13 @@ public access). Thresholds, PromQL sketches, and the runbook: `docs/ALERTING.md`
 | Purchases not executing | `/health` scheduler state; user KYC verified? key verified? `AUTOBUY_DRY_RUN`? |
 | "cannot decrypt" on keys | `ENCRYPTION_KEY` changed without running the rotation script |
 | Slow requests | JSON logs: `slow_query` warnings; worker count; DB indexes (`EXPLAIN`) |
+
+## Environment variables and docker-compose
+
+The `api` service in `docker-compose.yml` uses an explicit `environment:`
+list; docker compose does NOT forward `.env` to the container by itself, so a
+variable that is read by `api/config.py` but missing from that list is
+silently ignored in production (the container runs on the code default).
+Every variable the code reads must therefore appear in the compose list in
+`${VAR:-default}` style and in `.env.example`. `tests/test_env_plumbing.py`
+compares the three and fails CI on drift in either direction.

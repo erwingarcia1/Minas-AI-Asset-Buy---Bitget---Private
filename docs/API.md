@@ -338,6 +338,13 @@ stopped (status `failed`, `last_error` "PURCHASE STOPPED", Slack and the
 attempts. A success resets the streak. `missed_cycles` and
 `purchases_needing_review` are admin alerts too.
 
+Customer emails on failed buys follow the cycle, not the attempt: nothing
+on attempts 1 and 2, one "Purchase missed" email when the cycle's attempts
+are exhausted (naming the next attempt), one "purchase has been stopped"
+email when it stops. Slack gets one line per run for failed attempts and one
+per stopped purchase. Critical admin alerts are emailed to `SUPPORT_EMAIL`
+and every admin every 15 minutes (once per condition per 6 h).
+
 Way out of `needs_review`: `GET /api/admin/purchases?status=needs_review`
 lists parked purchases with their attempts; `GET /api/admin/purchases/{id}/review`
 asks the exchange, by our client id, what became of each order (state, fill,

@@ -11,6 +11,24 @@ advisory lock per run). The admin pause switch lives in Redis
 (`autobuy:schedulers:paused`), the job reports a heartbeat there, and
 `GET /health` → `schedulers.autobuy` shows it, whichever worker answers.
 
+## How alerts reach you
+
+`GET /api/admin/alerts` (the Alerts tab of the admin console, refreshed every
+30 s) is the live view. Without opening it you still hear about critical
+conditions: the `admin_alert_digest` scheduler job runs every 15 minutes and
+emails `SUPPORT_EMAIL` plus every admin account when an alert is critical, at
+most once per condition every 6 hours (Redis `autobuy:alerts:emailed:<name>`);
+it logs at CRITICAL as well. Slack (`SLACK_WEBHOOK_URL`, now passed through
+docker-compose) adds real-time lines: one per scheduler run for failed buy
+attempts, one per stopped purchase, one per needs_review, one per exchange
+withdrawal failure.
+
+Customer emails on failed buys: none on attempts 1 and 2 (they retry minutes
+later); one "Purchase missed" email when a cycle's 3 attempts are exhausted,
+naming the next attempt time; one distinct "purchase has been stopped" email
+when the purchase stops. A failed one-time purchase reaches the stop within
+about 15 minutes, so it hears the same day.
+
 ## Alert rules
 
 | Condition | Query sketch | Severity | Likely cause / first action |

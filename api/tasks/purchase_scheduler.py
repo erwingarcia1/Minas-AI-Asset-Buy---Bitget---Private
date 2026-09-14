@@ -830,6 +830,23 @@ async def poll_withdrawals(db: AsyncSession, now: Optional[datetime] = None,
     return counts
 
 
+async def _slack_run_summary(failures: list, dry_run: bool) -> None:
+    """One Slack line per run for failed buy attempts (per-attempt lines would flood a
+    channel during an exchange outage). Stopped purchases get their own line from the events."""
+    try:
+        from api.services.slack_service import send_slack
+        first_p, first_tx = failures[0]
+        errors = {}
+        for _, tx in failures:
+            key = (tx.error_message or "")[:60]
+            errors[key] = errors.get(key, 0) + 1
+        top = ", ".join(f"{n}x {e!r}" for e, n in sorted(errors.items(), key=lambda kv: -kv[1])[:3])
+        await send_slack(f":x: AutoBuy run{' (dry run)' if dry_run else ''}: {len(failures)} purchase(s) failed a buy attempt "
+                         f"and will retry next tick — {top}")
+    except Exception:
+        logger.exception("run failure summary could not be sent")
+
+
 async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None,
                                 gateway: Optional[ExchangeGateway] = None,
                                 dry_run: Optional[bool] = None) -> dict:
@@ -876,6 +893,7 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
             due = await find_due_purchases(db, now)
             logger.info("auto-buy run: %d due purchase(s) found in %.0f ms (db connect + query)",
                         len(due), (time.perf_counter() - q_start) * 1000)
+            run_failures: list = []   # (purchase, tx) for the one-line Slack summary
             for purchase in due:
                 try:
                     tx = await execute_one(db, purchase, now, gateway, dry_run)
@@ -890,6 +908,10 @@ async def execute_due_purchases(db: AsyncSession, now: Optional[datetime] = None
                     counts["executed"] += 1
                 else:
                     counts["failed"] += 1
+                    if tx.tx_type == "buy" and tx.status == "failed":
+                        run_failures.append((purchase, tx))
+            if run_failures:
+                await _slack_run_summary(run_failures, dry_run)
         finally:
             await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
             await lock_conn.commit()
@@ -985,6 +1007,37 @@ def poll_withdrawals_job() -> dict:
         return {"confirmed": 0, "failed": 0, "pending": 0, "skipped": 0}
 
 
+ALERT_DIGEST_LOCK_KEY = 0x41424144  # "ABAD"
+
+
+async def _alert_digest_once() -> dict:
+    from api.services.admin_alerts import notify_critical_alerts
+    engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
+    try:
+        async with engine.connect() as lock_conn:
+            got = (await lock_conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": ALERT_DIGEST_LOCK_KEY})).scalar()
+            if not got:
+                return {"critical": [], "emailed": [], "recipients": [], "skipped": "lock"}
+            try:
+                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    return await notify_critical_alerts(session)
+            finally:
+                await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ALERT_DIGEST_LOCK_KEY})
+                await lock_conn.commit()
+    finally:
+        await engine.dispose()
+
+
+def admin_alert_digest() -> dict:
+    """APScheduler entry point (every 15 min): email admins about critical alerts,
+    at most once per condition every 6 hours. Works without Slack."""
+    try:
+        return asyncio.run(_alert_digest_once())
+    except Exception:
+        logger.exception("admin alert digest failed")
+        return {}
+
+
 # Session-level advisory lock for the weekly digest: one worker sends, the
 # other three find the lock taken and return.
 DIGEST_LOCK_KEY = 0x41425744  # "ABWD"
@@ -1033,6 +1086,8 @@ def build_scheduler():
                   max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE_SECONDS)
     sched.add_job(drain_email_outbox, "interval", minutes=1, id="drain_email_outbox",
                   max_instances=1, coalesce=True, misfire_grace_time=55)
+    sched.add_job(admin_alert_digest, "interval", minutes=15, id="admin_alert_digest",
+                  max_instances=1, coalesce=True, misfire_grace_time=600)
     sched.add_job(send_weekly_digest, "cron", day_of_week="mon", hour=9, minute=0, id="weekly_digest",
                   max_instances=1, coalesce=True, misfire_grace_time=3600)
     sched.add_listener(job_event_listener, EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR)

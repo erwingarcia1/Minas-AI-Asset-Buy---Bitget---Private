@@ -136,12 +136,18 @@ async def test_real_subscribers_email_campaign_webhook_slack(db, user, binance_k
     assert delivered[0]["data"]["tx_type"] == "buy" and delivered[1]["data"]["tx_type"] == "withdrawal"
     assert slack_calls == [], "dry-run withdrawals do not page Slack"
 
-    # a failing second purchase alerts Slack and emails the failure
-    await make_purchase(db, user, binance_key, next_execution=NOW)
+    # a failing second purchase: Slack gets one run-summary line, the webhook fires per attempt,
+    # and the customer is emailed once the cycle is exhausted (a one-time purchase: after 3 attempts)
+    await make_purchase(db, user, binance_key, frequency="one_time", next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
-    assert any("buy failed" in s for s in slack_calls)
-    assert any(m["subject"].startswith("[DRY RUN] ✗ Purchase failed") for m in capture.sent)
+    assert any("1 purchase(s) failed a buy attempt" in s for s in slack_calls)
+    assert not any(m["subject"].startswith("[DRY RUN] ✗ Purchase") or "stopped" in m["subject"] for m in capture.sent), \
+        "no email on attempt 1"
     assert delivered[-1]["event"] == "purchase.buy_failed" and delivered[-1]["data"]["error"]
+    for _ in range(2):
+        await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
+    assert any("has been stopped" in m["subject"] for m in capture.sent), "the stop is the one email it gets"
+    assert any("PURCHASE STOPPED" in s for s in slack_calls)
     assert purchase_events.emit is not None
 
 
