@@ -8,10 +8,15 @@ vi.mock("@/api/endpoints", () => ({
   userAPI: { exchangeKeys: vi.fn(), addExchangeKey: vi.fn(), verifyExchangeKey: vi.fn(), deleteExchangeKey: vi.fn(), sendVerification: vi.fn(),
              supportedExchanges: vi.fn().mockResolvedValue(["bitget"]) },
   reportsAPI: { performance: vi.fn().mockResolvedValue({ has_data: false }) },
+  notificationAPI: { preferences: vi.fn(), update: vi.fn() },
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z" }, logout: vi.fn() }) }));
-import { userAPI } from "@/api/endpoints";
+import { notificationAPI, userAPI } from "@/api/endpoints";
+
+const PREFS = { email_enabled: true, email_purchase_confirmations: true, email_weekly_summary: true, email_milestones: true,
+  always_on_emails: ["password reset", "password changed", "purchase failed", "withdrawal failed", "withdrawal needs information"],
+  sms_enabled: false, push_enabled: true, quiet_hours_start: 21, quiet_hours_end: 8, phone_number: null, has_device_token: false };
 
 const FAILED = { id: "k1", exchange: "bitget", api_key_masked: "bg_a...z9", verified: false, verification_status: "failed",
   verification_error: "Bitget rejected this server's IP address (error 40018): Invalid IP. Add the server's IP to the key's allowlist, or create the key without an IP restriction.",
@@ -20,7 +25,7 @@ const VERIFIED_WITHDRAW = { ...FAILED, id: "k2", exchange: "binance", verified: 
   verified_at: "2026-09-11T11:40:00Z", withdrawal_enabled: true };
 
 describe("Settings: exchange keys", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(notificationAPI.preferences).mockResolvedValue(PREFS as never); });
 
   it("shows a failed key with its readable reason and a retry button, never 'pending' forever", async () => {
     vi.mocked(userAPI.exchangeKeys).mockResolvedValue([FAILED] as never);
@@ -110,5 +115,32 @@ describe("Settings: Bitget guidance", () => {
     expect(g).toHaveTextContent(/Whitelist our server's IP/);
     expect(screen.getByTestId("server-ip-placeholder")).toHaveTextContent("our server IP will be shown here");
     expect(g).toHaveTextContent(/Bitget address book/);
+  });
+});
+
+describe("Settings: email notifications", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    vi.mocked(notificationAPI.preferences).mockResolvedValue(PREFS as never);
+    vi.mocked(notificationAPI.update).mockImplementation(async (body) => ({ ...PREFS, ...body }) as never);
+  });
+
+  it("lets the user switch optional emails off and lists the always-on ones", async () => {
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    const weekly = await screen.findByLabelText(/Weekly summary/);
+    expect(weekly).toBeChecked();
+    expect(screen.getByTestId("always-on")).toHaveTextContent(/password reset, password changed, purchase failed, withdrawal failed/);
+    expect(screen.queryByLabelText(/purchase failed|password/i)).toBeNull();   // no toggle for always-on emails
+    fireEvent.click(weekly);
+    await waitFor(() => expect(notificationAPI.update).toHaveBeenCalledWith({ email_weekly_summary: false }));
+    await waitFor(() => expect(screen.getByLabelText(/Weekly summary/)).not.toBeChecked());
+    expect(screen.getByText(/Security and failure alerts are still sent/)).toBeInTheDocument();
+  });
+
+  it("the unsubscribe link route highlights the notifications section", async () => {
+    render(<MemoryRouter initialEntries={["/settings/notifications"]}><Settings /></MemoryRouter>);
+    const section = await screen.findByRole("region", { name: "Email notifications" });
+    expect(section.className).toMatch(/ring-2/);
   });
 });

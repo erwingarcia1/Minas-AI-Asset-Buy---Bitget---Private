@@ -20,6 +20,14 @@ logger = logging.getLogger("autobuy.notify")
 LARGE_TRANSACTION_USDT = 1000.0
 
 
+# Email categories a user may switch off. Security emails (password reset /
+# changed, wallet-change hold) and transactional failure emails (purchase
+# failed, withdrawal failed / needs info) are never optional.
+OPTIONAL_EMAIL_CATEGORIES = ("email_purchase_confirmations", "email_weekly_summary", "email_milestones")
+ALWAYS_ON_EMAILS = ("password reset", "password changed", "purchase failed", "withdrawal failed",
+                    "withdrawal needs information")
+
+
 @dataclass
 class Preferences:
     email_enabled: bool = True
@@ -27,6 +35,16 @@ class Preferences:
     push_enabled: bool = True
     quiet_hours_start: int = 21   # 9pm, user-local expressed as UTC offset hours
     quiet_hours_end: int = 8      # 8am
+    # optional email categories (see OPTIONAL_EMAIL_CATEGORIES)
+    email_purchase_confirmations: bool = True   # "purchase complete" / "sent to your wallet"
+    email_weekly_summary: bool = True           # Monday digest
+    email_milestones: bool = True               # first purchase, invested-amount milestones
+
+    def wants_email(self, category: str) -> bool:
+        """False only for an optional category the user switched off."""
+        if category not in OPTIONAL_EMAIL_CATEGORIES:
+            return True
+        return bool(getattr(self, category, True))
 
     @classmethod
     def for_user(cls, user: User) -> "Preferences":

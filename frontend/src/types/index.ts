@@ -377,3 +377,18 @@ export interface AutoBuyPurchaseUpdate {
   blockchain_network?: BlockchainNetwork;
   confirm_wallet_address?: string;
 }
+
+/** Notification settings. Security and failure emails are always sent; see always_on_emails. */
+export interface NotificationPreferences {
+  email_enabled: boolean;
+  email_purchase_confirmations: boolean;
+  email_weekly_summary: boolean;
+  email_milestones: boolean;
+  always_on_emails: string[];
+  sms_enabled: boolean;
+  push_enabled: boolean;
+  quiet_hours_start: number;
+  quiet_hours_end: number;
+  phone_number?: string | null;
+  has_device_token: boolean;
+}

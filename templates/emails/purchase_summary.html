@@ -9,4 +9,5 @@
   {% endfor %}
 </table>
 <p><b>Total: {{ total_usdt }} USDT</b> across {{ count }} purchase(s){% if failed %} · {{ failed }} failed (see your dashboard){% endif %}.</p>
+{% if unsubscribe_url %}<p style="color:#5a6763;font-size:12px;margin-top:24px;">You receive this weekly summary because it is switched on in your notification settings. <a href="{{ unsubscribe_url }}">Unsubscribe or change which emails you get</a>. Security and failure alerts are always sent.</p>{% endif %}
 {% endblock %}

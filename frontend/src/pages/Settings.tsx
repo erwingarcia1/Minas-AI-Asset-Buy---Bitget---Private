@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
-import { authAPI, userAPI } from "@/api/endpoints";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
+import { authAPI, notificationAPI, userAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
 import Integrations from "@/components/Settings/Integrations";
@@ -8,6 +9,7 @@ import { useAsync } from "@/hooks/useAsync";
 import { useAuth } from "@/hooks/useAuth";
 import { passwordProblem } from "@/utils/validation";
 import { capitalize, fmtDate } from "@/utils/format";
+import NotificationSettings from "@/components/Settings/NotificationSettings";
 
 type Msg = { kind: "error" | "success"; text: string } | null;
 
@@ -18,6 +20,12 @@ const PERMISSION_LABELS: Record<string, string> = {
 
 export default function Settings() {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const notificationsRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    // the "unsubscribe" link in emails lands on /settings/notifications
+    if (location.pathname.endsWith("/notifications") && typeof notificationsRef.current?.scrollIntoView === "function") notificationsRef.current.scrollIntoView({ block: "start" });
+  }, [location.pathname]);
   const keys = useAsync(() => userAPI.exchangeKeys());
   const supported = useAsync(() => userAPI.supportedExchanges().catch(() => ["bitget"]));
   const [pwMsg, setPwMsg] = useState<Msg>(null);
@@ -89,6 +97,8 @@ export default function Settings() {
         {mailMsg && <Alert kind={mailMsg.kind}>{mailMsg.text}</Alert>}
         <button className="btn-secondary" onClick={() => void sendVerification()}>Send verification email</button>
       </section>
+
+      <NotificationSettings ref={notificationsRef} highlight={location.pathname.endsWith("/notifications")} api={notificationAPI} />
 
       <section className="card space-y-4">
         <h2 className="font-semibold">Exchange API keys</h2>

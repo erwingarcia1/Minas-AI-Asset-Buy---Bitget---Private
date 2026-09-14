@@ -5,7 +5,7 @@ import type {
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
   PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
- RetryWithdrawalResult } from "@/types";
+ RetryWithdrawalResult, NotificationPreferences } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
 
@@ -25,6 +25,11 @@ export const authAPI = {
   validateResetToken: (token: string) => data<{ valid: boolean }>(api.post("/auth/reset-password/validate", { token })),
   /** 400 = invalid/expired/used link, 422 = password policy. */
   resetPassword: (token: string, new_password: string) => api.post("/auth/reset-password", { token, new_password }),
+};
+
+export const notificationAPI = {
+  preferences: () => data<NotificationPreferences>(api.get("/notifications/preferences")),
+  update: (body: Partial<NotificationPreferences>) => data<NotificationPreferences>(api.put("/notifications/preferences", body)),
 };
 
 export const userAPI = {

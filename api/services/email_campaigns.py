@@ -35,6 +35,9 @@ async def on_buy_executed(db, user: User, tx, purchase) -> None:
     """First-purchase congratulations and invested-amount milestones, computed
     from purchase_transactions (the Auto-Buy history)."""
     from api.services import history
+    from api.services.notifications import Preferences
+    if not Preferences.for_user(user).wants_email("email_milestones"):
+        return
     count, total = await history.completed_count_and_total(db, user.id)
     cost = float(tx.cost_usd if tx.cost_usd is not None else purchase.amount_usd)
     if count == 1:
@@ -59,14 +62,18 @@ async def send_weekly_summaries() -> int:
     """Monday-morning digest for every user with Auto-Buy activity in the last
     7 days. Returns how many digests were sent."""
     from api.services import history
+    from api.services.notifications import Preferences
     since = datetime.now(timezone.utc) - timedelta(days=7)
-    sent = 0
+    sent = skipped = 0
     async with AsyncSessionLocal() as db:
         user_ids = await history.users_with_activity_since(db, since)
         for user_id in user_ids:
             user = (await db.execute(
                 select(User).where(User.id == user_id))).scalar_one_or_none()
             if user is None:
+                continue
+            if not Preferences.for_user(user).wants_email("email_weekly_summary"):
+                skipped += 1
                 continue
             completed = await history.completed_rows(db, user_id, since=since)
             failed = await history.count_failed_since(db, since, user_id=user_id)
@@ -77,9 +84,16 @@ async def send_weekly_summaries() -> int:
             total = sum(cost for _, _, cost in grouped)
             html, text = render(
                 "purchase_summary", name=_name(user), rows=rows,
-                total_usdt=f"{total:.2f}", count=len(rows), failed=failed)
+                total_usdt=f"{total:.2f}", count=len(rows), failed=failed,
+                unsubscribe_url=weekly_summary_unsubscribe_link())
             if await email_service._send(user.email, f"Your week at {settings.app_name}",
                                          html, text, template="purchase_summary"):
                 sent += 1
-    logger.info("weekly summaries sent to %d user(s)", sent)
+    logger.info("weekly summaries sent to %d user(s), %d opted out", sent, skipped)
     return sent
+
+
+def weekly_summary_unsubscribe_link() -> str:
+    """Notification settings page; the weekly summary can be switched off there."""
+    from api.utils.links import build_app_link
+    return build_app_link("/settings/notifications")

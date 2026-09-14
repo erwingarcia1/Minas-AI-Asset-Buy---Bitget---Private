@@ -98,6 +98,12 @@ async def _notification_email(db, event: PurchaseEvent) -> None:
         return
     if event.type == "buy_executed" and event.purchase.purchase_type == "autobuy":
         return
+    if event.type in ("buy_executed", "withdrawal_sent"):
+        from api.services.notifications import Preferences
+        if not Preferences.for_user(event.user).wants_email("email_purchase_confirmations"):
+            logger.info("purchase confirmation email skipped (opted out): user=%s", event.user.id)
+            return
+    # failure emails (buy_failed, withdrawal_failed, withdrawal_needs_info) are never optional
     await email_service.send_purchase_event_email(event.user.email, event)
 
 
