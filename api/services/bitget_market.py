@@ -311,8 +311,13 @@ def check_withdrawal(coin: str, amount_usd: float, price: float, symbol: dict, c
 
 
 def live_ask(coin: str) -> float:
-    """Current best ask (no cache) for the minimum-withdrawal estimate."""
-    t = _client().get_ticker(f"{coin.upper()}USDT")
+    """Current best ask (no cache) for the minimum-withdrawal estimate. Any
+    failure to reach Bitget is MarketDataUnavailable (-> 503, nothing created),
+    never a raw client error (-> 500)."""
+    try:
+        t = _client().get_ticker(f"{coin.upper()}USDT")
+    except Exception as exc:
+        raise MarketDataUnavailable(f"live price for {coin} unavailable: {exc}") from exc
     price = t.get("ask") or t.get("last")
     if not price or price <= 0:
         raise MarketDataUnavailable(f"no live price for {coin}")

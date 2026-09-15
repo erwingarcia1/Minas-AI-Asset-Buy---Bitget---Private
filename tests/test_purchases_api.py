@@ -371,3 +371,49 @@ async def test_transactions_expose_tx_type(client, db, user, binance_key):
     out = (await client.get(f"{P}/{p.id}", headers=auth(user))).json()
     assert out["latest_transaction"]["tx_type"] == "accumulation"
     assert out["transactions"][0]["tx_type"] == "accumulation"
+
+
+async def test_below_minimum_withdrawal_is_rejected_server_side_even_when_posted_directly(client, user, bitget_key, db):
+    """A disabled button is not a guard: the raw endpoint, with the legacy
+    withdraw_immediately flag and no purchase_type, must refuse a 15 USD BTC
+    autobuy and create nothing."""
+    from sqlalchemy import func, select
+    from api.models import Purchase
+    before = (await db.execute(select(func.count(Purchase.id)).where(Purchase.user_id == user.id))).scalar_one()
+    raw = {"crypto_symbol": "BTC", "amount_usd": 15, "wallet_address": BTC_MAIN, "blockchain_network": "BTC",
+           "frequency": "daily", "exchange_account_id": str(bitget_key.id), "withdraw_immediately": True}
+    r = await client.post(P, json=raw, headers=auth(user))
+    assert r.status_code == 422, r.text
+    d = r.json()["detail"]
+    assert d["error"] == "below_minimum_withdrawal" and d["details"]["amount_usd"] == 15.0 and d["details"]["chain"] == "BTC"
+    assert d["details"]["min_withdraw_amount"] == 0.0005 and d["details"]["minimum_usd"] > 15
+    after = (await db.execute(select(func.count(Purchase.id)).where(Purchase.user_id == user.id))).scalar_one()
+    assert after == before, "nothing was created"
+    # the same guard covers switching an existing accumulate purchase to withdraw-immediately
+    ok = await client.post(P, json={**raw, "withdraw_immediately": False}, headers=auth(user))
+    assert ok.status_code == 201
+    pid = ok.json()["purchase_id"]
+    sw = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy", "wallet_address": BTC_MAIN,
+                                             "blockchain_network": "BTC", "confirm_wallet_address": BTC_MAIN}, headers=auth(user))
+    assert sw.status_code == 422 and sw.json()["detail"]["error"] == "below_minimum_withdrawal"
+    assert (await client.get(f"{P}/{pid}", headers=auth(user))).json()["purchase_type"] == "dca", "still accumulate"
+
+
+async def test_price_lookup_failure_during_validation_is_503_not_500(client, user, bitget_key, monkeypatch, db):
+    """Seen live: Bitget dropped the ticker connection while a 15 USD autobuy was
+    being validated and the API answered 500. It must answer 503 with the plain
+    message, and create nothing, exactly like the other market-data failures."""
+    from sqlalchemy import func, select
+    from api.models import Purchase
+    from api.services import bitget_market as bm
+
+    class Down:
+        def get_ticker(self, symbol):
+            raise ConnectionError("('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))")
+    monkeypatch.setattr(bm, "_client", lambda: Down())
+    monkeypatch.setattr(bm, "live_ask", bm.live_ask_unstubbed)   # the real lookup, against a client that drops the connection
+    before = (await db.execute(select(func.count(Purchase.id)).where(Purchase.user_id == user.id))).scalar_one()
+    r = await client.post(P, json=body(bitget_key, amount_usd=15, withdraw_immediately=True), headers=auth(user))
+    assert r.status_code == 503, r.text
+    assert r.json()["detail"] == {"error": "exchange_data_unavailable", "details": {"message": bm.UNAVAILABLE_MESSAGE}}
+    assert (await db.execute(select(func.count(Purchase.id)).where(Purchase.user_id == user.id))).scalar_one() == before
