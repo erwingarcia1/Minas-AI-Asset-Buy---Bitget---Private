@@ -37,7 +37,10 @@ services:
   # Admin web UI (client registry). Published on localhost only — expose it
   # to your VAs through Tailscale (`tailscale serve`), never publicly.
   webapp:
-    build: .
+    # No `build:` here on purpose: both services run the same image, and
+    # compose >= 2.40 builds services in parallel, so two `build: .` blocks
+    # naming the same tag race on export ("image ... already exists").
+    # The autobuy service builds bitget-autobuy:latest; this one reuses it.
     image: bitget-autobuy:latest
     container_name: bitget-autobuy-webapp
     restart: unless-stopped
