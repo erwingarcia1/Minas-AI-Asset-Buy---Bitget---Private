@@ -59,7 +59,9 @@ services:
     profiles: ["prod"]
     restart: always
     ports:
-      - "8000:8000"
+      # Localhost only: the web container reaches it over the compose network,
+      # and tailscale serve / the host nginx front it for everyone else.
+      - "127.0.0.1:8000:8000"
     environment:
       API_ENV: ${API_ENV:-production}
       REQUIRE_PRODUCTION: ${REQUIRE_PRODUCTION:-}
