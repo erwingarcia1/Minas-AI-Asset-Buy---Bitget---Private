@@ -115,6 +115,29 @@ services:
       redis:
         condition: service_healthy
 
+  # Web frontend: nginx serving the built SPA (frontend/dist — build it with
+  # `cd frontend && npm ci && npm run build`, or rsync a laptop build to the
+  # server) with an SPA fallback, forwarding /api/ and /health to the api
+  # container. Published on localhost only; `tailscale serve` (or the host
+  # nginx in deployment/nginx.conf) fronts it with HTTPS.
+  web:
+    image: nginx:1.27-alpine
+    container_name: autobuy_web
+    profiles: ["prod"]
+    restart: always
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./deployment/nginx.web.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/index.html"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   # Optional metrics scraper:  docker compose --profile monitoring up -d
   prometheus:
     image: prom/prometheus:latest

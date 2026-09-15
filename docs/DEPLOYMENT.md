@@ -60,6 +60,16 @@ Build it on the server (or in CI) and let nginx serve it:
 ```bash
 cd frontend && npm ci && npm run build          # -> frontend/dist
 sudo rsync -a --delete frontend/dist/ /var/www/autobuy/frontend/dist/
+```
+
+Alternatively, the prod compose profile ships a `web` service (nginx, published
+on 127.0.0.1:8080) that serves `frontend/dist` straight from the checkout and
+forwards `/api/` + `/health` to the `api` container (config:
+`deployment/nginx.web.conf`). Build on a laptop, rsync `frontend/dist/` into
+`~/autobuy/frontend/dist/` on the server, and front 8080 with `tailscale serve`
+or the host nginx — no Node on the server required.
+
+```bash
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
