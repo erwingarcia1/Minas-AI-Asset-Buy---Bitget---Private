@@ -417,3 +417,45 @@ async def test_price_lookup_failure_during_validation_is_503_not_500(client, use
     assert r.status_code == 503, r.text
     assert r.json()["detail"] == {"error": "exchange_data_unavailable", "details": {"message": bm.UNAVAILABLE_MESSAGE}}
     assert (await db.execute(select(func.count(Purchase.id)).where(Purchase.user_id == user.id))).scalar_one() == before
+
+
+BC1Q = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"   # valid Bitcoin mainnet bech32
+
+
+@pytest.mark.parametrize("chain, address, expect", [
+    ("BEP20", BC1Q, "BEP20 needs a 0x… address"),           # Bitcoin address on an EVM chain
+    ("BTC", ETH, "not a valid Bitcoin address"),             # 0x address on the Bitcoin chain
+])
+async def test_address_chain_mismatch_is_rejected_server_side_when_posted_directly(client, db, user, bitget_key, chain, address, expect):
+    """A red X in the form is not a guard: the raw endpoint refuses an address whose
+    format does not belong to the chain, on create, on the switch to
+    withdraw-immediately, and on the address book — and creates nothing."""
+    from sqlalchemy import func
+    from api.models.purchase import Wallet
+    before = (await db.execute(select(func.count(Purchase.id)).where(Purchase.user_id == user.id))).scalar_one()
+    raw = {"crypto_symbol": "BTC", "amount_usd": 60, "wallet_address": address, "blockchain_network": chain,
+           "frequency": "daily", "exchange_account_id": str(bitget_key.id), "withdraw_immediately": True}
+    r = await client.post(P, json=raw, headers=auth(user))
+    assert r.status_code == 422, r.text
+    d = r.json()["detail"]
+    assert d["error"] == "invalid_wallet_address" and d["details"]["blockchain_network"] == chain
+    assert expect in d["details"]["message"], d["details"]["message"]
+    assert (await db.execute(select(func.count(Purchase.id)).where(Purchase.user_id == user.id))).scalar_one() == before
+    # accumulate purchase with the same wrong wallet on file: also refused (the wallet is validated whenever given)
+    assert (await client.post(P, json={**raw, "withdraw_immediately": False}, headers=auth(user))).status_code == 422
+    # switching a clean accumulate purchase to withdraw with the mismatched pair: refused, stays accumulate
+    ok = await client.post(P, json={"crypto_symbol": "BTC", "amount_usd": 60, "frequency": "daily",
+                                    "exchange_account_id": str(bitget_key.id), "purchase_type": "dca"}, headers=auth(user))
+    assert ok.status_code == 201
+    pid = ok.json()["purchase_id"]
+    sw = await client.put(f"{P}/{pid}", json={"purchase_type": "autobuy", "wallet_address": address, "blockchain_network": chain,
+                                             "confirm_wallet_address": address}, headers=auth(user))
+    assert sw.status_code == 422 and sw.json()["detail"]["error"] == "invalid_wallet_address"
+    assert (await client.get(f"{P}/{pid}", headers=auth(user))).json()["purchase_type"] == "dca"
+    # the address book applies the same rule
+    w = await client.post("/api/wallets", json={"address": address, "blockchain_network": chain}, headers=auth(user))
+    assert w.status_code == 422 and w.json()["detail"]["error"] == "invalid_wallet_address"
+    assert (await db.execute(select(func.count(Wallet.id)).where(Wallet.user_id == user.id, Wallet.address == address))).scalar_one() == 0
+    # and the matching pairs pass the same check
+    good = {"BEP20": ETH, "BTC": BC1Q}[chain]
+    assert (await client.post(P, json={**raw, "wallet_address": good}, headers=auth(user))).status_code == 201
