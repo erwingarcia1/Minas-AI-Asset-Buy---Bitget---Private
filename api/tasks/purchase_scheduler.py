@@ -240,7 +240,8 @@ class ExchangeClientGateway:
                                      else WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol, chain),
                                      client_oid=client_oid, dry_run=dry_run,
                                      travel_rule=purchase.travel_rule_dict() or None,
-                                     tag=purchase.wallet_memo or None)
+                                     # only tag chains carry a memo; passed only when present
+                                     **({"tag": purchase.wallet_memo} if purchase.wallet_memo else {}))
         except Exception as exc:
             raise self._wrap(exc, "withdraw") from exc
         return {"withdrawal_id": result["withdrawal_id"], "chain": chain, "size": size, "expected_received": received,
