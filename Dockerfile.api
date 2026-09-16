@@ -17,6 +17,11 @@ COPY alembic.ini .
 COPY scripts/ scripts/
 COPY templates/ templates/
 COPY deployment/entrypoint.sh /entrypoint.sh
+# The commit this image was built from: /health reports it and scripts/deploy.sh
+# asserts it equals the checkout, so "deployed" always means the code moved.
+ARG GIT_COMMIT=unknown
+LABEL org.opencontainers.image.revision=$GIT_COMMIT
+RUN printf '%s' "$GIT_COMMIT" > /app/GIT_COMMIT
 RUN chmod +x /entrypoint.sh && chown -R autobuy /app
 
 USER autobuy

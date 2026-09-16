@@ -54,6 +54,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}   # scripts/deploy.sh sets it to the checkout's HEAD
     image: autobuy-api:latest
     container_name: autobuy_api
     profiles: ["prod"]

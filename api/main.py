@@ -100,6 +100,19 @@ app.add_middleware(
 )
 
 # Health check endpoint
+def build_commit() -> str:
+    """Commit stamped into the image by Dockerfile.api (GIT_COMMIT build arg)."""
+    import pathlib
+    for candidate in (pathlib.Path(__file__).resolve().parent.parent / "GIT_COMMIT", pathlib.Path("/app/GIT_COMMIT")):
+        try:
+            value = candidate.read_text().strip()
+            if value:
+                return value
+        except OSError:
+            continue
+    return "unknown"
+
+
 @app.get("/health")
 @limiter.exempt
 async def health_check(request: Request):
@@ -124,6 +137,7 @@ async def health_check(request: Request):
         "status": "healthy",
         "environment": settings.api_env,
         "version": "1.0.0",
+        "commit": build_commit(),   # the git commit this image was built from ("unknown" outside a stamped image)
         "dry_run": settings.autobuy_dry_run,
         "schedulers": {
             "paused": pause["paused"],           # None = Redis unreadable (the job fails closed)

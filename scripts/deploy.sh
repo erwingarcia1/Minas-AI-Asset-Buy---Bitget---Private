@@ -84,6 +84,9 @@ if ! docker info >/dev/null 2>&1 || { [ -e .env ] && [ ! -r .env ]; }; then
     fi
 fi
 compose() { $SUDO docker compose "$@"; }
+# The compose profile that carries the platform API. docker-compose.yml declares
+# profiles: ["prod"]; anything else (e.g. "production") silently deploys nothing.
+PLATFORM_PROFILE="prod"
 
 echo "==> Deploy target: $TARGET   branch: $BRANCH   $( [ "$CHECK" = 1 ] && echo '(CHECK ONLY — no changes)' )"
 
@@ -239,23 +242,61 @@ deploy_platform() {
     . "$(dirname "${BASH_SOURCE[0]:-$0}")/lib/platform_env_checks.sh" 2>/dev/null || . scripts/lib/platform_env_checks.sh
     PLATFORM_ENV_SUDO="$SUDO" check_platform_env .env || exit 1
     echo "==> [platform] Validating docker-compose.yml ..."
-    if ! compose -p autobuy-platform --profile prod config -q; then
+    if ! compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config -q; then
         echo "ERROR: docker-compose.yml failed validation — fix it before deploying." >&2
         exit 1
     fi
-    echo "==> [platform] Building + starting Postgres, Redis and the API (project: autobuy-platform) ..."
-    compose -p autobuy-platform --profile prod up -d --build
+    # A profile that matches nothing makes `up -d` a silent no-op ("Container
+    # autobuy_postgres Running", exit 0) while the old API keeps serving stale
+    # code and env. Refuse unless the api service is part of the resolved config.
+    if ! compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config --services 2>/dev/null | grep -qx api; then
+        echo "ERROR: compose profile '$PLATFORM_PROFILE' does not include the api service — nothing would be deployed." >&2
+        echo "       docker-compose.yml declares the API under profiles: [\"prod\"]." >&2
+        exit 1
+    fi
+
+    local before_id before_created expected_commit
+    before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_api 2>/dev/null || echo none)"
+    before_created="$($SUDO docker inspect --format '{{.Created}}' autobuy_api 2>/dev/null || echo none)"
+    expected_commit="$(git rev-parse HEAD)"
+
+    echo "==> [platform] Building + starting Postgres, Redis and the API (project: autobuy-platform, commit ${expected_commit:0:7}) ..."
+    GIT_COMMIT="$expected_commit" compose -p autobuy-platform --profile "$PLATFORM_PROFILE" up -d --build
+
+    # 1. the api container must have been (re)created — same id and created-at means nothing moved
+    local after_id after_created
+    after_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_api 2>/dev/null || echo none)"
+    after_created="$($SUDO docker inspect --format '{{.Created}}' autobuy_api 2>/dev/null || echo none)"
+    if [ "$after_id" = "none" ]; then
+        echo "ERROR: no autobuy_api container after 'up -d' — the deploy did not start the API." >&2
+        exit 1
+    fi
+    if [ "$after_id" = "$before_id" ] && [ "$after_created" = "$before_created" ]; then
+        echo "ERROR: the autobuy_api container was not recreated (same id ${after_id:0:12}, created $after_created)." >&2
+        echo "       The old build is still running with its old environment. Nothing was deployed." >&2
+        exit 1
+    fi
+    echo "==> [platform] api container recreated: ${before_id:0:12} -> ${after_id:0:12} (created $after_created)"
+
     echo "==> [platform] Waiting for the API to pass /health (migrations run at boot) ..."
-    local _try
+    local _try health
     for _try in $(seq 1 30); do
-        if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:8000/health; then
-            echo "==> [platform] API is healthy: http://127.0.0.1:8000/health"
+        if health="$(curl -fsS --max-time 3 http://127.0.0.1:8000/health 2>/dev/null)"; then
+            # 2. the running code must be the commit we just deployed
+            local running_commit
+            running_commit="$(printf '%s' "$health" | sed -n 's/.*"commit": *"\([^"]*\)".*/\1/p')"
+            if [ "$running_commit" != "$expected_commit" ]; then
+                echo "ERROR: /health reports commit '${running_commit:-<none>}' but the checkout is $expected_commit." >&2
+                echo "       The container that answered is not running the deployed code (stale image or another process on :8000)." >&2
+                exit 1
+            fi
+            echo "==> [platform] API is healthy and running commit ${running_commit:0:7}: http://127.0.0.1:8000/health"
             return 0
         fi
         sleep 4
     done
     echo "ERROR: API did not become healthy within 2 minutes. Recent logs:" >&2
-    compose -p autobuy-platform --profile prod logs --tail 40 api >&2 || true
+    compose -p autobuy-platform --profile "$PLATFORM_PROFILE" logs --tail 40 api >&2 || true
     exit 1
 }
 

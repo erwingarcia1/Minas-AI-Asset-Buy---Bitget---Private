@@ -15,6 +15,16 @@ running — the two stacks can never displace each other's containers. Never
 run `--remove-orphans` against the legacy project. On the server, deploys go
 through `scripts/deploy.sh platform` (see the README's AWS section).
 
+The compose profile is exactly `prod` (`profiles: ["prod"]` on the api
+service). Any other profile name makes `docker compose up -d` a silent no-op:
+it prints "Container autobuy_postgres Running", exits 0, and leaves the old
+API serving stale code and environment. `scripts/deploy.sh platform` now
+refuses a profile that does not include the api service, asserts that the
+`autobuy_api` container was actually recreated (id / created-at changed), and
+asserts that `/health` reports the checkout's commit (`GIT_COMMIT` build arg
+stamped into the image). The API binds `127.0.0.1:8000` only; nginx fronts it
+in production and the Vite proxy in development.
+
 The entrypoint applies Alembic migrations, then serves via **gunicorn with 4
 uvicorn workers** (measured: p95 245ms @10 concurrent vs 1.6s single-worker).
 The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse them.
