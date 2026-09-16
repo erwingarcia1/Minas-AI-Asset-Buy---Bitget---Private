@@ -36,6 +36,10 @@ class Wallet(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     address = Column(String(128), nullable=False, unique=True)
     blockchain_network = Column(String(40), nullable=False)  # exchange chain name (BTC, ERC20, SOL, ...)
+    # Chains that need a tag/memo (XRP, Stellar): who the address belongs to, as the
+    # customer declared it (self_custody | exchange; NULL = never asked), and the tag.
+    destination_type = Column(String(20), nullable=True)
+    memo = Column(String(64), nullable=True)
     label = Column(String(100), nullable=True)
     verified_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -59,6 +63,8 @@ class Purchase(Base):
     wallet_address = Column(String(128), nullable=True)
     # exchange chain name (BTC, ERC20, SOL, ...); None on accumulate purchases without a wallet
     blockchain_network = Column(String(40), nullable=True)
+    wallet_destination_type = Column(String(20), nullable=True)   # self_custody | exchange | NULL (never asked)
+    wallet_memo = Column(String(64), nullable=True)               # destination tag / memo sent with withdrawals
     purchase_type = Column(Enum(*PURCHASE_TYPES, name="purchase_type"), nullable=False, default="autobuy",
                            server_default="autobuy")
     status = Column(String(20), nullable=False, default="active")
@@ -125,6 +131,7 @@ class PurchaseTransaction(Base):
     withdrawal_fee = Column(Float, nullable=True)
     withdrawal_fee_currency = Column(String(10), nullable=True)
     expected_received = Column(Float, nullable=True)         # withdrawal: what the wallet should receive after the chain fee
+    withdrawal_memo = Column(String(64), nullable=True)      # withdrawal: the tag/memo actually sent
     tx_hash = Column(String(128), nullable=True)             # on-chain hash once the exchange reports it
     # Idempotency + row lineage (migration 017)
     client_oid = Column(String(64), nullable=True, unique=True)   # written before the order is sent

@@ -119,6 +119,22 @@ def _client_for(account: APIKey):
                           exchange=account.exchange)
 
 
+def tag_requirement(purchase: Purchase, chain: str) -> Optional[str]:
+    """Why a withdrawal on a tag chain must NOT be sent, or None when it may.
+    Refuses when the destination type was never recorded, and when the address
+    is an exchange account with no memo. Self-custody sends without a memo."""
+    from api.utils.chains import TAG_CHAINS, family_for_chain
+    word = TAG_CHAINS.get(family_for_chain(chain), "memo")
+    dtype = (purchase.wallet_destination_type or "").lower() or None
+    if dtype not in ("self_custody", "exchange"):
+        return (f"{chain} withdrawals need a destination {word}: this purchase never recorded whether the "
+                f"address is self-custody or an exchange account. Edit the purchase and answer that question.")
+    if dtype == "exchange" and not (purchase.wallet_memo or "").strip():
+        return (f"the {purchase.crypto_symbol} address is an exchange account but no {word} is stored; "
+                f"sending without it would strand the coins. Edit the purchase and add the {word}.")
+    return None
+
+
 class ExchangeClientGateway:
     """Buys, reads fills and withdraws through the platform's venue-agnostic ExchangeClient."""
 
@@ -196,6 +212,14 @@ class ExchangeClientGateway:
                 if not entry["withdrawable"]:
                     raise ExecutionError(f"Bitget has {purchase.crypto_symbol} withdrawals on {chain} suspended",
                                          stage="withdraw", code="CHAIN_NOT_WITHDRAWABLE")
+                if entry.get("need_tag"):
+                    # Live Bitget says this chain uses a destination tag / memo. Never send to an
+                    # exchange address without one, and never send when nobody said what the
+                    # address is: the coins would land in a shared account with nothing linking
+                    # them to the customer.
+                    tag_check = tag_requirement(purchase, chain)
+                    if tag_check:
+                        raise ExecutionError(tag_check, stage="withdraw", code="TAG_REQUIRED")
                 plan = bitget_market.withdrawal_plan(amount, entry)
                 size, fee, received = plan["size"], plan["fee"], plan["received"]
                 fee_currency = purchase.crypto_symbol
@@ -215,10 +239,12 @@ class ExchangeClientGateway:
                                      network=chain if account.exchange == "bitget"
                                      else WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol, chain),
                                      client_oid=client_oid, dry_run=dry_run,
-                                     travel_rule=purchase.travel_rule_dict() or None)
+                                     travel_rule=purchase.travel_rule_dict() or None,
+                                     tag=purchase.wallet_memo or None)
         except Exception as exc:
             raise self._wrap(exc, "withdraw") from exc
         return {"withdrawal_id": result["withdrawal_id"], "chain": chain, "size": size, "expected_received": received,
+                "memo": purchase.wallet_memo or None,
                 "withdrawal_fee": result.get("fee", fee), "withdrawal_fee_currency": result.get("fee_currency", fee_currency),
                 "tx_hash": result.get("tx_hash"), "raw_status": "simulated" if dry_run else "submitted"}
 
@@ -633,6 +659,7 @@ async def _withdraw_after_buy(db: AsyncSession, purchase: Purchase, account: API
     wd = PurchaseTransaction(purchase_id=purchase.id, status="pending", tx_type="withdrawal",
                              parent_transaction_id=buy.id, client_oid=f"abw-{uuid.uuid4().hex[:24]}",
                              amount_executed=amount, withdrawal_chain=purchase.blockchain_network,
+                             withdrawal_memo=purchase.wallet_memo or None,
                              order_id=buy.order_id, fill_price=buy.fill_price)
     db.add(wd)
     await db.commit()
@@ -664,8 +691,9 @@ async def _withdraw_after_buy(db: AsyncSession, purchase: Purchase, account: API
         wd.raw_status = result.get("raw_status")
         wd.executed_at = now
         await db.commit()
-        logger.info("purchase %s withdrawal %s sent: %s %s -> %s (%s), dry_run=%s", purchase.id, wd.id, amount,
-                    purchase.crypto_symbol, purchase.wallet_address, wd.withdrawal_chain, dry_run)
+        logger.info("purchase %s withdrawal %s sent: %s %s -> %s (%s%s), dry_run=%s", purchase.id, wd.id, amount,
+                    purchase.crypto_symbol, purchase.wallet_address, wd.withdrawal_chain,
+                    f", {'memo' if wd.withdrawal_memo else 'no memo'}", dry_run)
         events.append(("withdrawal_sent", None, wd))
     except Exception as exc:
         wd.executed_at = now

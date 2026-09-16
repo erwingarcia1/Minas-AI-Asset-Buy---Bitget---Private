@@ -83,7 +83,7 @@ class Venue:
 
     def __init__(self, *a, **k): pass
     def get_available(self, coin): return Venue.available
-    def withdraw(self, coin, address, amount, network=None, client_oid=None, dry_run=True, travel_rule=None):
+    def withdraw(self, coin, address, amount, network=None, client_oid=None, dry_run=True, travel_rule=None, tag=None):
         Venue.withdrawals.append({"amount": amount, "network": network, "dry_run": dry_run})
         return {"withdrawal_id": "DRY" if dry_run else "WD-live", "amount": amount, "dry_run": dry_run}
 

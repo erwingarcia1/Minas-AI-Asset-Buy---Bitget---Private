@@ -16,6 +16,7 @@ import type {
   CreateApplicantRequest,
   CreateApplicantResponse,
   DashboardResponse,
+  DestinationCheckOut,
   EmailOutboxView,
   EmailSentResponse,
   FillDeviation,
@@ -273,6 +274,8 @@ export declare class V2Api {
   constructor(http: HttpTransport);
   /** Coin Market — `GET /api/v2/market/coins/{coin}` */
   coinMarket(coin: string, query?: { amount_usd?: number | null }): Promise<CoinMarketOut>;
+  /** Check Withdrawal Destination — `GET /api/v2/market/destination` */
+  checkWithdrawalDestination(query: { chain: string; address: string; destination_type?: string | null; memo?: string | null }): Promise<DestinationCheckOut>;
   /** List Purchases — `GET /api/v2/purchases` */
   listPurchases(): Promise<PurchaseOut[]>;
   /** Create Purchase — `POST /api/v2/purchases` */

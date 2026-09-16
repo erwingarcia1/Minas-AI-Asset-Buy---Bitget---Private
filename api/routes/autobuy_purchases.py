@@ -24,7 +24,7 @@ from api.models.purchase import PURCHASE_FREQUENCIES, PURCHASE_TYPES
 from api.routes.user import get_current_user
 from api.services import bitget_market, wallet_hold
 from api.utils.address_denylist import DENYLIST_REASON, is_denylisted
-from api.utils.chains import DEFAULT_CHAIN_FOR_COIN, family_for_chain, normalize_chain, validate_address_for_chain
+from api.utils.chains import DEFAULT_CHAIN_FOR_COIN, check_destination, family_for_chain, normalize_chain, validate_address_for_chain
 from api.utils.exchange_networks import SUPPORTED_CRYPTOS
 
 logger = logging.getLogger("autobuy.purchases.v2")
@@ -76,6 +76,9 @@ class PurchaseCreateRequest(BaseModel):
     # Deprecated alias for purchase_type (true = autobuy, false = dca); must agree with it when both are sent.
     withdraw_immediately: Optional[bool] = None
     travel_rule_info: Optional[TravelRuleInfo] = None
+    # Tag chains (XRP Ledger, Stellar): who the address belongs to and the tag/memo.
+    destination_type: Optional[str] = Field(default=None, max_length=20)   # self_custody | exchange
+    memo: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("purchase_type")
     @classmethod
@@ -148,6 +151,8 @@ class PurchaseUpdateRequest(BaseModel):
     blockchain_network: Optional[str] = None
     confirm_wallet_address: Optional[str] = None
     travel_rule_info: Optional[TravelRuleInfo] = None   # replaces the stored details; send {} to clear
+    destination_type: Optional[str] = Field(default=None, max_length=20)
+    memo: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("purchase_type")
     @classmethod
@@ -204,6 +209,7 @@ class TransactionOut(BaseModel):
     withdrawal_fee: Optional[float] = None
     withdrawal_fee_currency: Optional[str] = None
     expected_received: Optional[float] = None   # withdrawal rows: what the wallet should receive
+    withdrawal_memo: Optional[str] = None       # withdrawal rows: the tag/memo sent
     tx_hash: Optional[str] = None
     raw_status: Optional[str] = None
 
@@ -217,6 +223,8 @@ class PurchaseOut(BaseModel):
     frequency: str
     wallet_address: Optional[str] = None   # None on accumulate purchases without a wallet on file
     blockchain_network: Optional[str] = None   # None on accumulate purchases: coins are held on the exchange
+    wallet_destination_type: Optional[str] = None   # self_custody | exchange (tag chains only)
+    wallet_memo: Optional[str] = None               # destination tag / memo sent with withdrawals
     purchase_type: str            # autobuy | dca
     withdraw_immediately: bool    # derived: purchase_type == "autobuy" (compatibility)
     exchange_account_id: Optional[UUID] = None
@@ -268,6 +276,7 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
     base = dict(
         id=p.id, crypto_symbol=p.crypto_symbol, amount_usd=p.amount_usd, frequency=p.frequency,
         wallet_address=p.wallet_address, blockchain_network=p.blockchain_network,
+        wallet_destination_type=p.wallet_destination_type, wallet_memo=p.wallet_memo,
         purchase_type=p.purchase_type, withdraw_immediately=p.purchase_type == "autobuy",
         exchange_account_id=p.exchange_account_id,
         exchange=p.exchange_account.exchange if p.exchange_account else None,
@@ -296,17 +305,21 @@ def _reject(error: str, details: dict) -> HTTPException:
     return HTTPException(status_code=422, detail={"error": error, "details": details})
 
 
-def _check_wallet(address: str, chain: str, crypto: str) -> None:
-    """422 unless the address is a valid, spendable address for the chain's format."""
+def _check_wallet(address: str, chain: str, crypto: str, destination_type: Optional[str] = None,
+                  memo: Optional[str] = None) -> dict:
+    """422 unless the address is a valid, spendable address for the chain's format
+    and, on tag chains, the destination question is answered consistently.
+    Returns the normalised destination {address, destination_type, memo}."""
     if is_denylisted(address):
         raise _reject("wallet_address_denylisted", {
             "wallet_address": address, "message": DENYLIST_REASON})
-    ok, reason = validate_address_for_chain(address, chain)
-    if not ok:
-        raise _reject("invalid_wallet_address", {
+    d = check_destination(address, chain, destination_type, memo)
+    if not d["ok"]:
+        raise _reject(d["error"], {
             "wallet_address": address, "blockchain_network": chain, "expected_family": family_for_chain(chain),
-            "message": f"{reason} ({crypto} on {chain})",
+            "needs_tag": d.get("needs_tag"), "message": f"{d['message']} ({crypto} on {chain})",
         })
+    return d
 
 
 async def _validate_against_exchange(account: APIKey, crypto: str, amount_usd: float, chain: Optional[str],
@@ -357,10 +370,14 @@ async def create_purchase(
     Bitget's minimum, when the chain is not withdrawable, when the amount after
     fees is below Bitget's minimum withdrawal (autobuy), or when the exchange
     account is not the caller's."""
+    destination = None
     if payload.wallet_address is not None:
-        _check_wallet(payload.wallet_address, payload.blockchain_network, payload.crypto_symbol)
+        destination = _check_wallet(payload.wallet_address, payload.blockchain_network, payload.crypto_symbol,
+                                    payload.destination_type, payload.memo)
         # after a password reset/change: only addresses this user already uses, for 24h
-        await wallet_hold.check_new_address(db, current_user, payload.wallet_address, "create_purchase")
+        await wallet_hold.check_new_address(db, current_user, destination["address"], "create_purchase")
+    elif payload.destination_type or payload.memo:
+        raise _reject("wallet_address_required", {"message": "destination_type and memo describe a wallet address; add the address"})
 
     account = (await db.execute(select(APIKey).where(
         APIKey.id == payload.exchange_account_id, APIKey.user_id == current_user.id))).scalar_one_or_none()
@@ -374,7 +391,10 @@ async def create_purchase(
 
     purchase = Purchase(
         user_id=current_user.id, exchange_account_id=account.id, crypto_symbol=payload.crypto_symbol,
-        amount_usd=payload.amount_usd, frequency=payload.frequency, wallet_address=payload.wallet_address,
+        amount_usd=payload.amount_usd, frequency=payload.frequency,
+        wallet_address=destination["address"] if destination else None,
+        wallet_destination_type=destination["destination_type"] if destination else None,
+        wallet_memo=destination["memo"] if destination else None,
         blockchain_network=payload.blockchain_network, purchase_type=payload.purchase_type,
         travel_rule_info=payload.travel_rule_info.to_json() if payload.travel_rule_info else None,
         status="active", failure_count=0,
@@ -418,10 +438,18 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     if p.status in ("cancelled", "completed", "failed"):
         raise HTTPException(status_code=409, detail=f"Purchase is {p.status} and cannot be changed")
     if (payload.status is None and payload.amount_usd is None and payload.frequency is None
-            and payload.purchase_type is None and payload.wallet_address is None and payload.travel_rule_info is None):
+            and payload.purchase_type is None and payload.wallet_address is None and payload.travel_rule_info is None
+            and payload.destination_type is None and payload.memo is None):
         raise HTTPException(status_code=400, detail="Nothing to update")
     if payload.travel_rule_info is not None:
         p.travel_rule_info = payload.travel_rule_info.to_json()
+    if payload.wallet_address is None and (payload.destination_type is not None or payload.memo is not None):
+        if not p.wallet_address:
+            raise _reject("wallet_address_required", {"message": "destination_type and memo describe a wallet address; add the address first"})
+        d = _check_wallet(p.wallet_address, p.blockchain_network, p.crypto_symbol,
+                          payload.destination_type if payload.destination_type is not None else p.wallet_destination_type,
+                          payload.memo if payload.memo is not None else p.wallet_memo)
+        p.wallet_destination_type, p.wallet_memo = d["destination_type"], d["memo"]
     if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
         # switching ON withdraw-immediately: blocked outright during the wallet-change hold,
         # otherwise real address + network + typed confirmation, every time
@@ -434,11 +462,14 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
         if payload.confirm_wallet_address != address:
             raise _reject("wallet_confirmation_mismatch", {
                 "message": "Type the wallet address again in confirm_wallet_address to confirm the switch"})
-        _check_wallet(address, network, p.crypto_symbol)
+        d = _check_wallet(address, network, p.crypto_symbol,
+                          payload.destination_type if payload.destination_type is not None else p.wallet_destination_type,
+                          payload.memo if payload.memo is not None else p.wallet_memo)
         if p.exchange_account is not None:
             await _validate_against_exchange(p.exchange_account, p.crypto_symbol, float(payload.amount_usd or p.amount_usd),
                                              network, withdraw=True)
-        p.wallet_address, p.blockchain_network, p.purchase_type = address, network, "autobuy"
+        p.wallet_address, p.blockchain_network, p.purchase_type = d["address"], network, "autobuy"
+        p.wallet_destination_type, p.wallet_memo = d["destination_type"], d["memo"]
         logger.info("purchase switched to autobuy", extra={"purchase_id": str(p.id), "user_id": str(current_user.id),
                                                            "network": network})
     elif payload.purchase_type == "dca" and p.purchase_type != "dca":
@@ -447,12 +478,13 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     elif payload.wallet_address is not None:
         # changing the wallet on an existing purchase: same checks as creation
         network = payload.blockchain_network or p.blockchain_network or DEFAULT_CHAIN_FOR_COIN.get(p.crypto_symbol)
-        _check_wallet(payload.wallet_address, network, p.crypto_symbol)
-        await wallet_hold.check_new_address(db, current_user, payload.wallet_address, "change_wallet")
+        d = _check_wallet(payload.wallet_address, network, p.crypto_symbol, payload.destination_type, payload.memo)
+        await wallet_hold.check_new_address(db, current_user, d["address"], "change_wallet")
         if p.purchase_type == "autobuy" and payload.confirm_wallet_address != payload.wallet_address:
             raise _reject("wallet_confirmation_mismatch", {
                 "message": "Type the wallet address again in confirm_wallet_address to change where coins are sent"})
-        p.wallet_address, p.blockchain_network = payload.wallet_address, network
+        p.wallet_address, p.blockchain_network = d["address"], network
+        p.wallet_destination_type, p.wallet_memo = d["destination_type"], d["memo"]
     if payload.status == "active" and p.status != "active" and p.exchange_account is None:
         raise HTTPException(status_code=409, detail={
             "error": "exchange_key_removed",
@@ -501,7 +533,7 @@ async def retry_withdrawal(purchase_id: UUID, current_user: User = Depends(get_c
                                                     "details": {"message": "No filled buy with a failed withdrawal was found"}})
     if p.exchange_account is None or not p.exchange_account.verified:
         raise _reject("exchange_key_unverified", {"message": "The purchase's exchange key is missing or unverified"})
-    _check_wallet(p.wallet_address, p.blockchain_network, p.crypto_symbol)
+    _check_wallet(p.wallet_address, p.blockchain_network, p.crypto_symbol, p.wallet_destination_type, p.wallet_memo)
     await _validate_against_exchange(p.exchange_account, p.crypto_symbol, float(p.amount_usd), p.blockchain_network, withdraw=True)
     wd = await ps.retry_withdrawal(db, p, gateway=_gateway())
     logger.info("withdrawal retried", extra={"purchase_id": str(p.id), "user_id": str(current_user.id),

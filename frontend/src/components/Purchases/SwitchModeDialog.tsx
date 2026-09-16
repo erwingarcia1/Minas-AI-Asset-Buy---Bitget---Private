@@ -5,6 +5,7 @@ import { Alert } from "@/components/Common";
 import type { AutoBuyPurchase, BlockchainNetwork, ChainInfo } from "@/types";
 import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain } from "@/utils/chains";
 import { chainSummary } from "./PurchaseForm";
+import { DestinationFields, destinationBody, destinationOk, type DestinationState } from "./DestinationFields";
 
 interface Props {
   purchase: AutoBuyPurchase;
@@ -22,6 +23,8 @@ export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
   const [confirm, setConfirm] = useState("");
   const [network, setNetwork] = useState<BlockchainNetwork>(purchase.blockchain_network ?? DEFAULT_CHAIN_FOR_COIN[purchase.crypto_symbol] ?? "");
   const [chains, setChains] = useState<ChainInfo[]>([]);
+  const [destination, setDestination] = useState<DestinationState>({
+    destinationType: purchase.wallet_destination_type ?? "", memo: purchase.wallet_memo ?? "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +42,8 @@ export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
       : null
     : null;
   const confirmed = confirm.trim() === address.trim() && address.trim().length > 0;
-  const canSubmit = !busy && verdict?.ok === true && confirmed && !networkWarning;
+  const needsTag = !!chainInfo?.need_tag && address.trim().length > 0;
+  const canSubmit = !busy && verdict?.ok === true && confirmed && !networkWarning && destinationOk(network, needsTag, destination);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -48,7 +52,7 @@ export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
     try {
       await autoBuyAPI.update(purchase.id, {
         purchase_type: "autobuy", wallet_address: address.trim(), blockchain_network: network,
-        confirm_wallet_address: confirm.trim(),
+        confirm_wallet_address: confirm.trim(), ...destinationBody(needsTag, destination),
       });
       onDone();
     } catch (err) { setError(errorMessage(err, "Could not switch the purchase")); }
@@ -76,6 +80,8 @@ export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
           <label className="label" htmlFor="sw-address">Wallet address</label>
           <input id="sw-address" className={`input font-mono ${verdict ? (verdict.ok ? "border-green-500" : "border-red-500") : ""}`} autoComplete="off" spellCheck={false} value={address} onChange={(e) => setAddress(e.target.value)} />
           {verdict && <p className={`mt-1 text-xs ${verdict.ok ? "text-green-700" : "text-red-600"}`}>{verdict.reason}</p>}
+          {needsTag && <DestinationFields coin={purchase.crypto_symbol} chain={network} address={address} addressValid={verdict?.ok === true}
+                                          value={destination} onChange={setDestination} idPrefix="sw-dest" />}
         </div>
         <div>
           <label className="label" htmlFor="sw-confirm">Type the address again to confirm</label>

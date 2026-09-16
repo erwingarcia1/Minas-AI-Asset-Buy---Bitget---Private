@@ -1,3 +1,4 @@
+import { tagLabelForChain } from "@/utils/chains";
 import { useEffect, useState } from "react";
 import { autoBuyAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
@@ -53,6 +54,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                   <div className="text-xs font-normal text-slate-400" data-testid="purchase-venue">
                     {p.exchange_key_removed || (!p.exchange && !p.exchange_account_id) ? <span className="text-red-600">Exchange key removed</span> : capitalize(p.exchange ?? "")}
                     {purchaseMode(p) === "dca" ? ` · Held on ${capitalize(p.exchange ?? "exchange")}` : p.blockchain_network ? ` · ${p.blockchain_network}` : ""}
+                    {purchaseMode(p) !== "dca" && p.wallet_destination_type ? (p.wallet_memo ? ` · ${tagLabelForChain(p.blockchain_network) ?? "memo"} ${p.wallet_memo}` : " · self-custody") : ""}
                   </div>
                 </td>
                 <td className="px-4 py-2">{fmtUsd(p.amount_usd)}</td>
@@ -116,7 +118,7 @@ function TransactionHistory({ purchase }: { purchase: AutoBuyPurchase }) {
           <tbody>{rows?.map((t) => (
             <tr key={t.id} className="border-t border-slate-100">
               <td className="py-2">{fmtDate(t.executed_at ?? t.created_at)}</td>
-              <td>{t.amount_executed != null ? `${fmtAmount(t.amount_executed)} ${purchase.crypto_symbol}` : "—"}{t.tx_type === "withdrawal" && t.expected_received != null && t.expected_received !== t.amount_executed && <div className="text-xs text-slate-400">≈ {fmtAmount(t.expected_received)} {purchase.crypto_symbol} received</div>}</td>
+              <td>{t.amount_executed != null ? `${fmtAmount(t.amount_executed)} ${purchase.crypto_symbol}` : "—"}{t.tx_type === "withdrawal" && t.expected_received != null && t.expected_received !== t.amount_executed && <div className="text-xs text-slate-400">≈ {fmtAmount(t.expected_received)} {purchase.crypto_symbol} received</div>}{t.tx_type === "withdrawal" && t.withdrawal_memo && <div className="text-xs text-slate-400">{tagLabelForChain(t.withdrawal_chain) ?? "memo"} {t.withdrawal_memo}</div>}</td>
               <td><StatusBadge status={t.status} /> {t.tx_type && <span className="text-xs text-slate-400">{t.tx_type}</span>}{t.error_message && <div className="text-xs text-red-600">{t.error_message}</div>}</td>
               <td className="font-mono text-xs">{t.exchange_tx_id ?? "—"}{t.tx_type === "withdrawal" && <div className="text-slate-400" title="on-chain transaction hash">{t.tx_hash ? `tx ${t.tx_hash.slice(0, 18)}…` : t.status === "simulated" ? "dry run: nothing was sent" : `awaiting tx hash${t.raw_status ? ` · ${t.raw_status}` : ""}`}</div>}</td>
               <td className="text-right">{t.tx_type === "withdrawal" ? (t.withdrawal_fee != null ? `${fmtAmount(t.withdrawal_fee)} ${t.withdrawal_fee_currency ?? ""}` : "—") : t.fee != null ? `${fmtAmount(t.fee)} ${t.fee_currency ?? ""}` : "—"}</td>

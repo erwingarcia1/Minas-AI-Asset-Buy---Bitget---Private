@@ -19,6 +19,7 @@ from .types import (
     CreateApplicantRequest,
     CreateApplicantResponse,
     DashboardResponse,
+    DestinationCheckOut,
     EmailOutboxView,
     EmailSentResponse,
     FillDeviation,
@@ -801,6 +802,10 @@ class V2Api:
         """Coin Market — ``GET /api/v2/market/coins/{coin}``."""
         return self._http.request("GET", "/api/v2/market/coins/" + _q(coin), auth=True, query={"amount_usd": amount_usd})
 
+    def check_withdrawal_destination(self, *, chain: str, address: str, destination_type: Optional[str] = None, memo: Optional[str] = None) -> DestinationCheckOut:
+        """Check Withdrawal Destination — ``GET /api/v2/market/destination``."""
+        return self._http.request("GET", "/api/v2/market/destination", auth=True, query={"chain": chain, "address": address, "destination_type": destination_type, "memo": memo})
+
     def list_purchases(self) -> List[PurchaseOut]:
         """List Purchases — ``GET /api/v2/purchases``."""
         return self._http.request("GET", "/api/v2/purchases", auth=True)
@@ -839,6 +844,10 @@ class AsyncV2Api:
     async def coin_market(self, coin: str, *, amount_usd: Optional[float] = None) -> CoinMarketOut:
         """Coin Market — ``GET /api/v2/market/coins/{coin}``."""
         return await self._http.request("GET", "/api/v2/market/coins/" + _q(coin), auth=True, query={"amount_usd": amount_usd})
+
+    async def check_withdrawal_destination(self, *, chain: str, address: str, destination_type: Optional[str] = None, memo: Optional[str] = None) -> DestinationCheckOut:
+        """Check Withdrawal Destination — ``GET /api/v2/market/destination``."""
+        return await self._http.request("GET", "/api/v2/market/destination", auth=True, query={"chain": chain, "address": address, "destination_type": destination_type, "memo": memo})
 
     async def list_purchases(self) -> List[PurchaseOut]:
         """List Purchases — ``GET /api/v2/purchases``."""

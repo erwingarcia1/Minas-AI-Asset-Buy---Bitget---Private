@@ -16,6 +16,7 @@ import type {
   CreateApplicantRequest,
   CreateApplicantResponse,
   DashboardResponse,
+  DestinationCheckOut,
   EmailOutboxView,
   EmailSentResponse,
   FillDeviation,
@@ -489,6 +490,11 @@ export class V2Api {
   /** Coin Market — `GET /api/v2/market/coins/{coin}` */
   coinMarket(coin: string, query?: { amount_usd?: number | null }): Promise<CoinMarketOut> {
     return this.http.request<CoinMarketOut>("GET", "/api/v2/market/coins/" + encodeURIComponent(String(coin)), { query, auth: true });
+  }
+
+  /** Check Withdrawal Destination — `GET /api/v2/market/destination` */
+  checkWithdrawalDestination(query: { chain: string; address: string; destination_type?: string | null; memo?: string | null }): Promise<DestinationCheckOut> {
+    return this.http.request<DestinationCheckOut>("GET", "/api/v2/market/destination", { query, auth: true });
   }
 
   /** List Purchases — `GET /api/v2/purchases` */

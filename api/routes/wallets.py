@@ -13,7 +13,7 @@ from api.database import get_db
 from api.models import User, Wallet, utcnow
 from api.routes.user import get_current_user
 from api.utils.address_denylist import DENYLIST_REASON, is_denylisted
-from api.utils.chains import family_for_chain, normalize_chain, validate_address_for_chain
+from api.utils.chains import TAG_CHAINS, check_destination, family_for_chain, normalize_chain
 from api.utils.network_validator import detect_chain, get_address_network
 
 logger = logging.getLogger("autobuy.wallets")
@@ -25,6 +25,8 @@ class WalletCreateRequest(BaseModel):
     address: str = Field(min_length=20, max_length=128)
     blockchain_network: str
     label: Optional[str] = Field(default=None, max_length=100)
+    destination_type: Optional[str] = Field(default=None, max_length=20)   # tag chains: self_custody | exchange
+    memo: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("blockchain_network")
     @classmethod
@@ -46,6 +48,10 @@ class WalletOut(BaseModel):
     blockchain_network: str
     chain: Optional[str] = None
     label: Optional[str] = None
+    destination_type: Optional[str] = None
+    memo: Optional[str] = None
+    needs_tag: bool = False
+    unfunded_warning: Optional[str] = None   # set on creation when the public ledger has never seen the address
     verified_at: Optional[datetime] = None
     created_at: datetime
 
@@ -54,7 +60,9 @@ class WalletOut(BaseModel):
 
 def _out(w: Wallet) -> WalletOut:
     return WalletOut(id=w.id, address=w.address, blockchain_network=w.blockchain_network,
-                     chain=detect_chain(w.address), label=w.label, verified_at=w.verified_at, created_at=w.created_at)
+                     chain=detect_chain(w.address), label=w.label, verified_at=w.verified_at, created_at=w.created_at,
+                     destination_type=w.destination_type, memo=w.memo,
+                     needs_tag=family_for_chain(w.blockchain_network) in TAG_CHAINS)
 
 
 @router.post("", response_model=WalletOut, status_code=status.HTTP_201_CREATED)
@@ -68,19 +76,20 @@ async def add_wallet(payload: WalletCreateRequest, current_user: User = Depends(
     if is_denylisted(payload.address):
         raise HTTPException(status_code=422, detail={"error": "wallet_address_denylisted",
                                                     "details": {"address": payload.address, "message": DENYLIST_REASON}})
-    ok, reason = validate_address_for_chain(payload.address, payload.blockchain_network)
-    if not ok:
+    d = check_destination(payload.address, payload.blockchain_network, payload.destination_type, payload.memo)
+    if not d["ok"]:
         raise HTTPException(status_code=422, detail={
-            "error": "invalid_wallet_address",
-            "details": {"address": payload.address, "blockchain_network": payload.blockchain_network,
-                        "detected_chain": detect_chain(payload.address),
-                        "detected_network": get_address_network(payload.address), "message": reason}})
+            "error": d["error"], "details": {"address": payload.address, "blockchain_network": payload.blockchain_network,
+                                             "detected_chain": detect_chain(payload.address),
+                                             "detected_network": get_address_network(payload.address),
+                                             "needs_tag": d.get("needs_tag"), "message": d["message"]}})
     existing = (await db.execute(select(Wallet).where(Wallet.address == payload.address))).scalar_one_or_none()
     if existing is not None:
         if existing.user_id == current_user.id:
             raise HTTPException(status_code=409, detail="Wallet already saved")
         raise HTTPException(status_code=409, detail="Address is already registered")
-    wallet = Wallet(user_id=current_user.id, address=payload.address, blockchain_network=payload.blockchain_network,
+    wallet = Wallet(user_id=current_user.id, address=d["address"], blockchain_network=payload.blockchain_network,
+                    destination_type=d["destination_type"], memo=d["memo"],
                     label=payload.label, verified_at=utcnow())  # format-verified at save time
     db.add(wallet)
     await db.commit()

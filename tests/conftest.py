@@ -139,8 +139,13 @@ SAMPLE_CHAINS = {
               "extraWithdrawFee": "0", "withdrawConfirm": "96", "minWithdrawAmount": "10", "browserUrl": "https://etherscan.io/tx/", "withdrawMinScale": "6"}],
     "SOL": [{"chain": "SOL", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.008",
              "extraWithdrawFee": "0", "withdrawConfirm": "5", "minWithdrawAmount": "0.02", "browserUrl": "https://solscan.io/tx/", "withdrawMinScale": "8"}],
+    # tag chains, as live Bitget reported them on 2026-09-16 (needTag true)
+    "XRP": [{"chain": "XRP", "needTag": "true", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.2",
+             "extraWithdrawFee": "0", "withdrawConfirm": "1", "minWithdrawAmount": "5", "browserUrl": "https://xrpscan.com/tx/", "withdrawMinScale": "6"}],
+    "XLM": [{"chain": "StellarLumens", "needTag": "true", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.02",
+             "extraWithdrawFee": "0", "withdrawConfirm": "1", "minWithdrawAmount": "57.7433883", "browserUrl": "https://stellar.expert/explorer/public/tx/", "withdrawMinScale": "7"}],
 }
-SAMPLE_ASK = {"BTC": 77042.84, "ETH": 4000.0, "SOL": 200.0, "USDT": 1.0, "USDC": 1.0}
+SAMPLE_ASK = {"BTC": 77042.84, "ETH": 4000.0, "SOL": 200.0, "USDT": 1.0, "USDC": 1.0, "XRP": 2.5, "XLM": 0.35}
 
 
 @pytest.fixture(autouse=True)

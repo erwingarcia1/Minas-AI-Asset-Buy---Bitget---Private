@@ -719,6 +719,15 @@ export class V2Api {
   }
 
   /**
+   * Check Withdrawal Destination — `GET /api/v2/market/destination`
+   * @param {{ chain: string; address: string; destination_type?: string | null; memo?: string | null }} [query]
+   * @returns {Promise<import('./types.js').DestinationCheckOut>}
+   */
+  checkWithdrawalDestination(query) {
+    return this.http.request("GET", "/api/v2/market/destination", { query, auth: true });
+  }
+
+  /**
    * List Purchases — `GET /api/v2/purchases`
    * @returns {Promise<import('./types.js').PurchaseOut[]>}
    */

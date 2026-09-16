@@ -118,6 +118,7 @@ export interface ChainOut {
   min_withdraw_amount: number;
   need_tag: boolean;
   supported: boolean;
+  tag_label?: string | null;
   withdraw_confirm: number;
   withdraw_fee: number;
   withdraw_min_scale: number;
@@ -177,6 +178,18 @@ export interface DashboardResponse {
   holdings: CryptoHolding[];
   monthly_average_usdt: number;
   upcoming_purchases: UpcomingPurchase[];
+}
+
+/** Server-side verdict on a withdrawal destination before the form submits. */
+export interface DestinationCheckOut {
+  embedded_tag?: string | null;
+  error?: string | null;
+  funded?: boolean | null;
+  message: string;
+  needs_tag: boolean;
+  ok: boolean;
+  tag_label?: string | null;
+  warning?: string | null;
 }
 
 export interface EmailOutboxView {
@@ -360,8 +373,10 @@ export interface PurchaseCreateRequest {
   amount_usd: number;
   blockchain_network?: string | null;
   crypto_symbol: string;
+  destination_type?: string | null;
   exchange_account_id: string;
   frequency: string;
+  memo?: string | null;
   purchase_type?: string;
   travel_rule_info?: TravelRuleInfo | null;
   wallet_address?: string | null;
@@ -394,6 +409,8 @@ export interface PurchaseDetailOut {
   travel_rule_info?: TravelRuleInfo | null;
   updated_at: string;
   wallet_address?: string | null;
+  wallet_destination_type?: string | null;
+  wallet_memo?: string | null;
   withdraw_immediately: boolean;
 }
 
@@ -416,6 +433,8 @@ export interface PurchaseOut {
   travel_rule_info?: TravelRuleInfo | null;
   updated_at: string;
   wallet_address?: string | null;
+  wallet_destination_type?: string | null;
+  wallet_memo?: string | null;
   withdraw_immediately: boolean;
 }
 
@@ -429,7 +448,9 @@ export interface PurchaseUpdateRequest {
   amount_usd?: number | null;
   blockchain_network?: string | null;
   confirm_wallet_address?: string | null;
+  destination_type?: string | null;
   frequency?: string | null;
+  memo?: string | null;
   purchase_type?: string | null;
   status?: string | null;
   travel_rule_info?: TravelRuleInfo | null;
@@ -558,6 +579,7 @@ export interface TransactionOut {
   withdrawal_fee?: number | null;
   withdrawal_fee_currency?: string | null;
   withdrawal_id?: string | null;
+  withdrawal_memo?: string | null;
 }
 
 /** One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id`` keep their historical names for existing clients; ``order_id`` and the withdrawal fields are the new, explicit ones. */
@@ -684,7 +706,9 @@ export interface VolatilityResponse {
 export interface WalletCreateRequest {
   address: string;
   blockchain_network: string;
+  destination_type?: string | null;
   label?: string | null;
+  memo?: string | null;
 }
 
 export interface WalletOut {
@@ -692,8 +716,12 @@ export interface WalletOut {
   blockchain_network: string;
   chain?: string | null;
   created_at: string;
+  destination_type?: string | null;
   id: string;
   label?: string | null;
+  memo?: string | null;
+  needs_tag?: boolean;
+  unfunded_warning?: string | null;
   verified_at?: string | null;
 }
 

@@ -206,7 +206,9 @@ export type AutoBuyStatus = "active" | "paused" | "completed" | "failed" | "canc
 export type PurchaseType = "autobuy" | "dca";   // autobuy: buy + withdraw to wallet; dca: buy + accumulate on exchange
 /** The exchange's chain name for a withdrawal (Bitget: "BTC", "ERC20", "SOL", "TRC20", ...). */
 export type BlockchainNetwork = string;
-export type ChainFamily = "bitcoin" | "ethereum" | "solana" | "tron";
+export type ChainFamily = "bitcoin" | "ethereum" | "solana" | "tron" | "xrpl" | "stellar";
+/** Tag chains only: who the address belongs to. Decides whether a memo is required. */
+export type DestinationType = "self_custody" | "exchange";
 
 export interface ChainInfo {
   chain: string;
@@ -220,6 +222,7 @@ export interface ChainInfo {
   withdraw_min_scale: number;
   withdraw_confirm: number;
   need_tag: boolean;
+  tag_label?: string | null;     // "destination tag" (XRP Ledger) / "memo" (Stellar) when need_tag
   browser_url: string | null;
   is_default: boolean;
   fee_usd?: number | null;
@@ -260,6 +263,7 @@ export interface AutoBuyTransaction {
   // withdrawal rows (parent_transaction_id -> the buy whose coins were sent)
   parent_transaction_id?: string | null;
   withdrawal_id?: string | null;
+  withdrawal_memo?: string | null;
   withdrawal_chain?: string | null;
   withdrawal_fee?: number | null;
   withdrawal_fee_currency?: string | null;
@@ -292,6 +296,8 @@ export interface AutoBuyPurchase {
   frequency: AutoBuyFrequency;
   wallet_address: string | null;   // null on accumulate purchases without a wallet on file
   blockchain_network: BlockchainNetwork | null;   // null on accumulate purchases: coins are held on the exchange
+  wallet_destination_type?: DestinationType | null;   // tag chains: self_custody | exchange
+  wallet_memo?: string | null;                        // destination tag / memo sent with withdrawals
   purchase_type?: PurchaseType;     // absent on API builds older than migration 012
   withdraw_immediately?: boolean;   // absent on API builds older than migration 011
   exchange_account_id: string | null;
@@ -312,6 +318,8 @@ export interface AutoBuyPurchaseCreate {
   amount_usd: number;
   wallet_address?: string;          // required for autobuy; optional for dca (accumulate never withdraws)
   blockchain_network?: BlockchainNetwork;   // required for autobuy; omitted for accumulate without a wallet
+  destination_type?: DestinationType;       // required on tag chains (XRP Ledger, Stellar)
+  memo?: string;                            // required when destination_type is "exchange" on a tag chain
   frequency: AutoBuyFrequency;
   exchange_account_id: string;
   purchase_type: PurchaseType;      // autobuy = withdraw to wallet after each buy, dca = accumulate on exchange
@@ -385,6 +393,8 @@ export interface AutoBuyPurchaseUpdate {
   wallet_address?: string;
   blockchain_network?: BlockchainNetwork;
   confirm_wallet_address?: string;
+  destination_type?: DestinationType;
+  memo?: string;
 }
 
 /** Notification settings. Security and failure emails are always sent; see always_on_emails. */
@@ -409,3 +419,15 @@ export interface AdminPurchaseRow {
 }
 export interface ExchangeLookup { attempt_id: string; client_oid: string | null; state: string | null; fill: Record<string, unknown> | null; verdict: string | null; error: string | null }
 export interface PurchaseReview { purchase: AdminPurchaseRow; lookups: ExchangeLookup[]; actions: string[] }
+
+/** GET /api/v2/market/destination: the server's verdict on an address + destination type + memo. */
+export interface DestinationCheck {
+  ok: boolean;
+  error: string | null;
+  message: string;
+  needs_tag: boolean;
+  tag_label: string | null;
+  embedded_tag: string | null;
+  funded: boolean | null;
+  warning: string | null;
+}

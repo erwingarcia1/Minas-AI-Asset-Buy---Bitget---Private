@@ -20,6 +20,8 @@ CRYPTO_CHAINS: Dict[str, str] = {
     "ETH": "ethereum",
     "USDC": "ethereum",
     "SOL": "solana",
+    "XRP": "xrpl",       # native XRP on the XRP Ledger (Bitget chain "XRP"); destination tag on exchanges
+    "XLM": "stellar",    # native XLM on Stellar (Bitget chain "StellarLumens"); memo on exchanges
 }
 
 SUPPORTED_EXCHANGES = tuple(EXCHANGE_NETWORKS)

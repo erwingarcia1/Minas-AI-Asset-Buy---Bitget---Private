@@ -5,6 +5,7 @@ import { Alert } from "@/components/Common";
 import type { ApiKey, AutoBuyFrequency, AutoBuyPurchaseCreated, ChainInfo, CoinMarket } from "@/types";
 import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain, fmtCoin } from "@/utils/chains";
 import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES } from "@/utils/exchangeNetworks";
+import { DestinationFields, destinationBody, destinationOk, type DestinationState } from "./DestinationFields";
 import { capitalize } from "@/utils/format";
 
 const DEFAULTS = { crypto: "BTC", amount: "50", frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: true };
@@ -32,6 +33,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const [chain, setChain] = useState<string>(DEFAULT_CHAIN_FOR_COIN[DEFAULTS.crypto]);
   const [address, setAddress] = useState(DEFAULTS.address);
   const [addressTouched, setAddressTouched] = useState(false);
+  const [destination, setDestination] = useState<DestinationState>({ destinationType: "", memo: "" });
   const [accountId, setAccountId] = useState("");
   const [frequency, setFrequency] = useState<AutoBuyFrequency>(DEFAULTS.frequency);
   const [withdraw, setWithdraw] = useState(DEFAULTS.withdraw);
@@ -94,14 +96,18 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
       : null
     : null;
   const chainNeeded = withdraw || hasAddress;   // accumulate without a wallet: coins stay on the exchange, no chain
+  // Tag chains (live Bitget needTag): the customer must say whether the address is self-custody or an exchange.
+  const needsTag = chainNeeded && hasAddress && !!chainInfo?.need_tag;
+  const destinationReady = destinationOk(chain, needsTag, destination);
   const marketBlocks = withdraw && (marketError !== null || (market !== null && !chainInfo));
   // withdraw: a valid address is required; accumulate: no address, or a valid one
   const addressOk = withdraw ? verdict?.ok === true : (!hasAddress || verdict?.ok === true);
-  const canSubmit = !busy && !!account && !amountError && addressOk && !chainWarning && !pairWarning && !marketBlocks && !marketLoading;
+  const canSubmit = !busy && !!account && !amountError && addressOk && destinationReady && !chainWarning && !pairWarning && !marketBlocks && !marketLoading;
 
   function reset() {
     setCrypto(DEFAULTS.crypto); setAmount(DEFAULTS.amount); setChain(DEFAULT_CHAIN_FOR_COIN[DEFAULTS.crypto]);
     setAddress(DEFAULTS.address); setAddressTouched(false); setFrequency(DEFAULTS.frequency); setWithdraw(DEFAULTS.withdraw);
+    setDestination({ destinationType: "", memo: "" });
   }
 
   async function submit(e: FormEvent) {
@@ -115,12 +121,14 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
         crypto_symbol: crypto, amount_usd: amountNumber,
         ...(address.trim() ? { wallet_address: address.trim() } : {}),
         ...(chainNeeded ? { blockchain_network: chain } : {}),
+        ...destinationBody(needsTag, destination),
         frequency, exchange_account_id: account.id,
         purchase_type: withdraw ? "autobuy" : "dca",
         withdraw_immediately: withdraw,
       });
       const when = created.next_execution ? new Date(created.next_execution).toLocaleString() : "the next scheduler run";
-      const mode = withdraw ? `each buy is sent to your wallet on ${chain}` : "accumulating on exchange";
+      const memoNote = needsTag ? (destination.destinationType === "exchange" ? ` with ${chainInfo?.tag_label ?? "memo"} ${destination.memo.trim()}` : ` (self-custody, no ${chainInfo?.tag_label ?? "memo"})`) : "";
+      const mode = withdraw ? `each buy is sent to your wallet on ${chain}${memoNote}` : "accumulating on exchange";
       const banner = `Purchase created (${withdraw ? "autobuy" : "dca"}): ${crypto} for ${amountNumber.toFixed(2)} USD via ${account.exchange}, ${mode}. First execution at ${when}.`;
       reset();
       setSuccess(banner);
@@ -178,7 +186,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           </label>
           <div className="relative">
             <input id="pf-address" className={`input pr-10 font-mono ${verdict ? (verdict.ok ? "border-green-500 focus:ring-green-500" : "border-red-500 focus:ring-red-500") : addressMissing ? "border-red-500" : ""}`}
-                   placeholder={chainInfo?.family === "bitcoin" ? "bc1… / 1… / 3…" : chainInfo?.family === "solana" ? "Base58 public key" : chainInfo?.family === "tron" ? "T…" : "0x…"}
+                   placeholder={chainInfo?.family === "bitcoin" ? "bc1… / 1… / 3…" : chainInfo?.family === "solana" ? "Base58 public key" : chainInfo?.family === "tron" ? "T…" : chainInfo?.family === "xrpl" ? "r… or X…" : chainInfo?.family === "stellar" ? "G… or M…" : "0x…"}
                    value={address} autoComplete="off" spellCheck={false}
                    onChange={(e) => setAddressE(e.target.value)} onBlur={() => setAddressTouched(true)}
                    aria-invalid={verdict ? !verdict.ok : addressMissing || undefined} aria-describedby="pf-address-status" />
@@ -192,6 +200,8 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           {verdict && <p id="pf-address-status" className={`mt-1 text-xs ${verdict.ok ? "text-green-700" : "text-red-600"}`}>{verdict.reason}</p>}
           {!verdict && addressMissing && <p id="pf-address-status" className="mt-1 text-xs text-red-600">A wallet address is required.</p>}
           {withdraw && <p className="mt-1 text-xs text-slate-500">Bitget only sends to addresses saved in your Bitget address book; add this address there first.</p>}
+          {needsTag && <DestinationFields coin={crypto} chain={chain} address={address} addressValid={verdict?.ok === true}
+                                          value={destination} onChange={(v) => { setSuccess(null); setDestination(v); }} idPrefix="pf-dest" />}
         </div>
 
         <div className="sm:col-span-2">

@@ -215,8 +215,10 @@ class BinanceClient:
 
 
     def withdraw(self, coin: str, address: str, amount: float, network: str | None = None,
-                 client_oid: str | None = None, dry_run: bool = True, travel_rule: dict | None = None) -> dict:
-        """Withdraw `amount` of `coin` to `address`.
+                 client_oid: str | None = None, dry_run: bool = True, travel_rule: dict | None = None,
+                 tag: str | None = None) -> dict:
+        """Withdraw `amount` of `coin` to `address` (`tag` = destination tag / memo on
+        chains that use one; only Bitget receives it).
 
         Returns {withdrawal_id, amount, dry_run}. Dry runs validate inputs and
         submit nothing. Only Binance withdrawals are implemented; other venues
@@ -233,6 +235,8 @@ class BinanceClient:
         try:
             with time_binance("withdraw"):
                 kwargs = {"travel_rule": travel_rule} if (travel_rule and self.exchange == "bitget") else {}
+                if tag and self.exchange == "bitget":
+                    kwargs["tag"] = tag
                 wid = self._client.withdraw(coin, address, amount, network=network, client_oid=client_oid, **kwargs)
         except ExchangeAPIError as exc:
             raise BinanceClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc

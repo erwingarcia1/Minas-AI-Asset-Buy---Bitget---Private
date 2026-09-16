@@ -1,5 +1,6 @@
 import { api, CSRF_HEADER, csrfToken } from "./client";
 import type {
+  DestinationCheck,
   AdminAlert, AdminStats, AdminTxRow, AdminUserRow, ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate,
   AutoBuyPurchaseCreated, AutoBuyPurchaseUpdate, AutoBuyTransaction, CoinMarket, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
@@ -143,4 +144,6 @@ export const adminAPI = {
 export const marketAPI = {
   coin: (coin: string, amountUsd?: number) =>
     data<CoinMarket>(api.get(`/v2/market/coins/${encodeURIComponent(coin)}`, { params: amountUsd ? { amount_usd: amountUsd } : undefined })),
+  destination: (params: { chain: string; address: string; destination_type?: string; memo?: string }) =>
+    data<DestinationCheck>(api.get("/v2/market/destination", { params })),
 };

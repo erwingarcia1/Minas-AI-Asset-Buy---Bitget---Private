@@ -257,7 +257,10 @@ class BitgetClient:
         body = {"coin": coin, "transferType": "on_chain", "address": address, "chain": network,
                 "size": str(amount)}
         if tag:
-            body["tag"] = tag
+            # Destination tag / memo for XRP, XLM and similar. Field name "tag" comes from
+            # Bitget's v2 withdrawal docs and SDK; NOT yet verified against a real tagged
+            # withdrawal (no live one has been sent as of 2026-09-16).
+            body["tag"] = str(tag)
         if remark:
             body["remark"] = remark
         if client_oid:

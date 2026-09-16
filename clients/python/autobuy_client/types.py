@@ -137,6 +137,7 @@ class ChainOut(TypedDict):
     min_withdraw_amount: float
     need_tag: bool
     supported: bool
+    tag_label: NotRequired[Optional[str]]
     withdraw_confirm: int
     withdraw_fee: float
     withdraw_min_scale: int
@@ -204,6 +205,18 @@ class DashboardResponse(TypedDict):
     holdings: List[CryptoHolding]
     monthly_average_usdt: float
     upcoming_purchases: List[UpcomingPurchase]
+
+
+class DestinationCheckOut(TypedDict):
+    """Server-side verdict on a withdrawal destination before the form submits."""
+    embedded_tag: NotRequired[Optional[str]]
+    error: NotRequired[Optional[str]]
+    funded: NotRequired[Optional[bool]]
+    message: str
+    needs_tag: bool
+    ok: bool
+    tag_label: NotRequired[Optional[str]]
+    warning: NotRequired[Optional[str]]
 
 
 class EmailOutboxView(TypedDict):
@@ -410,8 +423,10 @@ class PurchaseCreateRequest(TypedDict):
     amount_usd: float
     blockchain_network: NotRequired[Optional[str]]
     crypto_symbol: str
+    destination_type: NotRequired[Optional[str]]
     exchange_account_id: str
     frequency: str
+    memo: NotRequired[Optional[str]]
     purchase_type: NotRequired[str]
     travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
     wallet_address: NotRequired[Optional[str]]
@@ -446,6 +461,8 @@ class PurchaseDetailOut(TypedDict):
     travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
     updated_at: str
     wallet_address: NotRequired[Optional[str]]
+    wallet_destination_type: NotRequired[Optional[str]]
+    wallet_memo: NotRequired[Optional[str]]
     withdraw_immediately: bool
 
 
@@ -469,6 +486,8 @@ class PurchaseOut(TypedDict):
     travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
     updated_at: str
     wallet_address: NotRequired[Optional[str]]
+    wallet_destination_type: NotRequired[Optional[str]]
+    wallet_memo: NotRequired[Optional[str]]
     withdraw_immediately: bool
 
 
@@ -484,7 +503,9 @@ class PurchaseUpdateRequest(TypedDict):
     amount_usd: NotRequired[Optional[float]]
     blockchain_network: NotRequired[Optional[str]]
     confirm_wallet_address: NotRequired[Optional[str]]
+    destination_type: NotRequired[Optional[str]]
     frequency: NotRequired[Optional[str]]
+    memo: NotRequired[Optional[str]]
     purchase_type: NotRequired[Optional[str]]
     status: NotRequired[Optional[str]]
     travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
@@ -629,6 +650,7 @@ class TransactionOut(TypedDict):
     withdrawal_fee: NotRequired[Optional[float]]
     withdrawal_fee_currency: NotRequired[Optional[str]]
     withdrawal_id: NotRequired[Optional[str]]
+    withdrawal_memo: NotRequired[Optional[str]]
 
 
 class TransactionResponse(TypedDict):
@@ -767,7 +789,9 @@ class WalletCreateRequest(TypedDict):
     """WalletCreateRequest."""
     address: str
     blockchain_network: str
+    destination_type: NotRequired[Optional[str]]
     label: NotRequired[Optional[str]]
+    memo: NotRequired[Optional[str]]
 
 
 class WalletOut(TypedDict):
@@ -776,8 +800,12 @@ class WalletOut(TypedDict):
     blockchain_network: str
     chain: NotRequired[Optional[str]]
     created_at: str
+    destination_type: NotRequired[Optional[str]]
     id: str
     label: NotRequired[Optional[str]]
+    memo: NotRequired[Optional[str]]
+    needs_tag: NotRequired[bool]
+    unfunded_warning: NotRequired[Optional[str]]
     verified_at: NotRequired[Optional[str]]
 
 

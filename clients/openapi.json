@@ -655,6 +655,17 @@
             "title": "Supported",
             "type": "boolean"
           },
+          "tag_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Label"
+          },
           "withdraw_confirm": {
             "title": "Withdraw Confirm",
             "type": "integer"
@@ -949,6 +960,85 @@
           "monthly_average_usdt"
         ],
         "title": "DashboardResponse",
+        "type": "object"
+      },
+      "DestinationCheckOut": {
+        "description": "Server-side verdict on a withdrawal destination before the form submits.",
+        "properties": {
+          "embedded_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedded Tag"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "funded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Funded"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "needs_tag": {
+            "title": "Needs Tag",
+            "type": "boolean"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "tag_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Label"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "required": [
+          "ok",
+          "message",
+          "needs_tag"
+        ],
+        "title": "DestinationCheckOut",
         "type": "object"
       },
       "EmailOutboxView": {
@@ -1975,6 +2065,18 @@
             "title": "Crypto Symbol",
             "type": "string"
           },
+          "destination_type": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
           "exchange_account_id": {
             "format": "uuid",
             "title": "Exchange Account Id",
@@ -1983,6 +2085,18 @@
           "frequency": {
             "title": "Frequency",
             "type": "string"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
           },
           "purchase_type": {
             "default": "autobuy",
@@ -2205,6 +2319,28 @@
             ],
             "title": "Wallet Address"
           },
+          "wallet_destination_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Destination Type"
+          },
+          "wallet_memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Memo"
+          },
           "withdraw_immediately": {
             "title": "Withdraw Immediately",
             "type": "boolean"
@@ -2359,6 +2495,28 @@
             ],
             "title": "Wallet Address"
           },
+          "wallet_destination_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Destination Type"
+          },
+          "wallet_memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Memo"
+          },
           "withdraw_immediately": {
             "title": "Withdraw Immediately",
             "type": "boolean"
@@ -2444,6 +2602,18 @@
             ],
             "title": "Confirm Wallet Address"
           },
+          "destination_type": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
           "frequency": {
             "anyOf": [
               {
@@ -2454,6 +2624,18 @@
               }
             ],
             "title": "Frequency"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
           },
           "purchase_type": {
             "anyOf": [
@@ -3159,6 +3341,17 @@
               }
             ],
             "title": "Withdrawal Id"
+          },
+          "withdrawal_memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Memo"
           }
         },
         "required": [
@@ -3920,6 +4113,18 @@
             "title": "Blockchain Network",
             "type": "string"
           },
+          "destination_type": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
           "label": {
             "anyOf": [
               {
@@ -3931,6 +4136,18 @@
               }
             ],
             "title": "Label"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
           }
         },
         "required": [
@@ -3966,6 +4183,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "destination_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3981,6 +4209,33 @@
               }
             ],
             "title": "Label"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
+          },
+          "needs_tag": {
+            "default": false,
+            "title": "Needs Tag",
+            "type": "boolean"
+          },
+          "unfunded_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unfunded Warning"
           },
           "verified_at": {
             "anyOf": [
@@ -4115,7 +4370,6 @@
   },
   "info": {
     "contact": {
-      "email": "support@minastech.ca",
       "name": "Minas AutoBuy support"
     },
     "description": "Automated cryptocurrency purchasing platform: schedule recurring USDT buys (daily/weekly/biweekly/monthly), executed on Binance with KYC gating, encrypted key storage, and full transaction history.\n\nAll protected endpoints expect `Authorization: Bearer <access token>`. Validation failures return **422**; rate limits return **429** with `Retry-After`. Full guides: `docs/API.md`, `docs/DEPLOYMENT.md`.",
@@ -7002,6 +7256,101 @@
           }
         ],
         "summary": "Coin Market",
+        "tags": [
+          "auto-buy"
+        ]
+      }
+    },
+    "/api/v2/market/destination": {
+      "get": {
+        "description": "Validate an address (+ destination type + memo) for a chain with the same\nrule the purchase and wallet endpoints enforce, and on tag chains ask the\npublic ledger whether the account exists (a never-funded address is a\nwarning, not a refusal: Bitget's minimums exceed both reserves).",
+        "operationId": "check_withdrawal_destination_api_v2_market_destination_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "chain",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "minLength": 1,
+              "title": "Chain",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "destination_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Destination Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "memo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Memo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Check Withdrawal Destination",
         "tags": [
           "auto-buy"
         ]

@@ -77,7 +77,7 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
 | auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; `blockchain_network` is the exchange's chain name (`BTC`, `ERC20`, `TRC20`, `SOL`, `ArbitrumOne`, …; defaults to the coin's native chain); any wallet is validated against that chain's address format and rejected if it is a known burn/unspendable address; on Bitget the pair, minimum order, chain and (for autobuy) the minimum withdrawal are checked live, see "Bitget market data") · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, `travel_rule_info`, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `POST /{id}/retry-withdrawal` (withdrawal_failed / needs_info only: re-sends the last filled buy's coins, never buys again) · `DELETE /{id}` (cancel, history kept) |
-| wallets (`/api/wallets`) | `POST /` (`blockchain_network` = exchange chain name; the address format must match the chain family: bitcoin mainnet only, EVM `0x…`, Solana base58, Tron `T…`) · `GET /?blockchain_network=` · `DELETE /{id}` |
+| wallets (`/api/wallets`) | `POST /` (`blockchain_network` = exchange chain name; the address format must match the chain family: bitcoin mainnet only, EVM `0x…`, Solana base58, Tron `T…`, XRP Ledger `r…`/`X…`, Stellar `G…`/`M…`; tag chains also take `destination_type` + `memo`, see "Destination tag / memo") · `GET /?blockchain_network=` · `DELETE /{id}` |
 | notifications (`/api/notifications`) | `GET/PUT /preferences` — channel toggles, quiet hours, and the optional email categories `email_purchase_confirmations`, `email_weekly_summary`, `email_milestones` (stored per user in `notification_preferences`); `always_on_emails` lists what can never be switched off: password reset, password changed, purchase failed, withdrawal failed, withdrawal needs information. The weekly summary footer links to `/settings/notifications` (built with `build_app_link`) · `GET /history` · `POST /test` |
 | email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
 | webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
@@ -123,8 +123,10 @@ exchange accounts in one of two modes selected by `purchase_type`: `autobuy`
 or `dca` (coins accumulate on the exchange; a wallet is optional and, if
 given, validated). `blockchain_network` is the exchange's own chain name as
 returned by `GET /api/v2/market/coins/{coin}`; it defaults to the coin's
-native chain (BTC → `BTC`, ETH/USDT/USDC → `ERC20`, SOL → `SOL`) and the
-address must match the chain's family (bitcoin mainnet, EVM, Solana, Tron).
+native chain (BTC → `BTC`, ETH/USDT/USDC → `ERC20`, SOL → `SOL`, XRP → `XRP`,
+XLM → `StellarLumens`) and the address must match the chain's family
+(bitcoin mainnet, EVM, Solana, Tron, XRP Ledger, Stellar). Chains that need
+a destination tag / memo carry two more fields, see "Destination tag / memo".
 Both modes share the same list, history and scheduler, and every execution
 attempt records its `tx_type` (`buy`, and `withdrawal` as a separate row).
 The boolean `withdraw_immediately` is accepted as a deprecated alias and
@@ -167,7 +169,7 @@ withdrawal is presented with status `simulated` in the purchases API, the
 transactions API (`status_filter=simulated`), emails and the tax CSV
 (`withdrawal_status` column); storage keeps `success` + `raw_status =
 simulated`. Crypto amounts are shown with at most 8 decimals, trailing zeros
-trimmed. Purchase coins are BTC, ETH, USDC, SOL (USDT is the quote coin);
+trimmed. Purchase coins are BTC, ETH, USDC, SOL, XRP, XLM (USDT is the quote coin);
 accumulate purchases without a wallet store no `blockchain_network` (null,
 "held on the exchange"). Deleting an exchange key pauses its purchases with
 `last_error` "Exchange key removed…", `exchange_key_removed: true`, and
@@ -379,6 +381,54 @@ last 7 days whose `raw_status` is not final and stores the on-chain hash
 `withdrawal_failed` and emit `withdrawal_failed` (email + Slack). A withdrawal
 still unresolved after 7 days is marked `unconfirmed` and flagged on Slack.
 Dry-run rows (`raw_status: simulated`) and non-Bitget venues are skipped.
+
+### Destination tag / memo (XRP Ledger, Stellar) — migration 023
+
+Live Bitget reports `needTag: true` for the `XRP` and `StellarLumens` chains
+(verified 2026-09-16). On those chains an exchange or custody address is a
+shared account: a withdrawal without the right destination tag (XRP) or memo
+(Stellar) lands in the pool with nothing linking it to the customer. The API
+therefore stores two facts and refuses to guess:
+
+* `destination_type` — `self_custody` (a wallet the customer controls; no
+  tag) or `exchange` (an exchange / custody account; tag required). Stored
+  on `wallets.destination_type` and `purchases.wallet_destination_type`.
+* `memo` — the tag / memo itself (`wallets.memo`, `purchases.wallet_memo`;
+  each withdrawal row records what was sent in
+  `purchase_transactions.withdrawal_memo`). XRP: unsigned 32-bit integer in
+  digits. Stellar: id memo (unsigned 64-bit) or text memo up to 28 bytes.
+
+One rule (`api/utils/chains.check_destination`) is applied by
+`POST /api/v2/purchases`, `PUT /api/v2/purchases/{id}` (wallet change, memo
+edit, switch to `autobuy`), `POST /api/v2/purchases/{id}/retry-withdrawal`,
+`POST /api/wallets` and the executor. 422 errors: `destination_type_required`
+(tag chain, question never answered), `memo_required` (exchange without a
+tag), `invalid_memo`, `memo_not_expected` (self-custody with a tag),
+`memo_conflict` (typed tag differs from the one inside an X-address / muxed
+address, or self-custody chosen for such an address), and on other chains
+`memo_not_used` / `destination_type_not_used`. An XRP X-address (`X…`) or a
+Stellar muxed address (`M…`) carries its tag: it is decoded, the base
+(classic `r…` / `G…`) address is stored and the tag becomes the memo.
+
+The executor refuses to send on a tag chain when the purchase never recorded a
+destination type or is an exchange destination without a memo: the withdrawal
+row is `failed`, the purchase parks as `withdrawal_failed` with the reason
+(code `TAG_REQUIRED`), no re-buy, and the memo can be added with `PUT` before
+`retry-withdrawal`. The memo is passed to Bitget as the withdrawal body field
+`tag` — **that request field name comes from Bitget's documentation and SDK and
+has not been verified against a real tagged withdrawal yet** (no live XRP/XLM
+withdrawal has been sent as of 2026-09-16); `needTag` on the coins endpoint is
+live-verified.
+
+`GET /api/v2/market/destination?chain=&address=&destination_type=&memo=`
+returns the same verdict before a form submits (`ok`, `error`, `message`,
+`needs_tag`, `tag_label`, `embedded_tag`) and, on tag chains, asks the public
+ledger whether the account exists (`funded`; XRPL `account_info` →
+`actNotFound`, Horizon 404, both live-verified). A never-funded address sets
+`warning` (a typo looks the same as a brand-new wallet) but never blocks:
+Bitget's minimums exceed the XRPL (1 XRP) and Stellar (1 XLM) reserves, so
+the first send funds the account. `GET /api/v2/market/coins/{coin}` chains
+carry `need_tag` and `tag_label` ("destination tag" / "memo").
 
 ### Travel-rule / beneficiary details
 

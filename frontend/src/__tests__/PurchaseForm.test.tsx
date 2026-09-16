@@ -5,7 +5,7 @@ import PurchaseForm, { validateAmountUsd } from "@/components/Purchases/Purchase
 vi.mock("@/api/endpoints", () => ({
   autoBuyAPI: { create: vi.fn() },
   userAPI: { exchangeKeys: vi.fn() },
-  marketAPI: { coin: vi.fn() },
+  marketAPI: { coin: vi.fn(), destination: vi.fn() },
 }));
 import { autoBuyAPI, marketAPI, userAPI } from "@/api/endpoints";
 
@@ -17,6 +17,11 @@ const CHAIN_LIGHTNING = { ...CHAIN_BTC, chain: "LIGHTNING", family: null, family
 const MARKET = { coin: "BTC", pair: "BTCUSDT", online: true, min_trade_usdt: 1, taker_fee_rate: 0.002, quantity_precision: 6, price_ask: 77042.84,
   chains: [CHAIN_BTC, CHAIN_BEP20, CHAIN_LIGHTNING], note: "" };
 
+const CHAIN_XRP = { ...CHAIN_BTC, chain: "XRP", family: "xrpl", family_label: "XRP Ledger", need_tag: true, tag_label: "destination tag",
+  withdraw_fee: 0.2, min_withdraw_amount: 5, fee_usd: 0.5, min_purchase_usd: 14, estimated_received: 19.6 };
+const MARKET_XRP = { ...MARKET, coin: "XRP", pair: "XRPUSDT", price_ask: 2.5, chains: [CHAIN_XRP] };
+const XRP = "rB6d46oBHw6jfmfTnSCuCs2GAwaa25MePL";
+const XRP_X = "XVa6FLVfDCaBZAaHruwN9KDV4Rh8paJ9S75izdBzZxZnSHJ";   // X-address carrying tag 12345
 const KEY = { id: "k1", exchange: "binance", api_key_masked: "abcd…wxyz", verified: true, created_at: "", updated_at: "" };
 const ETH = "0x52908400098527886E0F7030069857D2E4169EE7";
 const BTC = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
@@ -28,7 +33,17 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
     vi.mocked(autoBuyAPI.create).mockResolvedValue(CREATED as never);
     vi.mocked(marketAPI.coin).mockResolvedValue(MARKET as never);
+    vi.mocked(marketAPI.destination).mockResolvedValue({ ok: false, error: "destination_type_required", message: "", needs_tag: true,
+      tag_label: "destination tag", embedded_tag: null, funded: null, warning: null } as never);
   });
+
+  async function readyXrp() {
+    vi.mocked(marketAPI.coin).mockResolvedValue(MARKET_XRP as never);
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Crypto"), { target: { value: "XRP" } });
+    await waitFor(() => expect(screen.getByTestId("chain-summary")).toHaveTextContent(/fee 0.2 XRP/), { timeout: 3000 });
+  }
 
   async function ready() {
     await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
@@ -167,5 +182,68 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
     fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Could not create the purchase|amount_usd/));
+  });
+
+  it("XRP: asks where the address is, blocks until answered, and sends destination_type + tag for an exchange", async () => {
+    await readyXrp();
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: XRP } });
+    expect(screen.getByTestId("address-indicator")).toHaveTextContent("✓");
+    expect(screen.getByText("Where is this XRP address?")).toBeInTheDocument();
+    expect(screen.getByText(/Sending to an exchange/)).toHaveTextContent(/without its destination tag/);
+    expect(screen.getByTestId("destination-required")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/An exchange or custody account/));
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();       // tag still missing
+    expect(screen.getByText(/The destination tag is required/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Destination tag"), { target: { value: "abc" } });
+    expect(screen.getByText(/at most 10 digits/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Destination tag"), { target: { value: "12345" } });
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
+    expect(autoBuyAPI.create).toHaveBeenCalledWith(expect.objectContaining({
+      crypto_symbol: "XRP", blockchain_network: "XRP", wallet_address: XRP, destination_type: "exchange", memo: "12345" }));
+  });
+
+  it("XRP: a wallet I control sends self_custody and no memo; BTC sends neither", async () => {
+    await readyXrp();
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: XRP } });
+    fireEvent.click(screen.getByLabelText(/A wallet I control/));
+    expect(screen.queryByLabelText("Destination tag")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
+    const body = vi.mocked(autoBuyAPI.create).mock.calls[0][0];
+    expect(body).toMatchObject({ destination_type: "self_custody" });
+    expect(body).not.toHaveProperty("memo");
+  });
+
+  it("XRP: an X-address selects exchange and fills the decoded tag read-only", async () => {
+    await readyXrp();
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: XRP_X } });
+    expect(screen.getByTestId("address-indicator")).toHaveTextContent("✓");
+    const tag = await screen.findByLabelText("Destination tag");
+    expect(tag).toHaveValue("12345");
+    expect(tag).toHaveAttribute("readonly");
+    expect(screen.getByLabelText(/A wallet I control/)).toBeDisabled();
+    expect(screen.getByText(/already contains destination tag 12345/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled();
+  });
+
+  it("XRP: warns (without blocking) when the ledger has never seen the address", async () => {
+    vi.mocked(marketAPI.destination).mockResolvedValue({ ok: false, error: "destination_type_required", message: "", needs_tag: true,
+      tag_label: "destination tag", embedded_tag: null, funded: false,
+      warning: "This address has never received XRP. That is normal for a brand-new wallet, but a wrong character also looks like this. Double-check it before saving." } as never);
+    await readyXrp();
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: XRP } });
+    expect(await screen.findByTestId("unfunded-warning")).toHaveTextContent(/has never received XRP/);
+    fireEvent.click(screen.getByLabelText(/A wallet I control/));
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled();
+  });
+
+  it("BTC never shows the destination question", async () => {
+    render(<PurchaseForm />);
+    await ready();
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
+    expect(screen.queryByText(/Where is this/)).toBeNull();
   });
 });
