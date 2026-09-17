@@ -60,7 +60,7 @@ Each blocker is tracked as a Phase 7 GitHub issue (labels `phase-7`, `production
 2. [ ] **Resend API key** + verified sending domain → #28
 3. [ ] **Twilio SMS credentials** (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) → #29
 4. [ ] **FCM push service account** (`FCM_SERVICE_ACCOUNT`) → #30
-5. [ ] **Live-trade verification on Binance testnet**, then a small-amount canary with `AUTOBUY_DRY_RUN=0` (today every order is simulated)
+5. [ ] **Small-amount canary withdrawals with real money** on the Tokyo server (`AUTOBUY_DRY_RUN=0` since 2026-09-16; one real BTC buy so far, no withdrawal yet): XRP first (~6 XRP to Erwin's own account on another exchange, with its destination tag, which also verifies Bitget's `tag` request field), then BTC (~$41). Shape and order in `docs/DEPLOYMENT.md`, "Go-live runbook".
 6. [ ] TLS certificate + DNS for `api.autobuy.app`; deploy `deployment/nginx.conf` → #31
 7. [ ] Strong `SECRET_KEY` + `ENCRYPTION_KEY` in production env (boot guard enforces this)
 8. [ ] Automated database backups on a schedule + one tested restore → #32

@@ -127,7 +127,7 @@ def tag_requirement(purchase: Purchase, chain: str) -> Optional[str]:
     word = TAG_CHAINS.get(family_for_chain(chain), "memo")
     dtype = (purchase.wallet_destination_type or "").lower() or None
     if dtype not in ("self_custody", "exchange"):
-        return (f"{chain} withdrawals need a destination {word}: this purchase never recorded whether the "
+        return (f"{chain} withdrawals need a {word}: this purchase never recorded whether the "
                 f"address is self-custody or an exchange account. Edit the purchase and answer that question.")
     if dtype == "exchange" and not (purchase.wallet_memo or "").strip():
         return (f"the {purchase.crypto_symbol} address is an exchange account but no {word} is stored; "

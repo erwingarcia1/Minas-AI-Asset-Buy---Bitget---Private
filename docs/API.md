@@ -169,7 +169,12 @@ withdrawal is presented with status `simulated` in the purchases API, the
 transactions API (`status_filter=simulated`), emails and the tax CSV
 (`withdrawal_status` column); storage keeps `success` + `raw_status =
 simulated`. Crypto amounts are shown with at most 8 decimals, trailing zeros
-trimmed. Purchase coins are BTC, ETH, USDC, SOL, XRP, XLM (USDT is the quote coin);
+trimmed. Purchase coins are BTC, ETH, USDC, SOL, XRP, XLM (USDT is the quote
+coin; KORU was evaluated 2026-09-16 and excluded: Bitget lists it with no
+chains and no USDT spot pair, so nothing can be delivered). `takerFeeRate` is
+Bitget's public standard tier: the first live BTC fill (2026-09-16) paid 0.1%
+against the quoted 0.2%, so the estimate is an upper bound for a discounted
+account;
 accumulate purchases without a wallet store no `blockchain_network` (null,
 "held on the exchange"). Deleting an exchange key pauses its purchases with
 `last_error` "Exchange key removed…", `exchange_key_removed: true`, and

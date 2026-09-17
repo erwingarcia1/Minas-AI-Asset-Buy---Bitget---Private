@@ -46,7 +46,7 @@ rest are manual and tracked as Phase 7 issues.
 | 7 | Sumsub webhook pointed at `https://<api host>/api/webhooks/sumsub` with the same secret as `SUMSUB_WEBHOOK_SECRET`; Resend sending domain verified (SPF/DKIM) | ⬜ manual (#27, #28) | provider dashboards |
 | 8 | Daily `pg_dump` scheduled to off-host storage, retention set, one restore rehearsed | ⬜ manual (#32) | "Database" section |
 | 9 | Prometheus scraping `/metrics`; `docs/ALERTING.md` rules routed to a pager with an on-call rotation | ⬜ manual (#33) | `deployment/prometheus.yml` |
-| 10 | Binance testnet run, then a small-amount canary before `AUTOBUY_DRY_RUN=0` | ⬜ manual | `PRODUCTION_READINESS.md` |
+| 10 | Small-amount canary withdrawals with real money, in the order and shape given in "Go-live runbook" below (XRP first, then BTC) | ⬜ manual | "Go-live runbook" |
 | 11 | `main` is the default branch and the deploy key pulls it | ⬜ manual | GitHub settings |
 
 ### Validate `.env` before every deploy
@@ -61,6 +61,96 @@ keys under 32 characters, `SECRET_KEY` equal to `ENCRYPTION_KEY`, the compose
 default Postgres password). Warnings cover disabled features, plain-http
 origins, and `AUTOBUY_DRY_RUN=0`. Values are never printed. `scripts/deploy.sh
 platform` performs its own, narrower check afterwards.
+
+## Go-live runbook: first real withdrawals (Phase 2)
+
+Status on 2026-09-17: the Tokyo server runs the platform with `AUTOBUY_DRY_RUN=0`
+at commit bd93adf and has handled one real transaction (a BTC buy on
+2026-09-16, no withdrawal yet). Every step below is deliberate, one at a time,
+with a human watching the exchange's own history.
+
+### Step 0 — migration 023 on the server (before any XRP/XLM purchase exists)
+
+Migration 023 (destination type + memo columns, two CHECK constraints) is
+committed and applied locally; it is **not** on the server. Apply it as its
+own step, never bundled with a trading change:
+
+```bash
+# on the server, before anything else: a backup you have listed and can restore
+sudo docker exec autobuy_postgres pg_dump -U autobuy -Fc autobuy_db > ~/backups/autobuy_db-before-023-$(date -u +%Y%m%dT%H%M%SZ).dump
+ls -la ~/backups | tail -3
+scripts/deploy.sh platform            # pulls main, rebuilds, migrates, verifies /health.commit
+sudo docker exec autobuy_api alembic current                    # expect 023
+sudo docker exec autobuy_postgres psql -U autobuy -d autobuy_db -Atc \
+  "select conname from pg_constraint where conname in ('ck_wallets_destination_type','ck_purchases_wallet_destination_type')"
+```
+
+Existing rows keep NULL in the new columns; every purchase on the server is
+on a tag-free chain, so nothing changes for them.
+
+### Step 1 — XRP first: ~6 XRP to Erwin's own account on another exchange (preferred)
+
+**Why XRP before BTC.** Bitget's XRP minimum withdrawal is 5 XRP, so the test
+costs about $12–15 against roughly $41 for the smallest BTC withdrawal that
+clears Bitget's minimum plus fee, and the XRP Ledger settles in seconds
+rather than the minutes-to-an-hour a BTC withdrawal takes to confirm.
+
+**Why an exchange address, not a self-custody wallet.** The Bitget withdrawal
+request field that carries the destination tag is named `tag` in Bitget's
+documentation and SDK and **has never been exercised by this system**. A
+self-custody XRP withdrawal carries no tag at all: it would succeed whether or
+not the field name is right and prove nothing. Only a withdrawal to an
+exchange address *with a tag attached* tests the field name. If the name is
+right, the receiving exchange credits the deposit within a minute and the
+field is live-verified. If it is wrong, the XRP lands in that exchange's
+pooled account, and because it is Erwin's own account and his own tag, he is
+the one person who can recover it through that exchange's support. That is
+the cheapest possible test of an unverified field name with real money, and
+far safer than testing against a third party's address.
+
+Shape of the test:
+
+1. Erwin opens the XRP deposit page of his own account on another exchange
+   and copies the deposit **address** and its **destination tag** exactly.
+2. On Bitget: the address is saved in the account's withdrawal address book
+   (with its tag) and the API key used by AutoBuy has the Withdraw permission
+   and the server IP whitelisted. Bitget refuses API withdrawals to unlisted
+   addresses.
+3. In AutoBuy, a **one-time** XRP purchase for about **$15** (6 XRP at ~$2.5;
+   Bitget's minimum withdrawal is 5 XRP after the 0.2 XRP fee, so keep the
+   amount above ~$14), chain `XRP`, answering **"An exchange or custody
+   account"** and entering the tag. The form and the API both refuse the
+   purchase without it.
+4. Watch, in this order: the AutoBuy transaction rows (buy → withdrawal row
+   with `withdrawal_memo` = the tag), Bitget's withdrawal history (status,
+   tx hash within a minute), then the receiving exchange's deposit history
+   (credited to Erwin's account within a minute or two).
+5. Record the outcome in `docs/API.md` under "Destination tag / memo": change
+   the `tag` field from *unverified* to *verified on <date>, withdrawal
+   <Bitget order id>*, and only then remove the "unverified" flag from the
+   code comment in `bitget_client.withdraw`. If the deposit is **not**
+   credited: do not send again; Erwin opens a ticket with the receiving
+   exchange (address + tag + Bitget tx hash), and the field name is corrected
+   in `bitget_client.withdraw` before any further tag-chain withdrawal.
+
+### Step 2 — BTC: smallest amount that clears the minimum (~$41)
+
+The first BTC withdrawal also confirms `BITGET_WITHDRAW_FEE_MODE` (exclusive,
+the default: AutoBuy sends net minus the 0.00003 BTC fee; if Bitget instead
+deducts the fee from the size sent, the wallet receives less than
+`expected_received` and the mode must be switched to `inclusive` before the
+next run). Use a one-time BTC purchase at the amount the form reports as the
+minimum for chain `BTC` (about $41 at current prices: minimum withdrawal
+0.0005 BTC plus fee at the live ask), to a self-custody wallet Erwin controls.
+Compare the withdrawal row's `amount_executed` / `expected_received` with what
+the wallet actually receives and with Bitget's withdrawal record.
+
+### Between steps
+
+`AUTOBUY_DRY_RUN=1` plus a restart stops all real orders at once; the
+scheduler pause switch (`POST /api/admin/scheduler/pause`) stops the jobs
+without a restart. Each step is one purchase, watched to completion, before
+the next.
 
 ## Web frontend
 

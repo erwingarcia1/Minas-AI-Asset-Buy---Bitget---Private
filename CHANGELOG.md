@@ -5,6 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — AutoBuy platform, 2026-09-16 / 2026-09-17
+
+Platform releases are tagged separately on GitHub (v0.5.0 covers everything up
+to commit bd93adf); this entry records what shipped after it.
+
+### Added
+
+* **XRP and XLM as purchase coins**, each on its single native chain (Bitget
+  chain names `XRP` and `StellarLumens`). Address validation for the XRP
+  Ledger (classic `r…` Base58Check and `X…` X-addresses, tag decoded) and
+  Stellar (`G…` StrKey with CRC16 and `M…` muxed addresses, memo id decoded),
+  server side and in the web form. Checksums verified against generated
+  addresses and known funded accounts.
+* **Migration 023** — `wallets.destination_type` / `wallets.memo`,
+  `purchases.wallet_destination_type` / `purchases.wallet_memo`,
+  `purchase_transactions.withdrawal_memo`, all nullable, with CHECK
+  constraints `ck_wallets_destination_type` and
+  `ck_purchases_wallet_destination_type` restricting the type to
+  `self_custody` / `exchange` / NULL. Applied locally 2026-09-17 (alembic
+  `023`, both constraints present); **not yet applied on the Tokyo server**
+  (planned as a deliberate step with a `pg_dump` first, see
+  `docs/DEPLOYMENT.md`, "Go-live runbook", Step 0).
+* **The destination-type rule** (`api/utils/chains.check_destination`), one
+  function for purchase create, wallet change, memo edit, switch to
+  withdraw-immediately, retry-withdrawal, `POST /api/wallets` and the
+  executor. On a chain Bitget reports as needing a tag: refuse when the
+  destination type is unset; refuse `exchange` without a memo; refuse a memo
+  on `self_custody`; an X-address / muxed address supplies its own tag and a
+  conflicting typed memo is refused; the base address is what gets stored. On
+  any other chain a memo or destination type is refused. The executor applies
+  the same rule at send time (`TAG_REQUIRED`): the withdrawal row fails, the
+  purchase parks as `withdrawal_failed` with the reason, no re-buy.
+* `GET /api/v2/market/destination` — the same verdict before a form submits,
+  plus a public-ledger existence probe (XRPL `account_info`, Horizon). A
+  never-funded address is a warning, never a block. `tag_label` on the market
+  chains (`"destination tag"` / `"memo"`).
+* Web form: the required "Where is this XRP address?" question with the
+  approved wording; X/M addresses auto-select *exchange* with the decoded tag
+  read-only; the memo is shown on purchases and withdrawal rows.
+
+### Verified
+
+* **Eleven curl proofs against the API, bypassing the UI** (2026-09-16, live
+  Bitget chain data, live XRPL node): exchange without tag → 422
+  `memo_required`; destination never answered → 422
+  `destination_type_required`; X-address with a conflicting typed tag → 422
+  `memo_conflict`; self-custody with a tag → 422 `memo_not_expected`; BTC with
+  a memo → 422 `memo_not_used`; self-custody → 201; exchange with tag → 201
+  (memo stored); `POST /api/wallets` exchange without tag → 422; X-address
+  saved as classic address + tag → 201; destination check reports the
+  unfunded warning; `GET /api/v2/market/coins/XRP` reports `need_tag` true.
+* **Two executor proofs in the real local container** (2026-09-17, dry run,
+  live Bitget chain data, real `ExchangeClientGateway`): an XRP purchase
+  written straight into the database with no destination type, and one with
+  `exchange` and no memo, both bought (simulated) and then **refused at send
+  time** — withdrawal row `failed`, purchase `withdrawal_failed`, reason
+  stored, nothing sent.
+* **Live fee:** the first real BTC buy on the Tokyo server (2026-09-16 20:44
+  UTC, 0.000197 BTC) paid 1.97e-07 BTC, i.e. **0.1%**, while Bitget's public
+  symbols endpoint quotes a 0.2% taker rate. The UI estimate therefore
+  overstates the fee for this account; the 3% fill-warning band is
+  unaffected.
+
+### Not verified
+
+* Bitget's withdrawal request field `tag` (docs and SDK only). It is only
+  exercised by a withdrawal to an exchange address with a tag attached, which
+  is the first real XRP test in the go-live runbook.
+
+### Excluded
+
+* **KORU** — requested alongside XRP/XLM; not added. Bitget lists coin id
+  2880 with an empty `chains` array and no `KORUUSDT` spot pair (error
+  40034). It is a TradFi perpetual on a 3× leveraged Direxion ETF: no chain,
+  no spot market, nothing to deliver to a wallet.
+
 ## [2.2.0] - 2026-07-21
 
 Adds a second, opt-in swap backend and makes the Bitget credential model
