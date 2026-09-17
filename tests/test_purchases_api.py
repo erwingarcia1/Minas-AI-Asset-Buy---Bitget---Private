@@ -150,7 +150,7 @@ async def test_create_rejects_foreign_or_missing_exchange_account(client, db, us
 
 
 @pytest.mark.parametrize("over", [
-    {"amount_usd": 5}, {"amount_usd": 2_000_000}, {"crypto_symbol": "DOGE"}, {"frequency": "hourly"},
+    {"amount_usd": 0}, {"amount_usd": -5}, {"amount_usd": 2_000_000}, {"crypto_symbol": "DOGE"}, {"frequency": "hourly"},
     {"blockchain_network": "devnet"}, {"blockchain_network": "LIGHTNING"}, {"wallet_address": "short"},
 ])
 async def test_create_schema_validation(client, user, binance_key, over):
@@ -459,3 +459,61 @@ async def test_address_chain_mismatch_is_rejected_server_side_when_posted_direct
     # and the matching pairs pass the same check
     good = {"BEP20": ETH, "BTC": BC1Q}[chain]
     assert (await client.post(P, json={**raw, "wallet_address": good}, headers=auth(user))).status_code == 201
+
+
+# ---- no invented minimum: the floor is Bitget's live figure for the mode (2026-09-18)
+
+XRP_ADDR = "rB6d46oBHw6jfmfTnSCuCs2GAwaa25MePL"
+
+
+def xrp_body(key, amount, withdraw, **over):
+    b = {"crypto_symbol": "XRP", "amount_usd": amount, "frequency": "daily", "exchange_account_id": str(key.id),
+         "purchase_type": "autobuy" if withdraw else "dca"}
+    if withdraw:
+        b.update({"wallet_address": XRP_ADDR, "blockchain_network": "XRP", "destination_type": "self_custody"})
+    b.update(over)
+    return b
+
+
+async def test_accumulate_floor_is_bitgets_minimum_order_only(client, user, bitget_key):
+    """$5 accumulate is above Bitget's 1 USDT order minimum: accepted. No withdrawal minimum applies."""
+    r = await client.post(P, json=xrp_body(bitget_key, 5, withdraw=False), headers=auth(user))
+    assert r.status_code == 201, r.text
+    r = await client.post(P, json=xrp_body(bitget_key, 1.5, withdraw=False), headers=auth(user))
+    assert r.status_code == 201, r.text
+
+
+async def test_below_bitgets_order_minimum_is_bitgets_error_not_ours(client, user, bitget_key):
+    r = await client.post(P, json=xrp_body(bitget_key, 0.5, withdraw=False), headers=auth(user))
+    assert r.status_code == 422, r.text
+    d = r.json()["detail"]
+    assert d["error"] == "below_minimum_order" and d["details"]["minimum_usd"] == 1.0
+    assert "Bitget requires at least 1 USDT" in d["details"]["message"]
+
+
+async def test_withdraw_floor_is_the_live_chain_minimum_plus_fee_with_headroom(client, user, bitget_key):
+    """Stub: XRP ask 2.5, min withdrawal 5 XRP, fee 0.2 on top, taker 0.2%:
+    (5 + 0.2) * 2.5 / 0.998 * 1.01 = $13.16. $5 is refused with that figure; $14 is accepted."""
+    from api.services import bitget_market as bm
+    r = await client.post(P, json=xrp_body(bitget_key, 5, withdraw=True), headers=auth(user))
+    assert r.status_code == 422, r.text
+    d = r.json()["detail"]
+    assert d["error"] == "below_minimum_withdrawal" and d["details"]["minimum_usd"] == 13.16
+    assert "minimum withdrawal" in d["details"]["message"]
+    assert bm.MIN_PURCHASE_HEADROOM == 0.01
+    r = await client.post(P, json=xrp_body(bitget_key, 14, withdraw=True), headers=auth(user))
+    assert r.status_code == 201, r.text
+
+
+async def test_minimum_check_fails_closed_for_both_modes(client, db, user, bitget_key, monkeypatch):
+    """Bitget unreachable: 503 and no purchase row, for accumulate as well as withdraw."""
+    from api.services import bitget_market as bm
+    def boom(symbol):
+        raise TimeoutError("bitget timed out")
+    monkeypatch.setattr(bm, "fetch_symbol", boom)
+    before = len((await db.execute(select(Purchase).where(Purchase.user_id == user.id))).scalars().all())
+    for withdraw in (False, True):
+        r = await client.post(P, json=xrp_body(bitget_key, 5, withdraw=withdraw), headers=auth(user))
+        assert r.status_code == 503 and r.json()["detail"]["error"] == "exchange_data_unavailable", r.text
+    after = len((await db.execute(select(Purchase).where(Purchase.user_id == user.id))).scalars().all())
+    assert after == before, "nothing may be created on the assumption the minimum is probably fine"

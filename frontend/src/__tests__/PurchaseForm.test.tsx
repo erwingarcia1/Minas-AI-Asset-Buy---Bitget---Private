@@ -50,11 +50,39 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     await waitFor(() => expect(screen.getByTestId("chain-summary")).toHaveTextContent(/fee 0.00003 BTC/), { timeout: 3000 });
   }
 
-  it("validates amount bounds", () => {
-    expect(validateAmountUsd(9)).toMatch(/Minimum/);
-    expect(validateAmountUsd(10)).toBeNull();
+  it("invents no minimum: only zero/negative, NaN and the ceiling are rejected client-side", () => {
+    expect(validateAmountUsd(9)).toBeNull();
+    expect(validateAmountUsd(0.5)).toBeNull();      // Bitget's order minimum decides, live
+    expect(validateAmountUsd(0)).toMatch(/above zero/);
+    expect(validateAmountUsd(-1)).toMatch(/above zero/);
     expect(validateAmountUsd(1_000_001)).toMatch(/Maximum/);
     expect(validateAmountUsd(Number.NaN)).toMatch(/Enter an amount/);
+  });
+
+  it("accumulate: $5 XRP is accepted, $0.50 is stopped by Bitget's live order minimum, never a $10 floor", async () => {
+    await readyXrp();
+    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));   // accumulate
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "5" } });
+    expect(screen.queryByText(/Minimum is 10/)).toBeNull();
+    expect(screen.getByText(/No minimum beyond Bitget's 1 USDT order minimum/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "0.5" } });
+    expect(screen.getByTestId("order-minimum")).toHaveTextContent("Bitget's minimum order for XRPUSDT is 1 USDT.");
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
+  });
+
+  it("withdraw: the chain figure carries the 1% headroom clause and $8 XRP is accepted when it clears it", async () => {
+    await readyXrp();   // CHAIN_XRP: min_purchase_usd 14 → $8 below; then re-price as the live API would
+    fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: XRP } });
+    fireEvent.click(screen.getByLabelText(/A wallet I control/));
+    expect(screen.getByTestId("chain-summary")).toHaveTextContent(/per buy, includes 1% headroom for the price moving between creation and execution/);
+    vi.mocked(marketAPI.coin).mockResolvedValue({ ...MARKET_XRP, chains: [{ ...CHAIN_XRP, min_purchase_usd: 6.87, meets_minimum: true, estimated_received: 5.9 }] } as never);
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "8" } });
+    await waitFor(() => expect(screen.getByTestId("chain-summary")).toHaveTextContent(/\$6.87 per buy/), { timeout: 3000 });
+    expect(screen.queryByText(/Minimum is 10/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalledWith(expect.objectContaining({ crypto_symbol: "XRP", amount_usd: 8, purchase_type: "autobuy" })));
   });
 
   it("shows a red X for a mismatched address and a green check for a valid one, then submits as autobuy", async () => {
@@ -117,7 +145,7 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     await ready();
     const select = screen.getByLabelText(/Blockchain network/) as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.value)).toEqual(["BTC", "BEP20"]);   // unsupported LIGHTNING is not offered
-    expect(screen.getByTestId("chain-summary")).toHaveTextContent(/min 0.0005 BTC \(≈ \$41.33 per buy\)/);
+    expect(screen.getByTestId("chain-summary")).toHaveTextContent(/min 0.0005 BTC \(≈ \$41.33 per buy, includes 1% headroom/);
     fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/below Bitget's minimum withdrawal on BTC/));
     expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();

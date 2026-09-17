@@ -31,7 +31,12 @@ logger = logging.getLogger("autobuy.purchases.v2")
 
 router = APIRouter()
 
-MIN_AMOUNT_USD, MAX_AMOUNT_USD = 10.0, 1_000_000.0
+# The platform invents no minimum: Bitget's live per-pair minimum order (1 USDT today) is
+# enforced by check_symbol at creation and again by the executor, and withdraw-immediately
+# purchases must also clear the live per-chain withdrawal minimum + fee (check_withdrawal).
+# 0.01 is only a sanity floor against zero/negative bodies. Both checks fail closed (503,
+# purchase not created) when Bitget cannot be reached.
+MIN_AMOUNT_USD, MAX_AMOUNT_USD = 0.01, 1_000_000.0
 
 
 # --------------------------------------------------------------------------- schemas

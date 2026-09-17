@@ -277,8 +277,16 @@ def meets_minimum(est: dict) -> bool:
     return est["sendable"] and est["withdraw_size"] >= est["min_withdraw_amount"]
 
 
+MIN_PURCHASE_HEADROOM = 0.01   # 1%: a market order fills seconds after the click at whatever the book gives
+
+
 def minimum_purchase_usd(price: float, symbol: dict, chain: dict, mode: Optional[str] = None) -> float:
-    """Smallest USD amount whose buy still clears minimum + fee, with a 1% margin."""
+    """Smallest USD amount whose buy still clears minimum + fee, plus 1% headroom.
+
+    The headroom is deliberate: a purchase sized exactly at the minimum would,
+    on a small adverse price move between creation and execution, buy slightly
+    less than the withdrawal needs and park as withdrawal_failed (bought, stuck).
+    The UI says so next to the figure."""
     mode = mode or fee_mode()
     min_amount = chain.get("min_withdraw_amount") or 0.0
     flat = chain.get("withdraw_fee") or 0.0
@@ -286,7 +294,7 @@ def minimum_purchase_usd(price: float, symbol: dict, chain: dict, mode: Optional
     # exclusive: net >= min + flat + min*pct ; inclusive: net >= min (fee comes out of it), but received must be > 0
     needed_net = min_amount + flat + min_amount * pct if mode == "exclusive" else max(min_amount, flat / max(1 - pct, 1e-9) + 1e-8)
     fee_rate = symbol.get("taker_fee_rate") or 0.0
-    return round(needed_net * price / max(1 - fee_rate, 1e-9) * 1.01, 2)
+    return round(needed_net * price / max(1 - fee_rate, 1e-9) * (1 + MIN_PURCHASE_HEADROOM), 2)
 
 
 def check_withdrawal(coin: str, amount_usd: float, price: float, symbol: dict, chain: dict) -> dict:

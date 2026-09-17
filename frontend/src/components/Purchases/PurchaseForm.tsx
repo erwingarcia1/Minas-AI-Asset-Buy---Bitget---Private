@@ -10,17 +10,22 @@ import { capitalize } from "@/utils/format";
 
 const DEFAULTS = { crypto: "BTC", amount: "50", frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: true };
 
+/** Sanity only: the platform invents no minimum. The floor is Bitget's live figure for the
+ *  mode (order minimum when accumulating; chain minimum + fee when withdrawing). */
 export function validateAmountUsd(value: number): string | null {
   if (Number.isNaN(value)) return "Enter an amount.";
-  if (value < 10) return "Minimum is 10 USD.";
+  if (value <= 0) return "Enter an amount above zero.";
   if (value > 1_000_000) return "Maximum is 1,000,000 USD.";
   return null;
 }
 
+/** The chain's smallest per-buy figure, with the plain reason it sits 1% above Bitget's own numbers. */
+export const HEADROOM_NOTE = "includes 1% headroom for the price moving between creation and execution";
+
 /** Fee / minimum line for a chain, priced when the API had an amount to price against. */
 export function chainSummary(c: ChainInfo, coin: string): string {
   const fee = `fee ${fmtCoin(c.withdraw_fee, coin)}${c.fee_usd != null ? ` (~$${c.fee_usd.toFixed(2)})` : ""}`;
-  const min = `min ${fmtCoin(c.min_withdraw_amount, coin)}${c.min_purchase_usd != null ? ` (≈ $${c.min_purchase_usd.toFixed(2)} per buy)` : ""}`;
+  const min = `min ${fmtCoin(c.min_withdraw_amount, coin)}${c.min_purchase_usd != null ? ` (≈ $${c.min_purchase_usd.toFixed(2)} per buy, ${HEADROOM_NOTE})` : ""}`;
   return `${fee} · ${min}`;
 }
 
@@ -92,9 +97,12 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const pairWarning = market && !market.online ? `${market.pair} is not trading on Bitget right now.` : null;
   const chainWarning = withdraw && chainInfo
     ? !chainInfo.withdrawable ? `Bitget has ${crypto} withdrawals on ${chain} suspended.`
-      : chainInfo.meets_minimum === false ? `${amountNumber || 0} USD buys about ${fmtCoin(chainInfo.estimated_received ?? 0, crypto)} after fees, below Bitget's minimum withdrawal on ${chain}. Use at least about $${(chainInfo.min_purchase_usd ?? 0).toFixed(2)}.`
+      : chainInfo.meets_minimum === false ? `${amountNumber || 0} USD buys about ${fmtCoin(chainInfo.estimated_received ?? 0, crypto)} after fees, below Bitget's minimum withdrawal on ${chain}. Use at least about $${(chainInfo.min_purchase_usd ?? 0).toFixed(2)} (${HEADROOM_NOTE}).`
       : null
     : null;
+  // Accumulate never withdraws: the only floor is Bitget's minimum order for the pair (live).
+  const orderMinWarning = market && !amountError && amountNumber < market.min_trade_usdt
+    ? `Bitget's minimum order for ${market.pair} is ${market.min_trade_usdt} USDT.` : null;
   const chainNeeded = withdraw || hasAddress;   // accumulate without a wallet: coins stay on the exchange, no chain
   // Tag chains (live Bitget needTag): the customer must say whether the address is self-custody or an exchange.
   const needsTag = chainNeeded && hasAddress && !!chainInfo?.need_tag;
@@ -102,7 +110,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const marketBlocks = withdraw && (marketError !== null || (market !== null && !chainInfo));
   // withdraw: a valid address is required; accumulate: no address, or a valid one
   const addressOk = withdraw ? verdict?.ok === true : (!hasAddress || verdict?.ok === true);
-  const canSubmit = !busy && !!account && !amountError && addressOk && destinationReady && !chainWarning && !pairWarning && !marketBlocks && !marketLoading;
+  const canSubmit = !busy && !!account && !amountError && !orderMinWarning && addressOk && destinationReady && !chainWarning && !pairWarning && !marketBlocks && !marketLoading;
 
   function reset() {
     setCrypto(DEFAULTS.crypto); setAmount(DEFAULTS.amount); setChain(DEFAULT_CHAIN_FOR_COIN[DEFAULTS.crypto]);
@@ -162,8 +170,10 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
         </div>
         <div>
           <label className="label" htmlFor="pf-amount">Amount (USD)</label>
-          <input id="pf-amount" className="input" type="number" min={10} max={1000000} step="0.01" value={amount} onChange={(e) => setAmountE(e.target.value)} />
+          <input id="pf-amount" className="input" type="number" min={0.01} max={1000000} step="0.01" value={amount} onChange={(e) => setAmountE(e.target.value)} />
           {amountError && <p className="mt-1 text-xs text-red-600">{amountError}</p>}
+          {!amountError && orderMinWarning && <p className="mt-1 text-xs text-red-600" data-testid="order-minimum">{orderMinWarning}</p>}
+          {!amountError && !orderMinWarning && market && <p className="mt-1 text-xs text-slate-400">{withdraw ? `Bitget's floor for this mode: the ${chain} withdrawal minimum plus fee (shown under the network).` : `No minimum beyond Bitget's ${market.min_trade_usdt} USDT order minimum: coins stay on the exchange.`}</p>}
         </div>
         {chainNeeded ? <div>
           <label className="label" htmlFor="pf-network">Blockchain network</label>

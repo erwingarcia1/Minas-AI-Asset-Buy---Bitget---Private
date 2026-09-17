@@ -117,6 +117,14 @@ default 60/min. Login lockout: 5 failed attempts → 15 minutes.
 
 ## Auto-Buy purchases
 
+The platform invents no minimum amount (since 2026-09-18; the earlier $10
+constant is gone). The floor is Bitget's live figure for the mode: accumulate
+purchases must only clear the pair's minimum order (`minTradeUSDT`, 1 USDT
+today); withdraw-immediately purchases must also clear the chain's minimum
+withdrawal plus fee at the live ask, with 1% headroom. Both checks run at
+creation and again in the executor, and fail closed (503
+`exchange_data_unavailable`, nothing created) when Bitget cannot be reached.
+
 `/api/v2/purchases` buys `amount_usd` of a coin on one of the caller's
 exchange accounts in one of two modes selected by `purchase_type`: `autobuy`
 (default: each buy is withdrawn to `wallet_address` on `blockchain_network`)
@@ -155,7 +163,8 @@ were verified against the live endpoints on 2026-09-11: symbols carry
 `pair_not_trading`, `below_minimum_order`, `above_maximum_order`,
 `chain_not_available`, `chain_not_withdrawable` or
 `below_minimum_withdrawal` (details include `minimum_usd`, the smallest
-amount that clears minimum + fee at the live ask), and 503
+amount that clears minimum + fee at the live ask, plus 1% headroom for the
+price moving between creation and execution), and 503
 `exchange_data_unavailable` when Bitget cannot be reached and nothing is
 cached (the purchase is not created). The executor re-checks the pair before
 buying and the chain before withdrawing. The withdrawal size depends on
