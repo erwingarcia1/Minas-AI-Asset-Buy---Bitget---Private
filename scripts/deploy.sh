@@ -276,12 +276,17 @@ deploy_platform() {
     if [ -n "$WEB_BUNDLE" ]; then
         echo "==> [platform] Checking the web bundle at $WEB_BUNDLE against this checkout's frontend/ tree ${expected_tree:0:12} ..."
         check_web_bundle "$expected_tree" "$WEB_BUNDLE" || exit 1
-        if [ -d frontend/dist ]; then
-            rm -rf frontend/dist.prev && mv frontend/dist frontend/dist.prev
-        fi
+        # Install IN PLACE. nginx bind-mounts frontend/dist by inode: renaming the directory
+        # away leaves the container serving the old files from their new name (seen on the
+        # first --web deploy, 2026-09-17), so the directory itself must never be replaced.
         mkdir -p frontend/dist
-        cp -a "$WEB_BUNDLE"/. frontend/dist/
-        echo "==> [platform] Web bundle installed into frontend/dist (previous kept at frontend/dist.prev)"
+        rm -rf frontend/dist.prev && mkdir -p frontend/dist.prev && cp -a frontend/dist/. frontend/dist.prev/
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a --delete "$WEB_BUNDLE"/ frontend/dist/
+        else
+            find frontend/dist -mindepth 1 -delete && cp -a "$WEB_BUNDLE"/. frontend/dist/
+        fi
+        echo "==> [platform] Web bundle installed into frontend/dist in place (previous copy at frontend/dist.prev)"
     else
         echo "==> [platform] Checking that frontend/dist was built from this checkout's frontend/ tree ${expected_tree:0:12} ..."
         if ! check_web_bundle "$expected_tree" frontend/dist; then
@@ -328,6 +333,8 @@ deploy_platform() {
             served_tree="$(curl -fsS --max-time 3 http://127.0.0.1:8080/BUILD_INFO 2>/dev/null | sed -n 's/^frontend_tree=//p' | head -1)"
             if [ -z "$served_tree" ]; then
                 echo "ERROR: http://127.0.0.1:8080/BUILD_INFO is not served — the web container is not serving frontend/dist." >&2
+                echo "       If frontend/dist was ever renamed or recreated, the bind mount still points at the old inode:" >&2
+                echo "       $SUDO docker compose -p autobuy-platform --profile $PLATFORM_PROFILE up -d --force-recreate web" >&2
                 exit 1
             fi
             if [ "$served_tree" != "$expected_tree" ]; then

@@ -91,3 +91,12 @@ def test_deploy_script_checks_the_bundle_before_and_after_moving_the_api():
     assert text.index("check_web_bundle") < text.index("up -d --build"), "the bundle is checked before the API moves"
     pkg = (ROOT / "frontend" / "package.json").read_text()
     assert "stamp-build.mjs" in pkg, "every frontend build writes dist/BUILD_INFO"
+
+
+def test_web_bundle_is_installed_in_place_never_by_renaming_the_mounted_directory():
+    """nginx bind-mounts frontend/dist by inode; `mv frontend/dist …` leaves the
+    container serving the old files (first --web deploy, 2026-09-17)."""
+    text = SCRIPT.read_text()
+    assert "mv frontend/dist" not in text
+    assert 'rsync -a --delete "$WEB_BUNDLE"/ frontend/dist/' in text
+    assert "--force-recreate web" in text, "the failure message says how to rebind the mount"
