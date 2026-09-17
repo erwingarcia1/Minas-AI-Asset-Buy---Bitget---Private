@@ -91,9 +91,10 @@ on a tag-free chain, so nothing changes for them.
 ### Step 1 — XRP first: ~6 XRP to Erwin's own account on another exchange (preferred)
 
 **Why XRP before BTC.** Bitget's XRP minimum withdrawal is 5 XRP, so the test
-costs about $12–15 against roughly $41 for the smallest BTC withdrawal that
-clears Bitget's minimum plus fee, and the XRP Ledger settles in seconds
-rather than the minutes-to-an-hour a BTC withdrawal takes to confirm.
+costs under $15 (about $7 at the 2026-09-17 price) against roughly $41 for the
+smallest BTC withdrawal that clears Bitget's minimum plus fee, and the XRP
+Ledger settles in seconds rather than the minutes-to-an-hour a BTC withdrawal
+takes to confirm.
 
 **Why an exchange address, not a self-custody wallet.** The Bitget withdrawal
 request field that carries the destination tag is named `tag` in Bitget's
@@ -116,11 +117,14 @@ Shape of the test:
    (with its tag) and the API key used by AutoBuy has the Withdraw permission
    and the server IP whitelisted. Bitget refuses API withdrawals to unlisted
    addresses.
-3. In AutoBuy, a **one-time** XRP purchase for about **$15** (6 XRP at ~$2.5;
-   Bitget's minimum withdrawal is 5 XRP after the 0.2 XRP fee, so keep the
-   amount above ~$14), chain `XRP`, answering **"An exchange or custody
-   account"** and entering the tag. The form and the API both refuse the
-   purchase without it.
+3. In AutoBuy, a **one-time** XRP purchase, chain `XRP`, answering **"An
+   exchange or custody account"** and entering the tag. The form and the API
+   both refuse the purchase without it. Size it from the live numbers, not
+   from memory: Bitget's minimum withdrawal is 5 XRP and the fee 0.2 XRP on
+   top (exclusive mode), so the form's "minimum per buy" for chain `XRP` is
+   the floor (about $7 at the 2026-09-17 price of $1.30; a $15 buy sends
+   about 11.3 XRP). The purchase amount is a deliberate decision, not a
+   default.
 4. Watch, in this order: the AutoBuy transaction rows (buy → withdrawal row
    with `withdrawal_memo` = the tag), Bitget's withdrawal history (status,
    tx hash within a minute), then the receiving exchange's deposit history
@@ -158,15 +162,23 @@ The SPA in `frontend/` is static files; it is not part of the API image.
 Build it on the server (or in CI) and let nginx serve it:
 
 ```bash
-cd frontend && npm ci && npm run build          # -> frontend/dist
+cd frontend && npm ci && npm run build          # -> frontend/dist, stamped with dist/BUILD_INFO
 sudo rsync -a --delete frontend/dist/ /var/www/autobuy/frontend/dist/
 ```
 
 Alternatively, the prod compose profile ships a `web` service (nginx, published
 on 127.0.0.1:8080) that serves `frontend/dist` straight from the checkout and
 forwards `/api/` + `/health` to the `api` container (config:
-`deployment/nginx.web.conf`). Build on a laptop, rsync `frontend/dist/` into
-`~/autobuy/frontend/dist/` on the server, and front 8080 with `tailscale serve`
+`deployment/nginx.web.conf`). Build on a laptop, rsync `frontend/dist/` to a
+staging directory on the server (for example `~/web-v0.6.1/`) and pass it to
+the deploy: `bash scripts/deploy.sh platform --branch main --web ~/web-v0.6.1`.
+The script installs it into `frontend/dist` before the API moves and, after
+`/health`, checks that nginx on :8080 serves a bundle built from the
+checkout's `frontend/` tree (`dist/BUILD_INFO`, written by every
+`npm run build`). Without `--web` the deploy refuses to complete unless the
+bundle already on disk carries that stamp, so the served SPA can never
+silently be an older release than the API (that happened once, with v0.6.0,
+before this check existed). Front 8080 with `tailscale serve`
 or the host nginx — no Node on the server required.
 
 ```bash

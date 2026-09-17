@@ -21,7 +21,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/deploy.sh [bot|platform|all] [--check] [--force] [--branch NAME]
+Usage: bash scripts/deploy.sh [bot|platform|all] [--check] [--force] [--branch NAME] [--web DIR]
 
   bot       (default) update + restart the live trading bot and admin web UI
             (docker-compose.legacy.yml — the containers currently in production)
@@ -34,6 +34,12 @@ Usage: bash scripts/deploy.sh [bot|platform|all] [--check] [--force] [--branch N
   --force   discard local commits/changes on the server and hard-reset to
             origin (never touches .env, data/, secrets/ — those are gitignored)
   --branch  deploy a specific branch (default: the branch checked out here)
+  --web DIR platform: ship a prebuilt web bundle (a `frontend/dist` built on a
+            laptop with `npm run build` and copied to DIR on this server) into
+            frontend/dist before starting the API. Without --web the deploy
+            refuses to complete unless frontend/dist was built from this
+            checkout's frontend/ tree (frontend/dist/BUILD_INFO), so the served
+            SPA can never silently be an older release.
 EOF
 }
 
@@ -52,12 +58,14 @@ TARGET=bot
 CHECK=0
 FORCE=0
 BRANCH=""
+WEB_BUNDLE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         bot|platform|all) TARGET="$1" ;;
         --check)  CHECK=1 ;;
         --force)  FORCE=1 ;;
         --branch) BRANCH="${2:?--branch needs a value}"; shift ;;
+        --web)    WEB_BUNDLE="${2:?--web needs a directory}"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "ERROR: unknown argument: $1" >&2; usage >&2; exit 1 ;;
     esac
@@ -255,10 +263,34 @@ deploy_platform() {
         exit 1
     fi
 
-    local before_id before_created expected_commit
+    local before_id before_created expected_commit expected_tree
     before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_api 2>/dev/null || echo none)"
     before_created="$($SUDO docker inspect --format '{{.Created}}' autobuy_api 2>/dev/null || echo none)"
     expected_commit="$(git rev-parse HEAD)"
+
+    # 0. the web bundle: shipped from --web, or already on disk and built from this checkout.
+    #    Checked BEFORE the API moves, so a stale SPA never rides along with a new API.
+    # shellcheck source=scripts/lib/platform_web_checks.sh
+    . "$(dirname "${BASH_SOURCE[0]:-$0}")/lib/platform_web_checks.sh" 2>/dev/null || . scripts/lib/platform_web_checks.sh
+    expected_tree="$(frontend_tree_of .)"
+    if [ -n "$WEB_BUNDLE" ]; then
+        echo "==> [platform] Checking the web bundle at $WEB_BUNDLE against this checkout's frontend/ tree ${expected_tree:0:12} ..."
+        check_web_bundle "$expected_tree" "$WEB_BUNDLE" || exit 1
+        if [ -d frontend/dist ]; then
+            rm -rf frontend/dist.prev && mv frontend/dist frontend/dist.prev
+        fi
+        mkdir -p frontend/dist
+        cp -a "$WEB_BUNDLE"/. frontend/dist/
+        echo "==> [platform] Web bundle installed into frontend/dist (previous kept at frontend/dist.prev)"
+    else
+        echo "==> [platform] Checking that frontend/dist was built from this checkout's frontend/ tree ${expected_tree:0:12} ..."
+        if ! check_web_bundle "$expected_tree" frontend/dist; then
+            echo "       The served web app would be an older release than the API. Build on a laptop" >&2
+            echo "       (cd frontend && npm ci && npm run build), copy frontend/dist/ to this server, and" >&2
+            echo "       rerun with --web /path/to/dist. Nothing was deployed." >&2
+            exit 1
+        fi
+    fi
 
     echo "==> [platform] Building + starting Postgres, Redis and the API (project: autobuy-platform, commit ${expected_commit:0:7}) ..."
     GIT_COMMIT="$expected_commit" compose -p autobuy-platform --profile "$PLATFORM_PROFILE" up -d --build
@@ -291,6 +323,18 @@ deploy_platform() {
                 exit 1
             fi
             echo "==> [platform] API is healthy and running commit ${running_commit:0:7}: http://127.0.0.1:8000/health"
+            # 3. the web app nginx actually serves must be that same bundle (bind mount, no restart needed)
+            local served_tree
+            served_tree="$(curl -fsS --max-time 3 http://127.0.0.1:8080/BUILD_INFO 2>/dev/null | sed -n 's/^frontend_tree=//p' | head -1)"
+            if [ -z "$served_tree" ]; then
+                echo "ERROR: http://127.0.0.1:8080/BUILD_INFO is not served — the web container is not serving frontend/dist." >&2
+                exit 1
+            fi
+            if [ "$served_tree" != "$expected_tree" ]; then
+                echo "ERROR: nginx serves a web bundle built from frontend tree ${served_tree:0:12}, not ${expected_tree:0:12}." >&2
+                exit 1
+            fi
+            echo "==> [platform] Web app on :8080 serves the bundle built from this checkout (frontend tree ${served_tree:0:7})"
             return 0
         fi
         sleep 4

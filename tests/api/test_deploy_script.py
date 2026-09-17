@@ -56,3 +56,38 @@ async def test_health_exposes_the_build_commit(client):
     async with client as c:
         r = await c.get("/health")
     assert r.status_code == 200 and r.json()["commit"] == "unknown"
+
+
+WEB_LIB = ROOT / "scripts" / "lib" / "platform_web_checks.sh"
+
+
+def _check(expected: str, dist) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", "-c", f'. "{WEB_LIB}"; check_web_bundle "{expected}" "{dist}"'], capture_output=True, text=True)
+
+
+def test_deploy_refuses_a_web_bundle_from_another_frontend_tree(tmp_path):
+    """The SPA is served from frontend/dist, which the API build never touches.
+    The deploy must refuse to complete when that bundle was not built from the
+    checkout's frontend/ tree, instead of reporting success with an old UI."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    r = _check("a" * 40, dist)
+    assert r.returncode == 1 and "index.html missing" in r.stderr
+    (dist / "index.html").write_text("<html></html>")
+    r = _check("a" * 40, dist)
+    assert r.returncode == 1 and "BUILD_INFO is missing" in r.stderr, "an unstamped (pre-v0.6.1) bundle cannot be trusted"
+    (dist / "BUILD_INFO").write_text("commit=x\nfrontend_tree=" + "b" * 40 + "\n")
+    r = _check("a" * 40, dist)
+    assert r.returncode == 1 and "was built from frontend tree bbbbbbbbbbbb" in r.stderr
+    (dist / "BUILD_INFO").write_text("commit=x\nfrontend_tree=" + "a" * 40 + "\n")
+    assert _check("a" * 40, dist).returncode == 0
+
+
+def test_deploy_script_checks_the_bundle_before_and_after_moving_the_api():
+    text = SCRIPT.read_text()
+    assert "--web" in text and 'WEB_BUNDLE="${2:?--web needs a directory}"' in text
+    assert "check_web_bundle" in text and "Nothing was deployed" in text
+    assert "http://127.0.0.1:8080/BUILD_INFO" in text, "the served bundle is verified through nginx after /health"
+    assert text.index("check_web_bundle") < text.index("up -d --build"), "the bundle is checked before the API moves"
+    pkg = (ROOT / "frontend" / "package.json").read_text()
+    assert "stamp-build.mjs" in pkg, "every frontend build writes dist/BUILD_INFO"
