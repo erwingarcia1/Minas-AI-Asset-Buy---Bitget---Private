@@ -9,7 +9,7 @@ on /api/wallets and again by the executor before any send:
 Chains without a tag refuse a memo or destination type outright.
 """
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from api.models import Purchase, PurchaseTransaction, Wallet
 from api.tasks import purchase_scheduler as ps
@@ -210,9 +210,11 @@ class _Venue:
 async def test_gateway_refuses_tag_chain_sends_without_the_memo(db, user, bitget_key, monkeypatch, dtype, memo, refused):
     _Venue.calls = []
     monkeypatch.setattr(ps, "_client_for", lambda account: _Venue())
-    p = await make_purchase(db, user, bitget_key, crypto_symbol="XRP", wallet_address=XRP, blockchain_network="XRP",
-                            wallet_destination_type=dtype, wallet_memo=memo, purchase_type="autobuy")
-    await db.refresh(p, ["exchange_account"])
+    # Built in memory, never persisted: since migration 024 the database itself refuses
+    # exchange + NULL memo, so this exercises the executor's backstop on its own.
+    p = Purchase(user_id=user.id, exchange_account_id=bitget_key.id, crypto_symbol="XRP", amount_usd=15.0, frequency="daily",
+                 wallet_address=XRP, blockchain_network="XRP", wallet_destination_type=dtype, wallet_memo=memo,
+                 purchase_type="autobuy", status="active", failure_count=0)
     gw = ps.ExchangeClientGateway()
     if refused:
         with pytest.raises(ps.ExecutionError) as ei:
@@ -227,7 +229,9 @@ async def test_gateway_refuses_tag_chain_sends_without_the_memo(db, user, bitget
 
 async def test_withdrawal_parked_with_reason_when_tag_missing(db, user, bitget_key, monkeypatch):
     """End to end through the executor: buy fills, the send is refused, the
-    purchase parks as withdrawal_failed with the reason; no re-buy."""
+    purchase parks as withdrawal_failed with the reason; no re-buy. The row
+    carries a blank memo: the one shape migration 024 cannot catch (the CHECK
+    only knows NULL), so the executor must."""
     _Venue.calls = []
     monkeypatch.setattr(ps, "_client_for", lambda account: _Venue())
 
@@ -238,7 +242,7 @@ async def test_withdrawal_parked_with_reason_when_tag_missing(db, user, bitget_k
             return {"order_id": order_id, "filled": True, "raw_status": "filled", "amount_crypto": 20.0, "exchange_rate": 2.5,
                     "cost_usdt": 50.0, "fee": 0.04, "fee_currency": "XRP"}
     p = await make_purchase(db, user, bitget_key, crypto_symbol="XRP", wallet_address=XRP, blockchain_network="XRP",
-                            wallet_destination_type="exchange", wallet_memo=None, purchase_type="autobuy")
+                            wallet_destination_type="exchange", wallet_memo="   ", purchase_type="autobuy")
     await db.refresh(p, ["exchange_account", "user", "transactions"])
     await ps.execute_one(db, p, p.next_execution, Gw(), dry_run=True)
     await db.refresh(p)
@@ -246,3 +250,33 @@ async def test_withdrawal_parked_with_reason_when_tag_missing(db, user, bitget_k
     assert _Venue.calls == []
     rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id))).scalars().all()
     assert {r.tx_type: r.status for r in rows} == {"buy": "success", "withdrawal": "failed"}
+
+
+# ---- migration 024: the database itself refuses an exchange destination without a memo
+
+@pytest.mark.parametrize("dtype, memo, writable", [
+    ("exchange", None, False), ("exchange", "", True),   # empty string is the API's job; the DB only knows NULL
+    ("exchange", "1", True), ("self_custody", None, True), (None, None, True), (None, "1", True),
+])
+async def test_db_constraint_exchange_requires_memo(db, user, bitget_key, dtype, memo, writable):
+    from sqlalchemy.exc import IntegrityError
+    uid, kid = user.id, bitget_key.id   # a rollback expires the fixtures' attributes
+    for factory in (
+        lambda: Purchase(user_id=uid, exchange_account_id=kid, crypto_symbol="XRP", amount_usd=15.0, frequency="daily",
+                         wallet_address=XRP, blockchain_network="XRP", wallet_destination_type=dtype, wallet_memo=memo,
+                         purchase_type="autobuy", status="active", failure_count=0),
+        lambda: Wallet(user_id=uid, address=XRP, blockchain_network="XRP", destination_type=dtype, memo=memo),
+    ):
+        row = factory()
+        db.add(row)
+        if writable:
+            await db.flush()
+            rid, model = row.id, type(row)
+            await db.commit()
+            await db.execute(delete(model).where(model.id == rid))
+            await db.commit()
+        else:
+            with pytest.raises(IntegrityError) as ei:
+                await db.flush()
+            assert "exchange_requires_memo" in str(ei.value)
+            await db.rollback()
