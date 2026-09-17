@@ -280,3 +280,5 @@ async def test_db_constraint_exchange_requires_memo(db, user, bitget_key, dtype,
                 await db.flush()
             assert "exchange_requires_memo" in str(ei.value)
             await db.rollback()
+            await db.refresh(user)          # the rollback expired the fixtures; the teardown reads them
+            await db.refresh(bitget_key)
