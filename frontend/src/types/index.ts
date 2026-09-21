@@ -57,37 +57,8 @@ export interface ApplicantStatusResponse {
   reject_labels: string[];
 }
 
-export type Frequency = "daily" | "weekly" | "biweekly" | "monthly";
-
-export interface PurchaseCreate {
-  crypto: string;
-  exchange?: string;
-  amount_usdt: number;
-  frequency: Frequency;
-  withdrawal_address?: string | null;
-}
-
-export interface PurchaseUpdate {
-  amount_usdt?: number;
-  frequency?: Frequency;
-  withdrawal_address?: string | null;
-}
-
-export interface Purchase {
-  id: string;
-  crypto: string;
-  exchange: string;
-  amount_usdt: number;
-  frequency: Frequency;
-  withdrawal_address: string | null;
-  next_purchase_date: string;
-  enabled: boolean;
-  created_at: string;
-}
-
 export type TransactionStatus = "pending" | "completed" | "failed" | "simulated";
 
-/** One Auto-Buy execution attempt (purchase_transactions is the single source of truth). */
 export interface Transaction {
   id: string;
   purchase_id: string;
@@ -153,7 +124,7 @@ export interface UpcomingPurchase {
   id: string;
   crypto: string;
   amount_usdt: number;
-  frequency: Frequency;
+  frequency: string;   // the purchase's own cadence (one_time | daily | weekly | monthly)
   next_purchase_date: string;
 }
 

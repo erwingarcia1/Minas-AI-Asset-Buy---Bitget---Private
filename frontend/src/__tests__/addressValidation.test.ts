@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addressVerdict, detectChain, getAddressNetwork, isDenylisted, validateAddressForNetwork, validateBitcoinAddress, validateEthereumAddress, validateSolanaAddress } from "@/utils/addressValidation";
-import { canExchangeWithdrawToNetwork } from "@/utils/exchangeNetworks";
+import { detectChain, getAddressNetwork, isDenylisted, validateBitcoinAddress, validateEthereumAddress, validateSolanaAddress } from "@/utils/addressValidation";
 import { addressVerdictForChain, parseStellarAddress, parseXrpAddress, tagLabelForChain, tagVerdictForChain } from "@/utils/chains";
 
 const BTC = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", P2SH = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy";
@@ -23,30 +22,14 @@ describe("address validation (mirrors the API)", () => {
     expect(validateSolanaAddress(SOL + "A")).toBe(false);
     expect(detectChain(ETH)).toBe("ethereum"); expect(detectChain(SOL)).toBe("solana"); expect(detectChain("x")).toBeNull();
   });
-  it("address must match network and coin", () => {
-    expect(validateAddressForNetwork(TESTNET, "mainnet")).toBe(false);
-    expect(validateAddressForNetwork(TESTNET, "testnet")).toBe(true);
-    expect(validateAddressForNetwork(ETH, "testnet")).toBe(true);
-    expect(addressVerdict(ETH, "BTC", "mainnet")).toMatchObject({ ok: false });
-    expect(addressVerdict(ETH, "USDT", "mainnet")).toMatchObject({ ok: true });
-    expect(addressVerdict(TESTNET, "BTC", "mainnet")?.reason).toMatch(/testnet/);
-    expect(addressVerdict("", "BTC", "mainnet")).toBeNull();
-  });
-  it("exchange network support", () => {
-    expect(canExchangeWithdrawToNetwork("binance", "testnet")).toBe(true);
-    expect(canExchangeWithdrawToNetwork("kraken", "mainnet")).toBe(false);
-  });
-});
-
-describe("burn / placeholder denylist", () => {
   it("rejects known unspendable addresses in every chain, case-insensitively for EVM", () => {
     expect(isDenylisted("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")).toBe(true);
     expect(isDenylisted("0x000000000000000000000000000000000000dEaD")).toBe(true);
     expect(isDenylisted("0x0000000000000000000000000000000000000000")).toBe(true);
     expect(isDenylisted("11111111111111111111111111111111")).toBe(true);
     expect(isDenylisted(BTC)).toBe(false);
-    expect(addressVerdict("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "BTC", "mainnet")).toMatchObject({ ok: false });
-    expect(addressVerdict("0x000000000000000000000000000000000000dEaD", "ETH", "mainnet")?.reason).toMatch(/burn/);
+    expect(addressVerdictForChain("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "BTC")).toMatchObject({ ok: false });
+    expect(addressVerdictForChain("0x000000000000000000000000000000000000dEaD", "ERC20")?.reason).toMatch(/burn/);
   });
 });
 

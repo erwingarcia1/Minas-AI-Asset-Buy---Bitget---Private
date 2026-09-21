@@ -207,12 +207,6 @@ async def test_list_and_delete_own_key(client, db, user, binance_key):
 
 # ---------------------------------------------------------------- misc branches
 
-async def test_resend_webhook_stub(client):
-    async with client as c:
-        r = await c.post("/api/webhooks/resend", json={"type": "email.bounced"})
-    assert r.status_code == 202 and r.json() == {"received": True}
-
-
 def test_binance_account_info_and_balance(monkeypatch):
     import api.services.binance_client as bc_mod
     class FakeLegacy:

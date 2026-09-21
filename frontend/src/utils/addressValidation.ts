@@ -138,15 +138,6 @@ export function getAddressNetwork(address: string): Network | null {
   return chain ? "mainnet" : null;
 }
 
-export const CRYPTO_CHAINS: Record<string, Chain> = { BTC: "bitcoin", ETH: "ethereum", USDT: "ethereum", USDC: "ethereum", SOL: "solana" };
-
-export function validateAddressForNetwork(address: string, network: Network, chain?: Chain): boolean {
-  const actual = detectChain(address.trim());
-  if (!actual || (chain && actual !== chain)) return false;
-  if (actual === "bitcoin") return bitcoinNetwork(address.trim()) === network;
-  return true;
-}
-
 /** Known unspendable / burn / placeholder addresses (mirrors api/utils/address_denylist.py). Always rejected. */
 export const ADDRESS_DENYLIST = new Set([
   "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "1111111111111111111114oLvT2", "1BitcoinEaterAddressDontSendf59kuE",
@@ -160,17 +151,4 @@ export const DENYLIST_REASON = "This is a known unspendable, burn or placeholder
 export function isDenylisted(address: string): boolean {
   const a = address.trim();
   return ADDRESS_DENYLIST.has(a) || (a.toLowerCase().startsWith("0x") && ADDRESS_DENYLIST.has(a.toLowerCase()));
-}
-
-/** Form helper: null while empty, otherwise a verdict with a human reason. */
-export function addressVerdict(address: string, crypto: string, network: Network): { ok: boolean; reason: string } | null {
-  const a = address.trim();
-  if (!a) return null;
-  if (isDenylisted(a)) return { ok: false, reason: DENYLIST_REASON };
-  const chain = CRYPTO_CHAINS[crypto];
-  const actual = detectChain(a);
-  if (!actual) return { ok: false, reason: "Not a valid Bitcoin, Ethereum or Solana address" };
-  if (chain && actual !== chain) return { ok: false, reason: `${crypto} needs a ${chain} address; this looks like ${actual}` };
-  if (actual === "bitcoin" && bitcoinNetwork(a) !== network) return { ok: false, reason: `This is a Bitcoin ${bitcoinNetwork(a)} address, not ${network}` };
-  return { ok: true, reason: `Valid ${actual} address for ${network}` };
 }

@@ -22,5 +22,3 @@ export const fmtDay = (iso: string | null | undefined) =>
 
 export const capitalize = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-export const FREQUENCIES = ["daily", "weekly", "biweekly", "monthly"] as const;
-export const SUPPORTED_CRYPTOS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LTC"] as const;

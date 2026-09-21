@@ -52,9 +52,6 @@ class Settings(BaseSettings):
     def reset_links_logged(self) -> bool:
         return str(self.log_reset_links).strip().lower() in ("1", "true", "yes")
     
-    # Binance
-    binance_api_key: str = os.getenv("BINANCE_API_KEY", "")
-    binance_api_secret: str = os.getenv("BINANCE_API_SECRET", "")
     
     # Sumsub (KYC)
     sumsub_app_token: str = os.getenv("SUMSUB_APP_TOKEN", "")
@@ -113,9 +110,6 @@ class Settings(BaseSettings):
                 pass
         return [o.strip() for o in raw.split(",") if o.strip()]
     
-    # Trading
-    supported_cryptos: str = os.getenv(
-        "SUPPORTED_CRYPTOS", "BTC,ETH,SOL,BNB,XRP,ADA,DOGE,LTC")
 
     # SMS (Twilio) + push (FCM) -- unset means the channel is a no-op
     twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")

@@ -3,8 +3,8 @@ import type {
   DestinationCheck,
   AdminAlert, AdminStats, AdminTxRow, AdminUserRow, ApiKey, ApplicantStatusResponse, AutoBuyPurchase, AutoBuyPurchaseCreate,
   AutoBuyPurchaseCreated, AutoBuyPurchaseUpdate, AutoBuyTransaction, CoinMarket, Comparison, CreateApplicantRequest, CreateApplicantResponse, DashboardData,
-  EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance, Purchase, PurchaseCreate,
-  PurchaseUpdate, QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
+  EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance,
+  QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
  RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview } from "@/types";
 
@@ -55,15 +55,6 @@ export const kycAPI = {
     data<CreateApplicantResponse>(api.post("/kyc/create-applicant", body)),
   applicantStatus: (applicantId: string) =>
     data<ApplicantStatusResponse>(api.get(`/kyc/applicant/${encodeURIComponent(applicantId)}/status`)),
-};
-
-export const purchaseAPI = {
-  list: () => data<Purchase[]>(api.get("/purchases/")),
-  get: (id: string) => data<Purchase>(api.get(`/purchases/${id}`)),
-  create: (body: PurchaseCreate) => data<Purchase>(api.post("/purchases/", body)),
-  update: (id: string, body: PurchaseUpdate) => data<Purchase>(api.put(`/purchases/${id}`, body)),
-  toggle: (id: string) => data<Purchase>(api.patch(`/purchases/${id}/toggle`)),
-  remove: (id: string) => api.delete(`/purchases/${id}`),
 };
 
 export const transactionAPI = {

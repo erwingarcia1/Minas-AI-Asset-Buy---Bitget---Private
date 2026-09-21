@@ -107,7 +107,7 @@ npm run build    # dist/ for nginx
 
 `VITE_API_BASE_URL=/api` in both `.env.development` and `.env.production`, so
 the app always talks to the origin it was served from: the Vite proxy in
-development, nginx in production (web vhost in `deployment/nginx.conf`). The
+development, nginx in production (`deployment/nginx.web.conf`, fronted by caddy for TLS). The
 API's `ALLOWED_ORIGINS` default already includes `http://localhost:5173`; set
 `APP_BASE_URL` to the same origin so emailed links open the app. The Sumsub
 KYC page embeds the official WebSDK (`@sumsub/websdk-react`, pinned).
@@ -146,7 +146,6 @@ docker compose --profile monitoring up -d   # optional Prometheus on :9090
 Production refuses to boot on a default/short `SECRET_KEY` or missing
 `ENCRYPTION_KEY`. Orders are **simulated** unless `AUTOBUY_DRY_RUN=0`.
 
-- Reverse proxy/TLS: `deployment/nginx.conf` (keeps `/metrics` private)
+- Reverse proxy/TLS: caddy (`deployment/caddy/Caddyfile`) in front of nginx (`deployment/nginx.web.conf`, which keeps `/metrics` private)
 - Metrics + alert thresholds + runbook: `docs/ALERTING.md`
 - Dev in-container reload: `docker-compose.dev.yml` override
-- Kubernetes: `deployment/kubernetes.yaml` is a stub; compose is the supported path

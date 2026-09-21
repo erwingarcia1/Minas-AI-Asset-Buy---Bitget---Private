@@ -251,7 +251,7 @@ The tailnet URL keeps working as a private path to the same `web` container.
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-`deployment/nginx.conf` has two vhosts: `api.example.com` (API only) and
+The former `deployment/nginx.conf` (removed 2026-09-22; the served config is `deployment/nginx.web.conf` behind caddy) had two vhosts: `api.example.com` (API only) and
 `app.example.com`, which serves `frontend/dist` with an SPA fallback, forwards
 `/api/` and `/health` to the API upstream, and sets a Content-Security-Policy
 that allows only Sumsub's origins (`api.sumsub.com`, `in.sumsub.com`,
@@ -300,7 +300,7 @@ testing steps: `docs/API.md` → "Email (Resend)".
 
 ## Monitoring
 
-Prometheus scrapes `/metrics` (keep it private — nginx config already denies
+Prometheus scrapes `/metrics` (keep it private — `deployment/nginx.web.conf` already denies
 public access). Thresholds, PromQL sketches, and the runbook: `docs/ALERTING.md`.
 `/health` reports per-component state including the scheduler's last tick.
 
