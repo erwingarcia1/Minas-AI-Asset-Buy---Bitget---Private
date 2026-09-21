@@ -36,7 +36,7 @@ The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse th
 | Instance | Ubuntu EC2, Tokyo (`ap-northeast-1`), repo at `~/autobuy` |
 | Public address | **Elastic IP `16.76.92.209`** (assigned 2026-09-21; survives stop/start). The earlier auto-assigned `18.179.57.78` / `ec2-18-179-57-78…` hostname is gone. |
 | SSH | `bash scripts/server_ssh.sh` → `ubuntu@16.76.92.209` (override with `SERVER=`) |
-| Public hostname | `autobuy.minastrade.com` — A record → `16.76.92.209`; this is what `APP_BASE_URL` / `ALLOWED_ORIGINS` in the server's `.env` already name |
+| Public entry point | **https://autobuy.minastrade.com** — GoDaddy A record → `16.76.92.209`; security group opens 80 + 443; the `caddy` compose service terminates TLS (automatic Let's Encrypt) and proxies to `web`. Matches `APP_BASE_URL` / `ALLOWED_ORIGINS` in the server's `.env`. See "Public HTTPS" below. |
 | Private entry point | `https://ip-172-31-21-173.tail0fdd4a.ts.net` (`tailscale serve` → `127.0.0.1:8080`), tailnet members only |
 | Exchange key allowlists | every IP-allowlisted exchange API key must name `16.76.92.209` |
 
@@ -204,8 +204,44 @@ checkout's `frontend/` tree (`dist/BUILD_INFO`, written by every
 `npm run build`). Without `--web` the deploy refuses to complete unless the
 bundle already on disk carries that stamp, so the served SPA can never
 silently be an older release than the API (that happened once, with v0.6.0,
-before this check existed). Front 8080 with `tailscale serve`
-or the host nginx — no Node on the server required.
+before this check existed). No Node on the server required.
+
+### Public HTTPS (the `caddy` service)
+
+```
+browser ──443──> caddy ──> web (nginx, SPA + /api/ proxy) ──> api
+tailnet ──> tailscale serve ──> 127.0.0.1:8080 ──┘
+```
+
+`caddy` is part of the prod profile, so `scripts/deploy.sh platform` starts it
+with everything else. It is the only service published on a public interface
+(80 and 443); it gets and renews the certificate for `PUBLIC_HOSTNAME`
+(default `autobuy.minastrade.com`, config in `deployment/caddy/Caddyfile`) and
+redirects http to https. Requirements: the DNS A record points at the box and
+the security group allows inbound 80 **and** 443 — without 80 the http
+redirect and the HTTP-01 challenge fail.
+
+* **The certificate lives in the `autobuy-platform_caddy_data` volume.** Never
+  remove it casually (`down -v`, `volume prune`): Let's Encrypt allows 5
+  duplicate certificates per week, and a wiped volume re-issues on every start.
+* **Client addresses.** Caddy discards any `X-Forwarded-*` a client sends and
+  writes its own; nginx takes the visitor's address from it (`real_ip_header`)
+  and passes the API exactly one `X-Forwarded-For` value; gunicorn runs with
+  `--forwarded-allow-ips "*"`, so `request.client` — the key for every per-IP
+  rate limit — is the real visitor. Before this, everyone behind nginx shared
+  one address, i.e. one `5/minute` login bucket. The arrangement is only safe
+  while the API port stays on `127.0.0.1`; `tests/test_public_proxy.py` pins it.
+* Reload after editing the Caddyfile (the directory is mounted, so a `git pull`
+  is visible inside the container):
+  `sudo docker compose -p autobuy-platform --profile prod exec caddy caddy reload --config /etc/caddy/Caddyfile`
+* Certificate / ACME trouble: `sudo docker logs autobuy_caddy`.
+* After changing `deployment/nginx.web.conf` through git, recreate `web`
+  (`… up -d --force-recreate --no-deps web`): it is a single-file bind mount
+  and keeps the old inode, so `nginx -s reload` alone serves the old config.
+
+The tailnet URL keeps working as a private path to the same `web` container.
+
+### Host nginx instead of compose (alternative)
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx
@@ -270,7 +306,7 @@ public access). Thresholds, PromQL sketches, and the runbook: `docs/ALERTING.md`
 - Horizontal: multiple API containers are safe — the scheduler takes a Postgres
   advisory lock per tick, so replicas never double-execute; rate limits and
   lockout live in shared Redis.
-- Put nginx (or a cloud LB) in front for TLS; the app emits HSTS in production.
+- TLS is terminated by the `caddy` service (or a cloud LB / host nginx); the app emits HSTS in production.
 
 ## Security operations
 

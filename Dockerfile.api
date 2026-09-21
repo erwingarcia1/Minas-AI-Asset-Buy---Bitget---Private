@@ -30,11 +30,18 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status == 200 else 1)"
 
+# --forwarded-allow-ips "*": the API is only ever reached through the nginx
+# `web` container (port 8000 is published on 127.0.0.1 only), and that nginx
+# overwrites X-Forwarded-For with the one address it verified itself — so
+# request.client is the real visitor and per-IP rate limits are per visitor,
+# not one bucket shared by everyone behind the proxy. Container IPs are
+# dynamic and uvicorn 0.24 takes no CIDR here, hence "*".
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["gunicorn", "api.main:app", \
      "--workers", "4", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
+     "--forwarded-allow-ips", "*", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
      "--timeout", "60", \

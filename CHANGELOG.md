@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+* **Public HTTPS at https://autobuy.minastrade.com.** New `caddy` service in the
+  prod compose profile (`deployment/caddy/Caddyfile`): automatic Let's Encrypt
+  certificate, http → https redirect, HSTS on the static SPA as well as the
+  API, proxying to the existing `web` container. It is the only service
+  published on a public interface; the tailnet URL still works.
+
+### Fixed
+
+* **Per-IP rate limits were one bucket for everyone.** Behind the nginx `web`
+  container the API saw every visitor as the container's address (verified in
+  the production access log), so `5/minute` on login was shared by all users.
+  Caddy now discards client-sent `X-Forwarded-*`, nginx resolves the real
+  address (`real_ip_header`) and overwrites — never appends —
+  `X-Forwarded-For`, and gunicorn trusts it (`--forwarded-allow-ips "*"`; safe
+  because the API port is loopback-only). Pinned by `tests/test_public_proxy.py`.
+
 ### Changed
 
 * **The production EC2 box has an Elastic IP, `16.76.92.209`** (assigned

@@ -192,9 +192,11 @@ local clone are checked out on `main`; `deploy.sh` deploys whatever branch
 the server has checked out (override with `--branch NAME` for a one-off).
 Merge to `main`, push, then deploy.
 
-The admin web UI is served tailnet-only at
-`https://ip-172-31-21-173.tail0fdd4a.ts.net` — you must be logged into the
-Tailscale network to reach it (invite people at
+The platform web app is public at **https://autobuy.minastrade.com** (the
+`caddy` compose service terminates TLS with an automatic Let's Encrypt
+certificate — see "Public HTTPS" in `docs/DEPLOYMENT.md`). The same app is
+also reachable privately at `https://ip-172-31-21-173.tail0fdd4a.ts.net` for
+members of the Tailscale network (invite people at
 https://login.tailscale.com/admin/users).
 
 ### SSH into the server

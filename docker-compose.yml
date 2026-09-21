@@ -62,7 +62,9 @@ services:
     restart: always
     ports:
       # Localhost only: the web container reaches it over the compose network,
-      # and tailscale serve / the host nginx front it for everyone else.
+      # and caddy / tailscale serve front that for everyone else. Must stay
+      # loopback-only: gunicorn trusts X-Forwarded-For from any peer (see
+      # Dockerfile.api), which is safe only while nginx is the sole way in.
       - "127.0.0.1:8000:8000"
     environment:
       API_ENV: ${API_ENV:-production}
@@ -122,8 +124,8 @@ services:
   # Web frontend: nginx serving the built SPA (frontend/dist — build it with
   # `cd frontend && npm ci && npm run build`, or rsync a laptop build to the
   # server) with an SPA fallback, forwarding /api/ and /health to the api
-  # container. Published on localhost only; `tailscale serve` (or the host
-  # nginx in deployment/nginx.conf) fronts it with HTTPS.
+  # container. Published on localhost only; the `caddy` service below fronts
+  # it with public HTTPS and `tailscale serve` with the private tailnet URL.
   web:
     image: nginx:1.27-alpine
     container_name: autobuy_web
@@ -138,6 +140,33 @@ services:
       - api
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/index.html"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Public HTTPS: Caddy terminates TLS for PUBLIC_HOSTNAME (automatic Let's
+  # Encrypt certificate, http -> https redirect) and hands every request to
+  # `web`. The only service published on a public interface; the certificate
+  # and ACME account live in the caddy_data volume — keep it across deploys,
+  # Let's Encrypt rate-limits re-issuance.
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: autobuy_caddy
+    profiles: ["prod"]
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-autobuy.minastrade.com}
+    volumes:
+      - ./deployment/caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -157,3 +186,5 @@ volumes:
   postgres_data:
   redis_data:
   prometheus_data:
+  caddy_data:
+  caddy_config:
