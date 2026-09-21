@@ -29,6 +29,17 @@ The entrypoint applies Alembic migrations, then serves via **gunicorn with 4
 uvicorn workers** (measured: p95 245ms @10 concurrent vs 1.6s single-worker).
 The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse them.
 
+## Production host
+
+| | |
+|---|---|
+| Instance | Ubuntu EC2, Tokyo (`ap-northeast-1`), repo at `~/autobuy` |
+| Public address | **Elastic IP `16.76.92.209`** (assigned 2026-09-21; survives stop/start). The earlier auto-assigned `18.179.57.78` / `ec2-18-179-57-78…` hostname is gone. |
+| SSH | `bash scripts/server_ssh.sh` → `ubuntu@16.76.92.209` (override with `SERVER=`) |
+| Public hostname | `autobuy.minastrade.com` — A record → `16.76.92.209`; this is what `APP_BASE_URL` / `ALLOWED_ORIGINS` in the server's `.env` already name |
+| Private entry point | `https://ip-172-31-21-173.tail0fdd4a.ts.net` (`tailscale serve` → `127.0.0.1:8080`), tailnet members only |
+| Exchange key allowlists | every IP-allowlisted exchange API key must name `16.76.92.209` |
+
 ## Production deployment checklist
 
 Work through this top to bottom before the first `scripts/deploy.sh platform`
@@ -40,7 +51,7 @@ rest are manual and tracked as Phase 7 issues.
 | 1 | Credential files ignored by git (`.env`, every `.env.*`, `.envy`, `*.pem`) | ✅ done | `.gitignore` |
 | 2 | Dev-only `/test-purchase` routes removed | ✅ done (#34) | `api/main.py` |
 | 3 | Production env template with every required variable | ✅ done | `.env.production.example` |
-| 4 | TLS + DNS: real hostname (`api.autobuy.app`) and certificate paths in `deployment/nginx.conf`; DNS A/AAAA records; HTTP→HTTPS redirect verified | ⬜ manual (#31) | `deployment/nginx.conf` |
+| 4 | TLS + DNS: public hostname `autobuy.minastrade.com` with a GoDaddy **A record → `16.76.92.209`** (the box's Elastic IP); security group opens 80 + 443; certificate issued; HTTP→HTTPS redirect verified | ⬜ manual (#31) | GoDaddy DNS, EC2 security group, `deployment/nginx.conf` |
 | 5 | Credentials provisioned into the server's root-owned `.env` (`chmod 600`): `SECRET_KEY`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, Resend (#28), Sumsub (#27); optional Twilio (#29), FCM (#30), Slack | ⬜ manual | `.env.production.example` |
 | 6 | `.env` validated (command below) | ⬜ manual | `scripts/validate_env.py` |
 | 7 | Sumsub webhook pointed at `https://<api host>/api/webhooks/sumsub` with the same secret as `SUMSUB_WEBHOOK_SECRET`; Resend sending domain verified (SPF/DKIM) | ⬜ manual (#27, #28) | provider dashboards |

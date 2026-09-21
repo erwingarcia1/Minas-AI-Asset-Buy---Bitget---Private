@@ -14,8 +14,8 @@ root-of-server `.env` file and never pass through the UI or its database.
 - Allocate an **Elastic IP** if you'll IP-whitelist your exchange API keys
   (the default public IP changes on stop/start).
 
-> **Already-provisioned server?** The Tokyo box described in the README is
-> set up — day-to-day deploys are just `bash scripts/remote_deploy.sh` from
+> **Already-provisioned server?** The Tokyo box described in the README
+> (Elastic IP `16.76.92.209`) is set up — day-to-day deploys are just `bash scripts/remote_deploy.sh` from
 > your laptop (see "Deploying to the AWS server" in the README). The steps
 > below are for provisioning a *new* instance from scratch.
 

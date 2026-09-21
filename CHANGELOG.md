@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+* **The production EC2 box has an Elastic IP, `16.76.92.209`** (assigned
+  2026-09-21). `scripts/server_ssh.sh` and `scripts/remote_deploy.sh` default
+  to it; README, `docs/DEPLOYMENT.md` (new "Production host" table),
+  `docs/MEME_BUY.md` and `deploy/AWS_EC2.md` name it in place of the
+  auto-assigned `18.179.57.78`, which no longer reaches the box. Exchange API
+  key allowlists must name the new address. Public hostname to be served:
+  `autobuy.minastrade.com` (A record → the Elastic IP).
+
 ## [0.6.4] — 2026-09-21: holdings are net and located; prices follow the pair; analytics states facts
 
 Corrections from the first live XRP and XLM buys on the production server.

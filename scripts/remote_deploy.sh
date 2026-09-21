@@ -12,13 +12,13 @@
 #
 # Overrides (env vars):
 #   SSH_KEY     path to the .pem   (default: <repo>/Minas-AI-Guardian-Execution-Key-Tokyo.pem)
-#   SERVER      user@host          (default: the Tokyo EC2 box)
+#   SERVER      user@host          (default: the Tokyo EC2 box, Elastic IP 16.76.92.209)
 #   REMOTE_DIR  repo path on server (default: ~/autobuy)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_KEY="${SSH_KEY:-$REPO_ROOT/Minas-AI-Guardian-Execution-Key-Tokyo.pem}"
-SERVER="${SERVER:-ubuntu@ec2-18-179-57-78.ap-northeast-1.compute.amazonaws.com}"
+SERVER="${SERVER:-ubuntu@16.76.92.209}"
 REMOTE_DIR="${REMOTE_DIR:-\$HOME/autobuy}"
 
 if [ ! -f "$SSH_KEY" ]; then

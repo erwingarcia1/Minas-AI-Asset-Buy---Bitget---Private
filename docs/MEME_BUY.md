@@ -130,11 +130,12 @@ tick them separately, and store them under separate env-var prefixes.
       withdrawal-status lookup that makes resume safe. Do **not** grant Trade.
 * [ ] **IP-allowlisted** to this host, and to a *stable* address — see the next
       item, which is the one that actually bites.
-* [ ] **EC2 public IP `18.179.57.78` is NOT an Elastic IP.** A stop/start of the
-      instance hands you a new public IP; the old one stays in the Bitget
-      allowlist and **every withdrawal call then fails with error 40038** while
-      spot trading keeps working, so nothing looks broken. Allocate an Elastic
-      IP, associate it, and lock the key to *that* address — before, not after.
+* [x] **The EC2 box has an Elastic IP: `16.76.92.209`.** Lock the key to *that*
+      address. (Until 2026-09-21 the box had the auto-assigned `18.179.57.78`,
+      which a stop/start would have replaced; an allowlist still naming it
+      makes **every withdrawal call fail with error 40038** while spot trading
+      keeps working, so nothing looks broken.) If the Elastic IP is ever
+      disassociated or the instance replaced, update the allowlist first.
 * [ ] **Destination addresses added BY HAND** to the Bitget withdrawal address
       book, one per chain, before the first run. **There is no API to add a
       withdrawal address** (the API is read-only: `GET

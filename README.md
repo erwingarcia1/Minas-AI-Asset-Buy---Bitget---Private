@@ -179,6 +179,14 @@ bot + admin web UI (and, optionally, the platform API stack). The repo is
 checked out at `~/autobuy` on the server, and the server pulls from GitHub
 with its own **deploy key** (`~/.ssh/github_deploy`) — no tokens needed.
 
+The instance has an **Elastic IP, `16.76.92.209`**, so its public address
+survives a stop/start. Use that address everywhere a fixed one is needed: SSH
+(`scripts/server_ssh.sh` and `scripts/remote_deploy.sh` default to it), the
+exchange API keys' IP allowlists, and the DNS A record for the public
+hostname `autobuy.minastrade.com`. The old auto-assigned address
+(`18.179.57.78` / `ec2-18-179-57-78…`) was released with the association and
+no longer reaches this box.
+
 **All deployments come from the `main` branch.** Both the server and your
 local clone are checked out on `main`; `deploy.sh` deploys whatever branch
 the server has checked out (override with `--branch NAME` for a one-off).
@@ -196,8 +204,7 @@ root on your machine (it is gitignored — never commit it, and keep it
 `chmod 600`):
 
 ```bash
-ssh -i Minas-AI-Guardian-Execution-Key-Tokyo.pem \
-    ubuntu@ec2-18-179-57-78.ap-northeast-1.compute.amazonaws.com
+ssh -i Minas-AI-Guardian-Execution-Key-Tokyo.pem ubuntu@16.76.92.209
 
 # or the shortcut, which also runs one-off commands:
 bash scripts/server_ssh.sh
