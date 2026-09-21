@@ -35,7 +35,7 @@ The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse th
 |---|---|
 | Instance | Ubuntu EC2, Tokyo (`ap-northeast-1`), repo at `~/autobuy` |
 | Public address | **Elastic IP `16.76.92.209`** (assigned 2026-09-21; survives stop/start). The earlier auto-assigned `18.179.57.78` / `ec2-18-179-57-78…` hostname is gone. |
-| SSH | `bash scripts/server_ssh.sh` → `ubuntu@16.76.92.209` (override with `SERVER=`) |
+| SSH | `bash scripts/server_ssh.sh` → `ubuntu@16.76.92.209`. The address is defined once, as `SERVER_HOST` in `scripts/lib/server_host.sh`; both scripts source it (override with `SERVER_HOST=` or `SERVER=`). A future address change is that one line. |
 | Public entry point | **https://autobuy.minastrade.com** — GoDaddy A record → `16.76.92.209`; security group opens 80 + 443; the `caddy` compose service terminates TLS (automatic Let's Encrypt) and proxies to `web`. Matches `APP_BASE_URL` / `ALLOWED_ORIGINS` in the server's `.env`. See "Public HTTPS" below. |
 | Private entry point | `https://ip-172-31-21-173.tail0fdd4a.ts.net` (`tailscale serve` → `127.0.0.1:8080`), tailnet members only |
 | Exchange key allowlists | every IP-allowlisted exchange API key must name `16.76.92.209` |

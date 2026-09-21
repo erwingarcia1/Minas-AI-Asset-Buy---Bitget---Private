@@ -100,3 +100,19 @@ def test_web_bundle_is_installed_in_place_never_by_renaming_the_mounted_director
     assert "mv frontend/dist" not in text
     assert 'rsync -a --delete "$WEB_BUNDLE"/ frontend/dist/' in text
     assert "--force-recreate web" in text, "the failure message says how to rebind the mount"
+
+
+def test_server_address_is_defined_once():
+    """The production box's address lives in scripts/lib/server_host.sh only;
+    the released auto-assigned address (18.179.57.78) must never come back."""
+    lib = (ROOT / "scripts" / "lib" / "server_host.sh").read_text()
+    assert 'SERVER_HOST="${SERVER_HOST:-16.76.92.209}"' in lib
+    for name in ("server_ssh.sh", "remote_deploy.sh"):
+        text = (ROOT / "scripts" / name).read_text()
+        assert "scripts/lib/server_host.sh" in text or 'lib/server_host.sh"' in text, name
+        assert "16.76.92.209" not in text.replace("scripts/lib/server_host.sh", ""), f"{name} hardcodes the address"
+        assert "18.179.57.78" not in text and "ec2-18-179-57-78" not in text, name
+    for path in ROOT.rglob("*.sh"):
+        if "venv" in path.parts or "node_modules" in path.parts:
+            continue
+        assert "18.179.57.78" not in path.read_text() and "ec2-18-179-57-78" not in path.read_text(), path
