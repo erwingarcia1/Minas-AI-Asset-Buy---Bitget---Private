@@ -86,6 +86,11 @@ coin list, moved to `tests/test_network_validator.py`),
 Frontend: "address must match network and coin" and "exchange network
 support" in `addressValidation.test.ts` (2).
 
+Two of the removed bot tests exercised the kept `bitget_client.py` (request
+signing, error-envelope handling); they were restored as
+`tests/test_bitget_client.py`. Every other removed test imported only deleted
+code (verified from each file's imports at the tag; none imported `api.*`).
+
 ## [0.6.4] — 2026-09-21: holdings are net and located; prices follow the pair; analytics states facts
 
 Corrections from the first live XRP and XLM buys on the production server.
