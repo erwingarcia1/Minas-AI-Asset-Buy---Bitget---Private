@@ -221,6 +221,10 @@ redirects http to https. Requirements: the DNS A record points at the box and
 the security group allows inbound 80 **and** 443 — without 80 the http
 redirect and the HTTP-01 challenge fail.
 
+* **`PUBLIC_BIND_IP` in the server's `.env` is `172.31.21.173`** (the box's VPC
+  address, where the Elastic IP lands). `tailscaled` already listens on
+  `100.66.20.22:443` for the tailnet URL, so publishing on `0.0.0.0:443` fails
+  with "address already in use"; bound to the VPC address the two coexist.
 * **The certificate lives in the `autobuy-platform_caddy_data` volume.** Never
   remove it casually (`down -v`, `volume prune`): Let's Encrypt allows 5
   duplicate certificates per week, and a wiped volume re-issues on every start.

@@ -30,9 +30,10 @@ def test_gunicorn_trusts_the_proxy_header():
 
 def test_only_caddy_is_published_on_a_public_interface():
     public = [p for p in re.findall(r'^\s+- "([^"]+:\d+(?:/udp)?)"$', COMPOSE, re.M) if not p.startswith("127.0.0.1:")]
-    assert sorted(public) == ["443:443", "80:80"], public
+    bind = "${PUBLIC_BIND_IP:-0.0.0.0}"   # an operator may narrow it (tailscaled holds :443 on the tailnet address)
+    assert sorted(public) == [f"{bind}:443:443", f"{bind}:80:80"], public
     caddy = COMPOSE[COMPOSE.index("\n  caddy:"):COMPOSE.index("\n  # Optional metrics scraper")]
-    assert '"80:80"' in caddy and '"443:443"' in caddy and "caddy_data:/data" in caddy
+    assert all(p in caddy for p in public) and "caddy_data:/data" in caddy
 
 
 def test_caddy_proxies_to_web_and_nothing_else():

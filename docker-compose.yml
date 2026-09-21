@@ -155,8 +155,12 @@ services:
     profiles: ["prod"]
     restart: always
     ports:
-      - "80:80"
-      - "443:443"
+      # PUBLIC_BIND_IP: the host address to listen on. Set it (in .env) to the
+      # box's VPC address when something else already holds :443 on another
+      # interface — on the Tokyo box tailscaled serves the tailnet URL on
+      # 100.x:443, so binding 0.0.0.0 fails with "address already in use".
+      - "${PUBLIC_BIND_IP:-0.0.0.0}:80:80"
+      - "${PUBLIC_BIND_IP:-0.0.0.0}:443:443"
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-autobuy.minastrade.com}
     volumes:
