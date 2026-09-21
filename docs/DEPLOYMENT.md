@@ -51,7 +51,7 @@ rest are manual and tracked as Phase 7 issues.
 | 1 | Credential files ignored by git (`.env`, every `.env.*`, `.envy`, `*.pem`) | ✅ done | `.gitignore` |
 | 2 | Dev-only `/test-purchase` routes removed | ✅ done (#34) | `api/main.py` |
 | 3 | Production env template with every required variable | ✅ done | `.env.production.example` |
-| 4 | TLS + DNS: public hostname `autobuy.minastrade.com` with a GoDaddy **A record → `16.76.92.209`** (the box's Elastic IP); security group opens 80 + 443; certificate issued; HTTP→HTTPS redirect verified | ⬜ manual (#31) | GoDaddy DNS, EC2 security group, `deployment/nginx.conf` |
+| 4 | TLS + DNS: public hostname `autobuy.minastrade.com` with a GoDaddy **A record → `16.76.92.209`** (the box's Elastic IP); security group opens 80 + 443; certificate issued; HTTP→HTTPS redirect verified | ✅ done 2026-09-21 (#31) — Let's Encrypt cert via the `caddy` service, auto-renewing (first expiry 2026-12-20) | GoDaddy DNS, EC2 security group, `deployment/caddy/Caddyfile` |
 | 5 | Credentials provisioned into the server's root-owned `.env` (`chmod 600`): `SECRET_KEY`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, Resend (#28), Sumsub (#27); optional Twilio (#29), FCM (#30), Slack | ⬜ manual | `.env.production.example` |
 | 6 | `.env` validated (command below) | ⬜ manual | `scripts/validate_env.py` |
 | 7 | Sumsub webhook pointed at `https://<api host>/api/webhooks/sumsub` with the same secret as `SUMSUB_WEBHOOK_SECRET`; Resend sending domain verified (SPF/DKIM) | ⬜ manual (#27, #28) | provider dashboards |
