@@ -166,9 +166,12 @@ means **exclusive** (fee charged on top: the balance dropped by size + fee,
 the wallet received size); `expected_received == amount_executed − fee` means
 **inclusive** (the balance dropped by size, the wallet received size − fee).
 `on_exchange` subtracts what left the balance; `sent_to_wallet` sums what the
-wallet received. A row sent under one mode is never recomputed under another;
-the mode is not yet a column of its own (proposed as migration 025, see
-CHANGELOG). `BITGET_WITHDRAW_FEE_MODE` (exclusive) is confirmed only by the
+wallet received. A row sent under one mode is never recomputed under another:
+since migration 025 the executor stamps `withdrawal_fee_mode` on every
+withdrawal row at send time (CHECK `exclusive` / `inclusive` / NULL) and
+readers use the column; the `expected_received` derivation is the fallback for
+rows written before 025 only. A NULL on a newer row is a bug, not a legacy
+case. `BITGET_WITHDRAW_FEE_MODE` (exclusive) is confirmed only by the
 first real withdrawal: compare `on_exchange` with Bitget's balance to the last
 digit and record the result here. **Not yet done as of 2026-09-21.**
 

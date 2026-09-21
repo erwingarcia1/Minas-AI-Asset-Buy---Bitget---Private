@@ -43,6 +43,7 @@ from sqlalchemy.pool import NullPool
 from api.config import settings
 from api.database import DATABASE_URL
 from api.models import APIKey, Purchase, PurchaseTransaction, User, utcnow
+from api.services import bitget_market
 from api.services.history import BUY_TYPES
 
 logger = logging.getLogger("autobuy.tasks.purchases")
@@ -661,6 +662,7 @@ async def _withdraw_after_buy(db: AsyncSession, purchase: Purchase, account: API
                              parent_transaction_id=buy.id, client_oid=f"abw-{uuid.uuid4().hex[:24]}",
                              amount_executed=amount, withdrawal_chain=purchase.blockchain_network,
                              withdrawal_memo=purchase.wallet_memo or None,
+                             withdrawal_fee_mode=bitget_market.fee_mode(),   # recorded at send time; readers never recompute under a later setting
                              order_id=buy.order_id, fill_price=buy.fill_price)
     db.add(wd)
     await db.commit()

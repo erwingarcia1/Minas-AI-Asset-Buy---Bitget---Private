@@ -38,11 +38,23 @@ Corrections from the first live XRP and XLM buys on the production server.
   figure with Bitget's balance to the last digit and **record** the result;
   that comparison is what confirms `BITGET_WITHDRAW_FEE_MODE`.
 
-### Proposed, not built
+### Added (0.6.5, 2026-09-21)
 
-* Migration 025, `purchase_transactions.withdrawal_fee_mode`, so the mode a
-  withdrawal was sent under is stored explicitly instead of derived from
-  `expected_received`. Awaiting approval (schema change).
+* **Migration 025** — `purchase_transactions.withdrawal_fee_mode` with CHECK
+  `ck_purchase_transactions_withdrawal_fee_mode` (`exclusive` / `inclusive` /
+  NULL). The executor writes the configured mode on every withdrawal row at
+  send time; readers prefer the column and fall back to the
+  `expected_received` derivation only for rows written before 025. A test
+  asserts every executor-written row carries a non-NULL mode.
+
+### Known issues
+
+* `tests/api/test_admin_alert_digest.py::test_nothing_is_emailed_while_no_alert_is_critical`
+  is order-dependent: it passes alone and fails in the full `tests/api` run
+  when an earlier test leaves a stopped purchase or a recent failed
+  transaction behind, because the alert computation is platform-wide, not
+  per user. Tracked as GitHub issue #35; not a product defect. Do not re-run
+  CI to green over it — fix the test's isolation.
 
 ## [Unreleased] — AutoBuy platform, 2026-09-16 / 2026-09-17
 

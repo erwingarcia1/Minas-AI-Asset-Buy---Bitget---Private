@@ -125,3 +125,53 @@ async def test_dashboard_and_transactions_expose_net_and_location(client, db, us
     assert buy["net_amount"] == pytest.approx(0.000196803, abs=1e-12)
     perf = (await client.get("/api/analytics/performance", headers=auth(user))).json()
     assert {h["crypto"]: h["total_amount"] for h in perf["holdings"]}["XLM"] == pytest.approx(14.30568, abs=1e-12)
+
+
+async def test_executor_stamps_every_withdrawal_row_with_the_fee_mode(db, user, bitget_key, monkeypatch):
+    """A NULL withdrawal_fee_mode on a row written after migration 025 is a bug,
+    not a legacy case: the derivation fallback exists for history only."""
+    from api.tasks import purchase_scheduler as ps
+    from tests.fake_gateway import FakeGateway
+    from api.config import settings
+    from sqlalchemy import select
+    monkeypatch.setattr(settings, "bitget_withdraw_fee_mode", "inclusive")
+    p = await make_purchase(db, user, bitget_key, crypto_symbol="BTC", purchase_type="autobuy")
+    await db.refresh(p, ["exchange_account", "user", "transactions"])
+    await ps.execute_one(db, p, p.next_execution, FakeGateway(), dry_run=True)
+    rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id,
+                                                                PurchaseTransaction.tx_type == "withdrawal"))).scalars().all()
+    assert rows and all(r.withdrawal_fee_mode == "inclusive" for r in rows), [r.withdrawal_fee_mode for r in rows]
+    # and a failed send (no amount) still records the mode it would have used
+    p2 = await make_purchase(db, user, bitget_key, crypto_symbol="BTC", purchase_type="autobuy")
+    await db.refresh(p2, ["exchange_account", "user", "transactions"])
+    gw = FakeGateway(); gw.fail_withdrawal = True
+    await ps.execute_one(db, p2, p2.next_execution, gw, dry_run=True)
+    rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p2.id,
+                                                                PurchaseTransaction.tx_type == "withdrawal"))).scalars().all()
+    assert rows and all(r.withdrawal_fee_mode is not None for r in rows)
+
+
+async def test_stored_mode_wins_over_the_derivation_and_the_check_constraint_holds(db, user, bitget_key):
+    from sqlalchemy.exc import IntegrityError
+    purchases = await _seed(db, user, bitget_key)
+    xrp = purchases["XRP"]
+    await db.refresh(xrp, ["transactions"])
+    buy = xrp.transactions[0]
+    # a row whose expected_received looks inclusive but whose stored mode says exclusive: the column wins
+    wd = _withdrawal(xrp.id, buy.id, size=1.1, fee=0.2, expected_received=0.9)
+    wd.withdrawal_fee_mode = "exclusive"
+    db.add(wd); await db.commit()
+    assert history.withdrawal_fee_mode(wd) == "exclusive"
+    pos = {p.crypto: p for p in await history.positions(db, user.id)}["XRP"]
+    assert pos.on_exchange == pytest.approx(0.0320666, abs=1e-12) and pos.sent_to_wallet == pytest.approx(1.1, abs=1e-12)
+    # legacy row (NULL column) still derives from expected_received
+    wd.withdrawal_fee_mode = None
+    assert history.withdrawal_fee_mode(wd) == "inclusive"
+    uid, kid = user.id, bitget_key.id
+    bad = _withdrawal(xrp.id, buy.id, size=0.5, fee=0.2, expected_received=0.5); bad.withdrawal_fee_mode = "on_top"
+    db.add(bad)
+    with pytest.raises(IntegrityError) as ei:
+        await db.flush()
+    assert "ck_purchase_transactions_withdrawal_fee_mode" in str(ei.value)
+    await db.rollback()
+    await db.refresh(user); await db.refresh(bitget_key)

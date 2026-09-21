@@ -131,6 +131,7 @@ class PurchaseTransaction(Base):
     withdrawal_fee = Column(Float, nullable=True)
     withdrawal_fee_currency = Column(String(10), nullable=True)
     expected_received = Column(Float, nullable=True)         # withdrawal: what the wallet should receive after the chain fee
+    withdrawal_fee_mode = Column(String(10), nullable=True)  # withdrawal: exclusive | inclusive, the mode it was SENT under (migration 025; NULL only on rows older than it)
     withdrawal_memo = Column(String(64), nullable=True)      # withdrawal: the tag/memo actually sent
     tx_hash = Column(String(128), nullable=True)             # on-chain hash once the exchange reports it
     # Idempotency + row lineage (migration 017)

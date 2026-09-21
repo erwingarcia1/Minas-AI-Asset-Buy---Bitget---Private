@@ -114,12 +114,17 @@ def net_of_fee(tx: PurchaseTransaction, coin: str) -> float:
 
 
 def withdrawal_fee_mode(tx: PurchaseTransaction) -> Optional[str]:
-    """The fee mode a withdrawal row was SENT under, read from what the row
-    recorded at send time, never from today's configuration:
+    """The fee mode a withdrawal row was SENT under, never today's configuration.
+    Since migration 025 the executor stores it in withdrawal_fee_mode; rows
+    older than that are derived from what they recorded at send time:
       exclusive: Bitget charged the fee on top -> expected_received == amount_executed
       inclusive: Bitget took the fee out of the size -> expected_received == amount_executed - fee
-    None when the row predates expected_received (nothing recorded)."""
-    if tx.tx_type != "withdrawal" or tx.expected_received is None or tx.amount_executed is None:
+    None when nothing was recorded (pre-2026-09-14 rows)."""
+    if tx.tx_type != "withdrawal":
+        return None
+    if tx.withdrawal_fee_mode in ("exclusive", "inclusive"):
+        return tx.withdrawal_fee_mode
+    if tx.expected_received is None or tx.amount_executed is None:
         return None
     if abs(float(tx.expected_received) - float(tx.amount_executed)) < 1e-12:
         return "exclusive"
