@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] — 2026-09-21: holdings are net and located; prices follow the pair; analytics states facts
+
+Corrections from the first live XRP and XLM buys on the production server.
+
+### Changed
+
+* **Holdings are net of the trading fee charged in the coin.** The gross fill
+  stays on the transaction row (`amount_crypto`, what Bitget's order history
+  shows) with `net_amount` beside it; the tax CSV gains `net_quantity`.
+  Holdings, average buy price, P&L and cost shares use the net figure.
+  Proved against the live account on 2026-09-21: BTC 0.000197 bought, fee
+  1.97e-07, Bitget balance 0.000196803; XLM 14.32 − 0.01432 = 14.30568; XRP
+  1.3334 − 0.0013334 = 1.3320666, each to the last digit.
+* **Holdings say where the coins are.** `total_amount` = acquired,
+  `on_exchange` = acquired minus what each real withdrawal took off the
+  Bitget balance, `sent_to_wallet` = what those withdrawals delivered. The
+  mode each withdrawal was sent under is read from the row (exclusive:
+  `expected_received == amount_executed`, balance drops by size + fee;
+  inclusive: `expected_received == amount_executed − fee`, balance drops by
+  size), never from today's configuration. Simulated withdrawals move nothing.
+* **Prices follow the pair's precision** (`price_precision`: BTC 2, XRP 4,
+  XLM 5) on transaction rows, holdings and analytics, and in emails, so XLM's
+  0.20945 fill no longer shows as 0.21.
+* **Analytics copy states the metric only** (reviewed for compliance):
+  volatility entries carry `summary` ("30-day volatility 3.1% (moderate).")
+  instead of `recommendation`; best/worst performer dropped; the
+  diversification score replaced by `share_of_invested` (share of COST,
+  labelled as such). The "Estimates only, not financial advice" note stays.
+  SDKs regenerated (breaking rename).
+* Runbook: after the first real withdrawal, compare the app's `on_exchange`
+  figure with Bitget's balance to the last digit and **record** the result;
+  that comparison is what confirms `BITGET_WITHDRAW_FEE_MODE`.
+
+### Proposed, not built
+
+* Migration 025, `purchase_transactions.withdrawal_fee_mode`, so the mode a
+  withdrawal was sent under is stored explicitly instead of derived from
+  `expected_received`. Awaiting approval (schema change).
+
 ## [Unreleased] — AutoBuy platform, 2026-09-16 / 2026-09-17
 
 Platform releases are tagged separately on GitHub (v0.5.0 covers everything up

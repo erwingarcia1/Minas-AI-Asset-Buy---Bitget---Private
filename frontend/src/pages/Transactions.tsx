@@ -44,7 +44,7 @@ export default function Transactions() {
                   <tr key={t.id} className={`border-t border-slate-100 ${t.status === "failed" ? "bg-red-50/60 text-slate-500" : ""}`} data-testid={t.status === "failed" ? "failed-row" : undefined}>
                     <td className="px-4 py-2">{fmtDate(t.executed_at ?? t.created_at)}</td>
                     <td className="px-4 py-2 font-medium">{t.crypto}</td>
-                    <td className="px-4 py-2">{t.status === "failed" || t.status === "pending" ? "—" : fmtCrypto(t.amount_crypto)}</td>
+                    <td className="px-4 py-2">{t.status === "failed" || t.status === "pending" ? "—" : <>{fmtCrypto(t.amount_crypto)}{t.net_amount != null && t.net_amount !== t.amount_crypto && <div className="text-xs text-slate-400" title="After the trading fee charged in the coin">{fmtCrypto(t.net_amount)} received</div>}</>}</td>
                     <td className="px-4 py-2">{t.status === "failed" ? <span className="text-slate-400" title="A failed attempt spends nothing">— <span className="text-xs">nothing spent</span></span> : t.status === "pending" ? "—" : fmtUsdt(t.cost_usdt)}</td>
                     <td className="px-4 py-2">{t.exchange_rate && t.status !== "failed" ? fmtPrice(t.exchange_rate, t.price_precision) : "—"}</td>
                     <td className="px-4 py-2 text-xs">

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from api.services import history
 
 CSV_COLUMNS = [
-    "datetime_utc", "crypto", "quantity", "fill_price_usd", "usd_amount",
+    "datetime_utc", "crypto", "quantity", "net_quantity", "fill_price_usd", "usd_amount",
     "fee", "fee_currency", "exchange", "order_id", "purchase_type", "tx_type",
     "withdrawal_address", "network", "withdrawal_fee", "withdrawal_fee_currency", "tx_hash",
     "withdrawal_status", "method",
@@ -34,7 +34,8 @@ def _lot(r: history.HistoryRow, wd: history.HistoryRow | None = None) -> dict:
     return {
         "datetime_utc": when.strftime("%Y-%m-%d %H:%M:%S"),
         "date": when.date().isoformat(),
-        "amount": r.amount_crypto,
+        "amount": r.amount_crypto,          # gross fill (matches the exchange's order history)
+        "net_amount": r.net_amount,         # the lot actually received, net of the coin-denominated fee
         "cost_usdt": r.cost_usd,
         "price": r.exchange_rate or 0.0,
         "fee": r.fee, "fee_currency": r.fee_currency,
@@ -142,7 +143,7 @@ def tax_summary_csv(summary: dict) -> str:
     for holding in summary["acquisitions"]:
         for lot in holding["lots"]:
             writer.writerow([
-                lot["datetime_utc"], holding["crypto"], _fmt(lot["amount"], 8),
+                lot["datetime_utc"], holding["crypto"], _fmt(lot["amount"], 8), _fmt(lot.get("net_amount"), 8),
                 _fmt(lot["price"], 2), f"{lot['cost_usdt']:.2f}",
                 _fmt(lot["fee"], 8), lot["fee_currency"] or "",
                 lot["exchange"] or "", lot["order_id"] or "",

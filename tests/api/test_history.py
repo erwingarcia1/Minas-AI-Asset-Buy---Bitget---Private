@@ -78,7 +78,8 @@ async def test_stats_holdings_monthly_average(db, user, rows):
     st = await history.stats(db, user.id)
     assert st == {"total_transactions": 4, "total_invested_usdt": 300.0, "average_purchase_usdt": 150.0,
                   "completed_count": 2, "failed_count": 1, "pending_count": 1, "needs_review_count": 0}
-    assert await history.holdings(db, user.id) == [("BTC", pytest.approx(0.003), 300.0)]
+    # 0.001 + 0.002 bought gross; the 0.0001 BTC trading fee on the first buy never reached the account
+    assert await history.holdings(db, user.id) == [("BTC", pytest.approx(0.0029), 300.0)]
     assert await history.monthly_average(db, user.id) == 300.0
     assert await history.completed_count_and_total(db, user.id) == (2, 300.0)
 
@@ -94,7 +95,8 @@ async def test_completed_rows_window_and_grouping(db, user, rows):
     all_rows = await history.completed_rows(db, user.id)
     assert [r.id for r in all_rows] == [rows["a"].id, rows["b"].id]  # oldest first
     assert await history.completed_rows(db, user.id, since=now + timedelta(days=1)) == []
-    assert history.group_by_crypto(all_rows) == [("BTC", pytest.approx(0.003), 300.0)]
+    assert history.group_by_crypto(all_rows) == [("BTC", pytest.approx(0.0029), 300.0)], "net of the coin fee, like holdings"
+    assert [r.net_amount for r in all_rows] == [pytest.approx(0.0009), 0.002] and [r.amount_crypto for r in all_rows] == [0.001, 0.002]
 
 
 async def test_failed_count_and_active_users(db, user, rows):

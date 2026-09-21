@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models import APIKey, Purchase, PurchaseTransaction
@@ -65,7 +65,8 @@ class HistoryRow:
     purchase_type: str            # autobuy | dca
     tx_type: str                  # withdrawal | accumulation
     status: str                   # API vocabulary: pending | completed | failed | simulated (dry-run withdrawal)
-    amount_crypto: float          # coins bought (0 when the buy failed)
+    amount_crypto: float          # coins bought, GROSS fill as Bitget's order history shows it (0 when the buy failed)
+    net_amount: float             # what the account actually received: gross minus the trading fee when it was charged in the coin
     cost_usd: float               # quote spent (the purchase amount when the fill did not report it)
     fill_price: Optional[float]
     fee: Optional[float]
@@ -99,6 +100,48 @@ class HistoryRow:
 BUY_TYPES = ("buy", "accumulation")   # rows that are purchases (lots); "withdrawal" rows move coins
 
 
+def net_of_fee(tx: PurchaseTransaction, coin: str) -> float:
+    """Coins the account actually received from a buy: the gross fill minus the
+    trading fee when Bitget charged it in the coin itself (proved against the
+    live balance on 2026-09-21: 0.000197 BTC bought, fee 1.97e-07 BTC, balance
+    0.000196803). Fees charged in USDT or BGB do not touch the quantity."""
+    if tx.tx_type not in BUY_TYPES:
+        return float(tx.amount_executed or 0.0)
+    amount = float(tx.amount_executed or 0.0)
+    if tx.fee and (tx.fee_currency or "").upper() == (coin or "").upper():
+        amount = max(amount - float(tx.fee), 0.0)
+    return amount
+
+
+def withdrawal_fee_mode(tx: PurchaseTransaction) -> Optional[str]:
+    """The fee mode a withdrawal row was SENT under, read from what the row
+    recorded at send time, never from today's configuration:
+      exclusive: Bitget charged the fee on top -> expected_received == amount_executed
+      inclusive: Bitget took the fee out of the size -> expected_received == amount_executed - fee
+    None when the row predates expected_received (nothing recorded)."""
+    if tx.tx_type != "withdrawal" or tx.expected_received is None or tx.amount_executed is None:
+        return None
+    if abs(float(tx.expected_received) - float(tx.amount_executed)) < 1e-12:
+        return "exclusive"
+    return "inclusive"
+
+
+def withdrawal_movement(tx: PurchaseTransaction) -> Tuple[float, float, Optional[str]]:
+    """(left_exchange, received_by_wallet, mode) for a successful, real withdrawal.
+    exclusive: left = size + fee, received = size.  inclusive: left = size, received = size - fee.
+    A row with no recorded mode uses the mode configured NOW and is reported as such
+    (only pre-2026-09-14 simulated rows on the dev database; none in production)."""
+    size = float(tx.amount_executed or 0.0)
+    fee = float(tx.withdrawal_fee or 0.0)
+    mode = withdrawal_fee_mode(tx)
+    if mode is None:
+        from api.services.bitget_market import fee_mode
+        mode = fee_mode()
+    if mode == "exclusive":
+        return size + fee, size, mode
+    return size, max(size - fee, 0.0), mode
+
+
 def _row(tx: PurchaseTransaction, p: Purchase, exchange: Optional[str]) -> HistoryRow:
     amount = float(tx.amount_executed or 0.0)
     if tx.cost_usd is not None:
@@ -110,7 +153,7 @@ def _row(tx: PurchaseTransaction, p: Purchase, exchange: Optional[str]) -> Histo
     return HistoryRow(
         id=tx.id, purchase_id=p.id, user_id=p.user_id, crypto=p.crypto_symbol,
         purchase_type=p.purchase_type, tx_type=tx.tx_type, status=presented_status(tx),
-        amount_crypto=amount, cost_usd=float(cost), fill_price=tx.fill_price,
+        amount_crypto=amount, net_amount=net_of_fee(tx, p.crypto_symbol), cost_usd=float(cost), fill_price=tx.fill_price,
         fee=tx.fee, fee_currency=tx.fee_currency, exchange=exchange,
         order_id=tx.order_id or (tx.exchange_tx_id if tx.tx_type == "accumulation" else None),
         withdrawal_id=tx.withdrawal_id or (tx.exchange_tx_id if tx.tx_type == "withdrawal" else None),
@@ -221,19 +264,62 @@ async def count_network_failures_since(db: AsyncSession, since: datetime) -> int
     return int((await db.execute(q)).scalar_one())
 
 
-async def holdings(db: AsyncSession, user_id) -> List[Tuple[str, float, float]]:
-    """[(crypto, total_amount, total_cost_usd)] over successful buys, biggest cost first."""
+@dataclass
+class Position:
+    """What a customer owns of one coin and where it is. All three quantities
+    come from recorded rows only (see net_of_fee / withdrawal_movement)."""
+    crypto: str
+    acquired: float          # Σ net buys: gross fill − trading fee charged in the coin
+    on_exchange: float       # acquired − Σ what each real withdrawal took off the Bitget balance
+    sent_to_wallet: float    # Σ what each real withdrawal delivered to the destination
+    cost_usd: float          # Σ quote spent on those buys
+    withdrawals: int         # real (non-simulated) successful withdrawals counted
+    fee_modes: List[str]     # distinct modes those withdrawals were sent under
+
+
+async def positions(db: AsyncSession, user_id) -> List[Position]:
+    """Per coin, biggest cost first. Buys are summed net of the coin-denominated
+    trading fee; successful real withdrawals are subtracted per the mode each
+    was sent under. Simulated (dry-run) withdrawals move nothing."""
     cost = func.coalesce(PurchaseTransaction.cost_usd, Purchase.amount_usd)
+    fee_in_coin = case((func.upper(func.coalesce(PurchaseTransaction.fee_currency, "")) == func.upper(Purchase.crypto_symbol),
+                        func.coalesce(PurchaseTransaction.fee, 0.0)), else_=0.0)
+    net = func.coalesce(PurchaseTransaction.amount_executed, 0.0) - fee_in_coin
     rows = (await db.execute(
-        select(Purchase.crypto_symbol,
-               func.coalesce(func.sum(PurchaseTransaction.amount_executed), 0.0),
-               func.coalesce(func.sum(cost), 0.0))
+        select(Purchase.crypto_symbol, func.coalesce(func.sum(net), 0.0), func.coalesce(func.sum(cost), 0.0))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
         .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
                PurchaseTransaction.tx_type.in_(BUY_TYPES))
         .group_by(Purchase.crypto_symbol)
         .order_by(func.sum(cost).desc()))).all()
-    return [(r[0], float(r[1]), float(r[2])) for r in rows if float(r[1]) > 0]
+    out = {r[0]: Position(crypto=r[0], acquired=float(r[1]), on_exchange=float(r[1]), sent_to_wallet=0.0,
+                          cost_usd=float(r[2]), withdrawals=0, fee_modes=[]) for r in rows if float(r[1]) > 0}
+    wds = (await db.execute(
+        select(PurchaseTransaction, Purchase.crypto_symbol)
+        .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
+        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
+               PurchaseTransaction.tx_type == "withdrawal"))).all()
+    for tx, coin in wds:
+        if is_simulated(tx) or coin not in out:
+            continue
+        left, received, mode = withdrawal_movement(tx)
+        pos = out[coin]
+        pos.on_exchange = max(pos.on_exchange - left, 0.0)
+        pos.sent_to_wallet += received
+        pos.withdrawals += 1
+        if mode not in pos.fee_modes:
+            pos.fee_modes.append(mode)
+    for pos in out.values():
+        pos.acquired, pos.on_exchange, pos.sent_to_wallet = (round(pos.acquired, 10), round(pos.on_exchange, 10),
+                                                             round(pos.sent_to_wallet, 10))
+    return list(out.values())
+
+
+async def holdings(db: AsyncSession, user_id) -> List[Tuple[str, float, float]]:
+    """[(crypto, acquired, total_cost_usd)] over successful buys, NET of the
+    coin-denominated trading fee, biggest cost first. Feeds P&L, average buy
+    price and cost shares: invested cost bought the acquired quantity."""
+    return [(p.crypto, p.acquired, p.cost_usd) for p in await positions(db, user_id)]
 
 
 async def monthly_average(db: AsyncSession, user_id) -> float:
@@ -300,11 +386,11 @@ async def users_with_activity_since(db: AsyncSession, since: datetime) -> Sequen
 
 
 def group_by_crypto(rows: Iterable[HistoryRow]) -> List[Tuple[str, float, float]]:
-    """[(crypto, amount, cost)] from already-loaded successful rows."""
+    """[(crypto, net amount, cost)] from already-loaded successful rows (net of the coin fee, like holdings)."""
     acc: dict = {}
     for r in rows:
         a, c = acc.get(r.crypto, (0.0, 0.0))
-        acc[r.crypto] = (a + r.amount_crypto, c + r.cost_usd)
+        acc[r.crypto] = (a + r.net_amount, c + r.cost_usd)
     return [(k, v[0], v[1]) for k, v in sorted(acc.items())]
 
 

@@ -912,15 +912,26 @@
         "type": "object"
       },
       "CryptoHolding": {
+        "description": "What the customer owns of a coin and where it is. total_amount is the\nquantity ACQUIRED (net of the trading fee charged in the coin); on_exchange\nis what is still on Bitget after real withdrawals (matches Bitget's balance);\nsent_to_wallet is what those withdrawals delivered.",
         "properties": {
           "crypto": {
             "title": "Crypto",
             "type": "string"
           },
+          "on_exchange": {
+            "default": 0.0,
+            "title": "On Exchange",
+            "type": "number"
+          },
           "price_precision": {
             "default": 8,
             "title": "Price Precision",
             "type": "integer"
+          },
+          "sent_to_wallet": {
+            "default": 0.0,
+            "title": "Sent To Wallet",
+            "type": "number"
           },
           "total_amount": {
             "title": "Total Amount",
@@ -3492,6 +3503,11 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "net_amount": {
+            "default": 0.0,
+            "title": "Net Amount",
+            "type": "number"
           },
           "order_id": {
             "anyOf": [

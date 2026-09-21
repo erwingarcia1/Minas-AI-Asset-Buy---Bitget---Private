@@ -129,7 +129,22 @@ Shape of the test:
    with `withdrawal_memo` = the tag), Bitget's withdrawal history (status,
    tx hash within a minute), then the receiving exchange's deposit history
    (credited to Erwin's account within a minute or two).
-5. Record the outcome in `docs/API.md` under "Destination tag / memo": change
+5. **Confirm the fee mode against the balance, and record it.** After Bitget
+   marks the withdrawal successful, read the dashboard's "on exchange" figure
+   for XRP and Bitget's available XRP balance (Assets → Spot, or
+   `get_available("XRP")` in the container) and compare them to the last
+   digit. The app computes "on exchange" from the recorded row under the mode
+   it was sent in: exclusive means the balance dropped by size + 0.2 XRP fee,
+   inclusive by size only. Equal to the last digit = the configured
+   `BITGET_WITHDRAW_FEE_MODE` (exclusive) is confirmed. Off by exactly the
+   0.2 XRP fee = Bitget deducts the fee from the size, the mode must be
+   switched to `inclusive` before the next withdrawal, and the row is left as
+   recorded (it was sent under exclusive; the app reads each row's own mode).
+   Write the result down: date, withdrawal order id, app figure, Bitget
+   figure, verdict — in `docs/API.md` under "Bitget market data" next to
+   `BITGET_WITHDRAW_FEE_MODE` and in `CHANGELOG.md`. Observing it is not
+   enough; the recorded comparison is what closes the gap.
+6. Record the outcome in `docs/API.md` under "Destination tag / memo": change
    the `tag` field from *unverified* to *verified on <date>, withdrawal
    <Bitget order id>*, and only then remove the "unverified" flag from the
    code comment in `bitget_client.withdraw`. If the deposit is **not**

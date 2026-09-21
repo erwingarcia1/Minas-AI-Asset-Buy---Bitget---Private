@@ -46,9 +46,18 @@ export default function Dashboard() {
           <h2 className="font-semibold">Holdings</h2>
           {overview.holdings.length === 0 ? <p className="mt-3 text-sm text-slate-500">No completed purchases yet.</p> : (
             <table className="mt-3 w-full text-sm">
-              <thead className="text-left text-slate-500"><tr><th className="py-1">Asset</th><th>Amount</th><th className="text-right">Cost</th></tr></thead>
+              <thead className="text-left text-slate-500"><tr><th className="py-1">Asset</th><th>Acquired</th><th>Where it is</th><th className="text-right">Cost</th></tr></thead>
               <tbody>{overview.holdings.map((h) => (
-                <tr key={h.crypto} className="border-t border-slate-100"><td className="py-2 font-medium">{h.crypto}</td><td>{fmtCrypto(h.total_amount)}</td><td className="text-right">{fmtUsdt(h.total_cost_usdt)}</td></tr>
+                <tr key={h.crypto} className="border-t border-slate-100" data-testid={`holding-${h.crypto}`}>
+                  <td className="py-2 font-medium">{h.crypto}</td>
+                  <td title="Net of the trading fee charged in the coin">{fmtCrypto(h.total_amount)}</td>
+                  <td className="text-slate-600">
+                    {(h.sent_to_wallet ?? 0) > 0
+                      ? <>{fmtCrypto(h.on_exchange ?? h.total_amount)} on exchange · {fmtCrypto(h.sent_to_wallet)} in your wallet</>
+                      : "all on the exchange"}
+                  </td>
+                  <td className="text-right">{fmtUsdt(h.total_cost_usdt)}</td>
+                </tr>
               ))}</tbody>
             </table>
           )}

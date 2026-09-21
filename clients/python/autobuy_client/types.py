@@ -194,9 +194,11 @@ class CreateApplicantResponse(TypedDict):
 
 
 class CryptoHolding(TypedDict):
-    """CryptoHolding."""
+    """What the customer owns of a coin and where it is. total_amount is the quantity ACQUIRED (net of the trading fee charged in the coin); on_exchange is what is still on Bitget after real withdrawals (matches Bitget's balance); sent_to_wallet is what those withdrawals delivered."""
     crypto: str
+    on_exchange: NotRequired[float]
     price_precision: NotRequired[int]
+    sent_to_wallet: NotRequired[float]
     total_amount: float
     total_cost_usdt: float
 
@@ -675,6 +677,7 @@ class TransactionResponse(TypedDict):
     fee: NotRequired[Optional[float]]
     fee_currency: NotRequired[Optional[str]]
     id: str
+    net_amount: NotRequired[float]
     order_id: NotRequired[Optional[str]]
     price_precision: NotRequired[int]
     purchase_id: str

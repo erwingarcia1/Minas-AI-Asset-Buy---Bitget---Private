@@ -23,8 +23,14 @@ router = APIRouter()
 # --------------------------------------------------------------------------
 
 class CryptoHolding(BaseModel):
+    """What the customer owns of a coin and where it is. total_amount is the
+    quantity ACQUIRED (net of the trading fee charged in the coin); on_exchange
+    is what is still on Bitget after real withdrawals (matches Bitget's balance);
+    sent_to_wallet is what those withdrawals delivered."""
     crypto: str
-    total_amount: float
+    total_amount: float          # acquired, net of the coin-denominated trading fee
+    on_exchange: float = 0.0
+    sent_to_wallet: float = 0.0
     total_cost_usdt: float
     price_precision: int = 8   # decimals Bitget quotes the pair in (for any price derived from these figures)
 
@@ -83,9 +89,10 @@ class TimelineResponse(BaseModel):
 async def _holdings(db: AsyncSession, user_id) -> List[CryptoHolding]:
     """Successful Auto-Buy buys summed per coin (purchase_transactions)."""
     from api.services import bitget_market
-    return [CryptoHolding(crypto=c, total_amount=round(a, 8), total_cost_usdt=round(cost, 8),
-                          price_precision=await bitget_market.price_precision_async(c))
-            for c, a, cost in await history.holdings(db, user_id)]
+    return [CryptoHolding(crypto=pos.crypto, total_amount=pos.acquired, on_exchange=pos.on_exchange,
+                          sent_to_wallet=pos.sent_to_wallet, total_cost_usdt=round(pos.cost_usd, 8),
+                          price_precision=await bitget_market.price_precision_async(pos.crypto))
+            for pos in await history.positions(db, user_id)]
 
 
 # --------------------------------------------------------------------------

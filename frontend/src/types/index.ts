@@ -94,6 +94,7 @@ export interface Transaction {
   crypto: string;
   purchase_type: PurchaseType;
   tx_type: "buy" | "withdrawal" | "accumulation";
+  net_amount?: number;        // gross minus the trading fee charged in the coin
   amount_crypto: number;
   cost_usdt: number;
   exchange_rate: number | null;
@@ -142,7 +143,9 @@ export interface QuickStats {
 export interface CryptoHolding {
   price_precision?: number;
   crypto: string;
-  total_amount: number;
+  total_amount: number;        // acquired, net of the trading fee charged in the coin
+  on_exchange?: number;        // still on Bitget after real withdrawals (matches Bitget's balance)
+  sent_to_wallet?: number;     // delivered to the customer's wallet by those withdrawals
   total_cost_usdt: number;
 }
 

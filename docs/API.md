@@ -84,7 +84,7 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 | market (`/api/v2/market`) | `GET /coins/{coin}?amount_usd=` — the coin's Bitget USDT pair (online, minimum order, taker fee) and every withdrawal chain with fee, minimum, precision, address family and, when `amount_usd` is given, the fee in USD, the estimated coins received and whether the amount clears the minimum withdrawal (`meets_minimum`) |
 | exchange (`/api/exchange`) | `GET /supported` (exchanges this deployment accepts keys for, from `SUPPORTED_EXCHANGES`, default `bitget`; other exchanges are rejected with 422 `exchange_not_supported`) · `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` — one harmless authenticated call (account info on Binance/Bitget, a balance read on Bybit/OKX); the key records `verification_status` (pending \| verified \| failed), a readable `verification_error` (never credentials), `verified_at`, `last_checked_at`, `withdrawal_enabled` (warn the user; the executor still requires `verified`), the reported `permissions` and `extra_permissions`. Bitget codes confirmed from its "Edit API key" screen: `stow` Spot → Trade (required; missing → `no_trade_permission` "Spot trading permission is required"), `smow` Margin → Trade, `taxw` Taxation → Search, `p2pw` P2P → Search, `wtow` Wallet → Transfer (internal, not an external withdrawal) — these four are `extra_permissions` (non-blocking warning). Any other code, including whatever Bitget uses for Withdraw, is still reported as withdrawal possible (`withdrawal_enabled: null`) until confirmed |
 | transactions (`/api/transactions`) | `GET /` · `/{id}` · `/crypto/{crypto}` · `/status/{status}` · `/stats/summary` — every Auto-Buy execution attempt (purchase_transactions): fill price, cost, fees, exchange, order id, and for withdrawals the address, network, fee and tx hash. `status` is pending \| completed \| failed |
-| dashboard (`/api/dashboard`) | `GET /` (active/upcoming = the user's active Auto-Buy purchases, both types; holdings and averages from purchase_transactions) · `/stats` · `/analytics/timeline?days=N` |
+| dashboard (`/api/dashboard`) | `GET /` (active/upcoming = the user's active Auto-Buy purchases, both types; holdings from purchase_transactions: `total_amount` = acquired NET of the trading fee charged in the coin, `on_exchange` = acquired minus what each real withdrawal took off the Bitget balance, `sent_to_wallet` = what those withdrawals delivered; see "Holdings arithmetic") · `/stats` · `/analytics/timeline?days=N` |
 | service | `GET /health` (`schedulers`: pause switch + per-scheduler running/paused, last run, last result, consecutive failures for both the legacy recurring tick and the Auto-Buy job) · `GET /metrics` (Prometheus; keep private) |
 
 Full request/response schemas with examples live in `/docs`.
@@ -146,6 +146,31 @@ next month, one-time completes); three consecutive failures mark the purchase
 `failed`. Buys and withdrawals are simulated while `AUTOBUY_DRY_RUN=1`.
 Only exchanges listed in `SUPPORTED_EXCHANGES` (default `bitget`) accept
 keys; the Binance/Bybit/OKX code paths remain but are switched off.
+
+### Holdings arithmetic (since 2026-09-21)
+
+Every quantity is derived from recorded rows, never from today's
+configuration. A buy's **net amount** is the gross fill minus the trading fee
+when Bitget charged it in the coin (fees in USDT or BGB leave the quantity
+alone); proved against the live account on 2026-09-21: BTC 0.000197 bought,
+fee 1.97e-07, balance 0.000196803, and likewise XLM 14.30568 and XRP
+1.3320666. Transaction rows keep the **gross** fill in `amount_crypto` (what
+Bitget's order history shows) and carry `net_amount` beside it; the tax CSV
+has both `quantity` and `net_quantity`. Holdings, average buy price, P&L and
+cost shares all use the net figure.
+
+A successful, non-simulated withdrawal row records `amount_executed` (size
+handed to Bitget), `withdrawal_fee` and `expected_received`, and the mode it
+was sent under is read from those: `expected_received == amount_executed`
+means **exclusive** (fee charged on top: the balance dropped by size + fee,
+the wallet received size); `expected_received == amount_executed − fee` means
+**inclusive** (the balance dropped by size, the wallet received size − fee).
+`on_exchange` subtracts what left the balance; `sent_to_wallet` sums what the
+wallet received. A row sent under one mode is never recomputed under another;
+the mode is not yet a column of its own (proposed as migration 025, see
+CHANGELOG). `BITGET_WITHDRAW_FEE_MODE` (exclusive) is confirmed only by the
+first real withdrawal: compare `on_exchange` with Bitget's balance to the last
+digit and record the result here. **Not yet done as of 2026-09-21.**
 
 ### Bitget market data
 

@@ -169,9 +169,12 @@ export interface CreateApplicantResponse {
   kyc_status: string;
 }
 
+/** What the customer owns of a coin and where it is. total_amount is the quantity ACQUIRED (net of the trading fee charged in the coin); on_exchange is what is still on Bitget after real withdrawals (matches Bitget's balance); sent_to_wallet is what those withdrawals delivered. */
 export interface CryptoHolding {
   crypto: string;
+  on_exchange?: number;
   price_precision?: number;
+  sent_to_wallet?: number;
   total_amount: number;
   total_cost_usdt: number;
 }
@@ -605,6 +608,7 @@ export interface TransactionResponse {
   fee?: number | null;
   fee_currency?: string | null;
   id: string;
+  net_amount?: number;
   order_id?: string | null;
   price_precision?: number;
   purchase_id: string;

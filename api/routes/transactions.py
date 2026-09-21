@@ -50,7 +50,8 @@ class TransactionResponse(UTCModel):
     crypto: str
     purchase_type: str                 # autobuy | dca
     tx_type: str                       # withdrawal | accumulation
-    amount_crypto: float
+    amount_crypto: float               # gross fill, as the exchange's order history shows it
+    net_amount: float = 0.0            # what the account received: gross minus the trading fee charged in the coin
     cost_usdt: float
     exchange_rate: Optional[float] = None
     price_precision: int = 8           # decimals Bitget quotes the pair in; show exchange_rate with exactly these
@@ -73,7 +74,7 @@ class TransactionResponse(UTCModel):
     @classmethod
     def from_row(cls, r: history.HistoryRow, price_precision: int = 8) -> "TransactionResponse":
         return cls(id=r.id, purchase_id=r.purchase_id, crypto=r.crypto, purchase_type=r.purchase_type,
-                   tx_type=r.tx_type, amount_crypto=r.amount_crypto, cost_usdt=r.cost_usd,
+                   tx_type=r.tx_type, amount_crypto=r.amount_crypto, net_amount=r.net_amount, cost_usdt=r.cost_usd,
                    exchange_rate=r.exchange_rate, price_precision=price_precision, exchange=r.exchange, order_id=r.order_id,
                    binance_order_id=r.order_id, fee=r.fee, fee_currency=r.fee_currency,
                    withdrawal_id=r.withdrawal_id, wallet_address=r.wallet_address,
