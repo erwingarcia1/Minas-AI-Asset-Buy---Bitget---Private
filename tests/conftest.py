@@ -159,7 +159,8 @@ def stub_bitget_market(monkeypatch):
         coin = symbol[:-4] if symbol.endswith("USDT") else symbol
         if coin not in SAMPLE_CHAINS or coin in ("USDT", "USDC"):   # no USDT/USDT or USDC/USDT spot pair
             return None
-        return {**SAMPLE_SYMBOL, "symbol": f"{coin}USDT", "baseCoin": coin}
+        return {**SAMPLE_SYMBOL, "symbol": f"{coin}USDT", "baseCoin": coin,
+                "pricePrecision": {"BTC": "2", "ETH": "2", "SOL": "2", "XRP": "4", "XLM": "5"}.get(coin, "2")}
 
     def fetch_chains(coin):
         return [dict(c) for c in SAMPLE_CHAINS.get(coin.upper(), [])]

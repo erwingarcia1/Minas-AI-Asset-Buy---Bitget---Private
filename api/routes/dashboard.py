@@ -26,6 +26,7 @@ class CryptoHolding(BaseModel):
     crypto: str
     total_amount: float
     total_cost_usdt: float
+    price_precision: int = 8   # decimals Bitget quotes the pair in (for any price derived from these figures)
 
 
 class ActivePurchase(UTCModel):
@@ -81,7 +82,9 @@ class TimelineResponse(BaseModel):
 
 async def _holdings(db: AsyncSession, user_id) -> List[CryptoHolding]:
     """Successful Auto-Buy buys summed per coin (purchase_transactions)."""
-    return [CryptoHolding(crypto=c, total_amount=round(a, 8), total_cost_usdt=round(cost, 8))
+    from api.services import bitget_market
+    return [CryptoHolding(crypto=c, total_amount=round(a, 8), total_cost_usdt=round(cost, 8),
+                          price_precision=await bitget_market.price_precision_async(c))
             for c, a, cost in await history.holdings(db, user_id)]
 
 

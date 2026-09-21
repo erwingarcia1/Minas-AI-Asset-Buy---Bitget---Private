@@ -173,6 +173,40 @@ def get_symbol_sync(coin: str) -> Optional[dict]:
     return None if v.get("missing") else v
 
 
+DEFAULT_PRICE_PRECISION = 8
+
+
+def price_precision(coin: str) -> int:
+    """Decimals Bitget quotes the coin's USDT pair in (`pricePrecision`: BTC 2,
+    XRP 4, XLM 5 as of 2026-09-21). Prices are shown with exactly this many
+    decimals so sub-dollar coins keep their significant figures. Unknown pair
+    or Bitget unreachable: 8, which loses nothing."""
+    try:
+        sym = get_symbol_sync(coin)
+    except Exception:
+        return DEFAULT_PRICE_PRECISION
+    if not sym:
+        return DEFAULT_PRICE_PRECISION
+    return int(sym.get("price_precision") or DEFAULT_PRICE_PRECISION)
+
+
+async def price_precision_async(coin: str) -> int:
+    try:
+        sym = await get_symbol(coin)
+    except Exception:
+        return DEFAULT_PRICE_PRECISION
+    if not sym:
+        return DEFAULT_PRICE_PRECISION
+    return int(sym.get("price_precision") or DEFAULT_PRICE_PRECISION)
+
+
+def fmt_price(value: Optional[float], coin: str) -> str:
+    """A price with the pair's precision, for emails and text."""
+    if value is None:
+        return "market"
+    return f"{value:.{price_precision(coin)}f}"
+
+
 async def get_chains(coin: str) -> list:
     return await _cached(_CHAINS_KEY.format(coin=coin.upper()), lambda: _chains_value(coin))
 

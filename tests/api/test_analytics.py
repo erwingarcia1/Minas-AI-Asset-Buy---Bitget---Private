@@ -74,7 +74,8 @@ async def test_performance_math(seeded, market):
     assert "SOL" not in by
     assert p["total_invested_usdt"] == 800.0
     assert p["total_market_value"] == 850.0
-    assert p["best_performer"] == "BTC" and p["worst_performer"] == "ETH"
+    assert "best_performer" not in p and "worst_performer" not in p, "no ranking: every percentage is in the table"
+    assert by["BTC"]["price_precision"] == 2
 
 
 async def test_performance_degrades_without_prices(seeded, monkeypatch):
@@ -93,14 +94,15 @@ async def test_performance_empty_user(db, user, market):
     assert p["holdings"] == [] and p["total_invested_usdt"] == 0.0
 
 
-async def test_comparison_and_diversification(seeded, market):
+async def test_comparison_and_share_of_invested(seeded, market):
     async with client() as c:
         comp = (await c.get("/api/analytics/comparison", headers=auth_headers(seeded))).json()
     by = {e["crypto"]: e for e in comp["entries"]}
     # bought BTC at 50k vs 60k market -> -16.67% (below market = good)
     assert by["BTC"]["buy_price_vs_market_pct"] == pytest.approx(-16.67, abs=0.01)
-    # 500/800 and 300/800 split -> 1 - (0.625^2 + 0.375^2) = 0.4688
-    assert comp["diversification_score"] == pytest.approx(46.9, abs=0.1)
+    # 500/800 and 300/800 of the COST invested: the shares are reported, no score is derived
+    assert "diversification_score" not in comp
+    assert comp["share_of_invested"] == [{"crypto": "BTC", "share_pct": 62.5}, {"crypto": "ETH", "share_pct": 37.5}]
 
 
 async def test_recurring_projection(seeded, market):
@@ -115,12 +117,16 @@ async def test_recurring_projection(seeded, market):
     assert r["note"].startswith("Estimates only, not financial advice")
 
 
-async def test_volatility_recommendations(seeded, market):
+async def test_volatility_is_the_metric_only(seeded, market):
     async with client() as c:
         v = (await c.get("/api/analytics/volatility", headers=auth_headers(seeded))).json()
     by = {e["crypto"]: e for e in v["entries"]}
-    assert by["BTC"]["level"] == "moderate"
-    assert by["ETH"]["level"] == "high" and "more frequent" in by["ETH"]["recommendation"]
+    assert by["BTC"]["level"] == "moderate" and by["BTC"]["summary"] == f"30-day volatility {by['BTC']['volatility_30d_pct']}% (moderate)."
+    assert by["ETH"]["level"] == "high" and by["ETH"]["summary"].startswith("30-day volatility")
+    for e in v["entries"]:
+        assert "recommendation" not in e
+        for word in ("fine", "cadence", "should", "would", "smaller", "larger", "frequent"):
+            assert word not in e["summary"].lower(), f"guidance word {word!r} in {e['summary']!r}"
 
 
 async def test_market_data_cache_and_degradation(monkeypatch):
@@ -141,3 +147,12 @@ async def test_market_data_cache_and_degradation(monkeypatch):
     md2 = md_mod.MarketData(client=BrokenLegacy())
     await get_redis().delete("market:price:NOPEUSDT")
     assert await md2.get_price("NOPE") is None
+
+
+def test_price_precision_follows_the_pair():
+    """Bitget quotes BTCUSDT to 2 decimals, XLMUSDT to 5 (live 2026-09-21); unknown pairs fall back to 8."""
+    from api.services import bitget_market as bm
+    assert bm.price_precision("BTC") == 2
+    assert bm.fmt_price(76132.62, "BTC") == "76132.62"
+    assert bm.price_precision("DOGE") == 8 and bm.fmt_price(0.2, "DOGE") == "0.20000000"
+    assert bm.fmt_price(None, "BTC") == "market"

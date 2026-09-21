@@ -1,6 +1,11 @@
 export const fmtUsdt = (n: number | null | undefined) =>
   n == null ? "—" : `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
 
+/** A price in USDT with exactly the decimals Bitget quotes the pair in (BTC 2, XRP 4, XLM 5),
+ *  so sub-dollar coins keep their significant figures: 0.20945, not 0.21. */
+export const fmtPrice = (n: number | null | undefined, precision = 8) =>
+  n == null ? "—" : `${n.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision })} USDT`;
+
 /** Crypto amounts: at most 8 decimals, trailing zeros trimmed, never exponent notation ("0.00076179", "0.5", "0"). */
 export const fmtAmount = (n: number, digits = 8) => {
   const fixed = n.toFixed(digits);

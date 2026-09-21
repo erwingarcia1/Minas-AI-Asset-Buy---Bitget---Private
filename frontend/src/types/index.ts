@@ -97,6 +97,7 @@ export interface Transaction {
   amount_crypto: number;
   cost_usdt: number;
   exchange_rate: number | null;
+  price_precision?: number;
   exchange: string | null;
   order_id: string | null;
   binance_order_id: string | null;   // = order_id (compatibility)
@@ -139,6 +140,7 @@ export interface QuickStats {
 }
 
 export interface CryptoHolding {
+  price_precision?: number;
   crypto: string;
   total_amount: number;
   total_cost_usdt: number;
@@ -342,21 +344,22 @@ export function purchaseMode(p: { purchase_type?: PurchaseType; withdraw_immedia
 // ---- analytics (GET /api/analytics/*) ------------------------------------------
 export interface PerformanceHolding {
   crypto: string; total_amount: number; invested_usdt: number; average_buy_price: number;
+  price_precision?: number;   // decimals Bitget quotes the pair in
   current_price?: number | null; market_value?: number | null;
   unrealized_pnl_usdt?: number | null; unrealized_pnl_pct?: number | null;
 }
 export interface Performance {
   price_available: boolean; holdings: PerformanceHolding[]; total_invested_usdt: number;
   total_market_value?: number | null; total_pnl_usdt?: number | null; total_pnl_pct?: number | null;
-  best_performer?: string | null; worst_performer?: string | null;
 }
 export interface RecurringProjection {
   schedules: { crypto: string; frequency: string; amount_usdt: number; monthly_usdt: number }[];
   expected_monthly_usdt: number; projected_annual_usdt: number;
 }
-export interface VolatilityEntry { crypto: string; volatility_30d_pct?: number | null; level: string; recommendation: string }
-export interface ComparisonEntry { crypto: string; average_buy_price: number; current_price?: number | null; buy_price_vs_market_pct?: number | null }
-export interface Comparison { entries: ComparisonEntry[]; diversification_score: number }
+export interface VolatilityEntry { crypto: string; volatility_30d_pct?: number | null; level: string; summary: string }
+export interface ComparisonEntry { crypto: string; average_buy_price: number; price_precision?: number; current_price?: number | null; buy_price_vs_market_pct?: number | null }
+export interface InvestedShare { crypto: string; share_pct: number }   // share of COST invested, not of current value
+export interface Comparison { entries: ComparisonEntry[]; share_of_invested: InvestedShare[] }
 
 // ---- dashboard timeline (GET /api/dashboard/analytics/timeline) ------------------
 export interface TimelinePoint { date: string; transaction_count: number; total_usdt: number }

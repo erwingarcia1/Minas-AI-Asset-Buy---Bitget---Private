@@ -13,6 +13,7 @@ from api.database import AsyncSessionLocal
 from api.models import User
 from api.config import settings
 from api.services.email_service import email_service
+from api.services import bitget_market
 from api.services.history import fmt_amount
 from api.services.email_templates import render
 
@@ -45,7 +46,7 @@ async def on_buy_executed(db, user: User, tx, purchase) -> None:
             "first_purchase", name=_name(user), crypto=purchase.crypto_symbol,
             amount_crypto=fmt_amount(tx.amount_executed or 0),
             cost_usdt=f"{cost:.2f}",
-            exchange_rate=f"{tx.fill_price:.2f}" if tx.fill_price else "market",
+            exchange_rate=bitget_market.fmt_price(tx.fill_price, purchase.crypto_symbol),
             order_id=tx.order_id or "-")
         await email_service.queue(user.email, "🎉 Your first automated purchase",
                                   html, text, template="first_purchase", user_id=user.id)

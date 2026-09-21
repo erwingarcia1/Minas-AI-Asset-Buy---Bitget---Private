@@ -39,5 +39,5 @@ he cancels a purchase outright.
 Planned: target-allocation portfolios ("60% BTC / 30% ETH / 10% SOL") where
 the scheduler skews each cycle's buys toward underweight assets — dollar-cost
 averaging that self-corrects drift without ever selling. The analytics
-endpoints (performance, diversification) added in Sprint 4 are the data
+endpoints (performance, share of invested cost) added in Sprint 4 are the data
 foundation for it.

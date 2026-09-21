@@ -1,5 +1,5 @@
 """Advanced analytics: performance vs live prices, benchmarks, recurring-spend
-projections, and volatility-informed recommendations. Price lookups degrade
+projections, and 30-day volatility per coin. Price lookups degrade
 gracefully — with the market data source down, responses carry cost-basis
 figures and price_available=false instead of failing."""
 from typing import List, Optional
@@ -13,6 +13,7 @@ from api.database import get_db
 from api.models import User
 from api.routes.user import get_current_user
 import api.services.market_data as market_mod
+from api.services import bitget_market
 
 router = APIRouter()
 
@@ -26,6 +27,7 @@ class HoldingPerformance(BaseModel):
     total_amount: float
     invested_usdt: float
     average_buy_price: float
+    price_precision: int = 8           # decimals Bitget quotes the pair in; show prices with exactly these
     current_price: Optional[float] = None
     market_value: Optional[float] = None
     unrealized_pnl_usdt: Optional[float] = None
@@ -33,14 +35,14 @@ class HoldingPerformance(BaseModel):
 
 
 class PerformanceResponse(BaseModel):
+    """Per-holding figures only. No ranking (best/worst) is produced: every
+    percentage is in the table and ordering them adds judgement, not fact."""
     price_available: bool
     holdings: List[HoldingPerformance]
     total_invested_usdt: float
     total_market_value: Optional[float] = None
     total_pnl_usdt: Optional[float] = None
     total_pnl_pct: Optional[float] = None
-    best_performer: Optional[str] = None
-    worst_performer: Optional[str] = None
 
 
 async def _holdings(db, user_id):
@@ -54,7 +56,7 @@ async def performance(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unrealized P&L per holding against live prices, with best/worst performers."""
+    """Unrealized P&L per holding against live prices."""
     holdings = []
     any_price = False
     for crypto, amount, invested in await _holdings(db, current_user.id):
@@ -62,7 +64,8 @@ async def performance(
         h = HoldingPerformance(
             crypto=crypto, total_amount=round(amount, 8),
             invested_usdt=round(invested, 2),
-            average_buy_price=round(invested / amount, 8))
+            average_buy_price=round(invested / amount, 8),
+            price_precision=await bitget_market.price_precision_async(crypto))
         if price is not None:
             any_price = True
             h.current_price = price
@@ -80,22 +83,27 @@ async def performance(
         invested_priced = sum(h.invested_usdt for h in priced)
         resp.total_pnl_usdt = round(resp.total_market_value - invested_priced, 2)
         resp.total_pnl_pct = round(resp.total_pnl_usdt / invested_priced * 100, 2)
-        by_pct = sorted(priced, key=lambda h: h.unrealized_pnl_pct)
-        resp.best_performer = by_pct[-1].crypto
-        resp.worst_performer = by_pct[0].crypto
     return resp
 
 
 class ComparisonEntry(BaseModel):
     crypto: str
     average_buy_price: float
+    price_precision: int = 8
     current_price: Optional[float] = None
     buy_price_vs_market_pct: Optional[float] = None  # negative = bought below market
 
 
+class InvestedShare(BaseModel):
+    crypto: str
+    share_pct: float   # this coin's share of the total COST invested (not of current value)
+
+
 class ComparisonResponse(BaseModel):
+    """Average buy price vs the market, and each coin's share of invested
+    cost. No score is derived from the shares: the shares are the fact."""
     entries: List[ComparisonEntry]
-    diversification_score: float  # 0 (one coin) .. 100 (evenly spread)
+    share_of_invested: List[InvestedShare]   # by cost, biggest first, sums to 100
 
 
 @router.get("/comparison", response_model=ComparisonResponse)
@@ -103,22 +111,23 @@ async def comparison(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Average buy price vs the market now, plus a diversification score
-    (100 × (1 − Herfindahl index) over invested value)."""
+    """Average buy price vs the market now, and each coin's share of the
+    total cost invested."""
     holdings = await _holdings(db, current_user.id)
     entries = []
     for crypto, amount, invested in holdings:
         avg = invested / amount
         price = await market_mod.market_data.get_price(crypto)
-        e = ComparisonEntry(crypto=crypto, average_buy_price=round(avg, 8))
+        e = ComparisonEntry(crypto=crypto, average_buy_price=round(avg, 8),
+                            price_precision=await bitget_market.price_precision_async(crypto))
         if price is not None:
             e.current_price = price
             e.buy_price_vs_market_pct = round((avg - price) / price * 100, 2)
         entries.append(e)
     total = sum(inv for _, _, inv in holdings)
-    hhi = sum((inv / total) ** 2 for _, _, inv in holdings) if total else 1.0
-    return ComparisonResponse(entries=entries,
-                              diversification_score=round((1 - hhi) * 100, 1))
+    shares = sorted((InvestedShare(crypto=c, share_pct=round(inv / total * 100, 1)) for c, _, inv in holdings),
+                    key=lambda x: -x.share_pct) if total else []
+    return ComparisonResponse(entries=entries, share_of_invested=shares)
 
 
 class RecurringProjection(BaseModel):
@@ -163,7 +172,7 @@ class VolatilityEntry(BaseModel):
     crypto: str
     volatility_30d_pct: Optional[float] = None
     level: str  # low | moderate | high | unknown
-    recommendation: str
+    summary: str   # the metric in words, e.g. "30-day volatility 3.1% (moderate)." — no guidance
 
 
 class VolatilityResponse(BaseModel):
@@ -175,8 +184,9 @@ async def volatility(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """30-day daily-return volatility per held/scheduled coin, with a DCA-cadence
-    suggestion: higher volatility rewards smaller, more frequent buys."""
+    """30-day daily-return volatility per held or scheduled coin, bucketed
+    low (< 2%) / moderate (2–5%) / high (>= 5%). A description of the
+    metric only; no cadence or sizing guidance is produced."""
     from api.models import Purchase
     cryptos = {c for c, _, _ in await _holdings(db, current_user.id)}
     # scheduled coins: active Auto-Buy purchases (both types)
@@ -188,21 +198,10 @@ async def volatility(
     for crypto in sorted(cryptos):
         vol = await market_mod.market_data.get_volatility_30d(crypto)
         if vol is None:
-            entries.append(VolatilityEntry(
-                crypto=crypto, level="unknown",
-                recommendation="Volatility data unavailable right now."))
-        elif vol >= 5:
-            entries.append(VolatilityEntry(
-                crypto=crypto, volatility_30d_pct=vol, level="high",
-                recommendation="High volatility: smaller, more frequent buys "
-                               "(e.g. weekly → daily) smooth your cost basis."))
-        elif vol >= 2:
-            entries.append(VolatilityEntry(
-                crypto=crypto, volatility_30d_pct=vol, level="moderate",
-                recommendation="Moderate volatility: your current cadence is fine."))
-        else:
-            entries.append(VolatilityEntry(
-                crypto=crypto, volatility_30d_pct=vol, level="low",
-                recommendation="Low volatility: less frequent, larger buys "
-                               "would reduce fee overhead."))
+            entries.append(VolatilityEntry(crypto=crypto, level="unknown",
+                                           summary="Volatility data unavailable right now."))
+            continue
+        level = "high" if vol >= 5 else "moderate" if vol >= 2 else "low"
+        entries.append(VolatilityEntry(crypto=crypto, volatility_30d_pct=vol, level=level,
+                                       summary=f"30-day volatility {vol}% ({level})."))
     return VolatilityResponse(entries=entries)

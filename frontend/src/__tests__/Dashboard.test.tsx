@@ -27,7 +27,7 @@ describe("Dashboard", () => {
     vi.mocked(analyticsAPI.performance).mockResolvedValue({ price_available: true, holdings: [], total_invested_usdt: 300 } as never);
     vi.mocked(analyticsAPI.recurring).mockResolvedValue({ schedules: [], expected_monthly_usdt: 435, projected_annual_usdt: 5220 } as never);
     vi.mocked(analyticsAPI.volatility).mockResolvedValue({ entries: [] } as never);
-    vi.mocked(analyticsAPI.comparison).mockResolvedValue({ entries: [], diversification_score: 0 } as never);
+    vi.mocked(analyticsAPI.comparison).mockResolvedValue({ entries: [], share_of_invested: [] } as never);
   });
 
   it("renders stats, holdings, the 30-day timeline, upcoming purchases and analytics", async () => {

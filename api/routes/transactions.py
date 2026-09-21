@@ -33,6 +33,14 @@ def _validate_status(value: str) -> str:
 # Schemas
 # --------------------------------------------------------------------------
 
+async def _precision(coin: str, memo: dict) -> int:
+    """Pair price precision, one Bitget cache read per coin per request."""
+    if coin not in memo:
+        from api.services import bitget_market
+        memo[coin] = await bitget_market.price_precision_async(coin)
+    return memo[coin]
+
+
 class TransactionResponse(UTCModel):
     """One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id``
     keep their historical names for existing clients; ``order_id`` and the
@@ -45,6 +53,7 @@ class TransactionResponse(UTCModel):
     amount_crypto: float
     cost_usdt: float
     exchange_rate: Optional[float] = None
+    price_precision: int = 8           # decimals Bitget quotes the pair in; show exchange_rate with exactly these
     exchange: Optional[str] = None
     order_id: Optional[str] = None
     binance_order_id: Optional[str] = None   # = order_id (compatibility)
@@ -62,10 +71,10 @@ class TransactionResponse(UTCModel):
     created_at: datetime
 
     @classmethod
-    def from_row(cls, r: history.HistoryRow) -> "TransactionResponse":
+    def from_row(cls, r: history.HistoryRow, price_precision: int = 8) -> "TransactionResponse":
         return cls(id=r.id, purchase_id=r.purchase_id, crypto=r.crypto, purchase_type=r.purchase_type,
                    tx_type=r.tx_type, amount_crypto=r.amount_crypto, cost_usdt=r.cost_usd,
-                   exchange_rate=r.exchange_rate, exchange=r.exchange, order_id=r.order_id,
+                   exchange_rate=r.exchange_rate, price_precision=price_precision, exchange=r.exchange, order_id=r.order_id,
                    binance_order_id=r.order_id, fee=r.fee, fee_currency=r.fee_currency,
                    withdrawal_id=r.withdrawal_id, wallet_address=r.wallet_address,
                    blockchain_network=r.blockchain_network, withdrawal_fee=r.withdrawal_fee,
@@ -106,9 +115,10 @@ async def list_transactions(
     db: AsyncSession = Depends(get_db),
 ):
     """List the authenticated user's execution attempts, newest first, paginated."""
+    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     status = _validate_status(status_filter) if status_filter is not None else None
     rows, total = await history.list_rows(db, current_user.id, status=status, limit=limit, offset=offset)
-    return TransactionListResponse(items=[TransactionResponse.from_row(r) for r in rows],
+    return TransactionListResponse(items=[TransactionResponse.from_row(r, await _precision(r.crypto, _prec)) for r in rows],
                                    total=total, limit=limit, offset=offset)
 
 
@@ -130,8 +140,9 @@ async def transactions_by_crypto(
     db: AsyncSession = Depends(get_db),
 ):
     """List the user's attempts for one cryptocurrency."""
+    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     rows, _ = await history.list_rows(db, current_user.id, crypto=crypto, limit=limit, offset=offset)
-    return [TransactionResponse.from_row(r) for r in rows]
+    return [TransactionResponse.from_row(r, await _precision(r.crypto, _prec)) for r in rows]
 
 
 @router.get("/status/{tx_status}", response_model=List[TransactionResponse])
@@ -143,9 +154,10 @@ async def transactions_by_status(
     db: AsyncSession = Depends(get_db),
 ):
     """List the user's attempts with a given status."""
+    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     rows, _ = await history.list_rows(db, current_user.id, status=_validate_status(tx_status),
                                       limit=limit, offset=offset)
-    return [TransactionResponse.from_row(r) for r in rows]
+    return [TransactionResponse.from_row(r, await _precision(r.crypto, _prec)) for r in rows]
 
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
@@ -155,7 +167,8 @@ async def get_transaction(
     db: AsyncSession = Depends(get_db),
 ):
     """Get one attempt by id."""
+    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     row = await history.get_row(db, current_user.id, transaction_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    return TransactionResponse.from_row(row)
+    return TransactionResponse.from_row(row, await _precision(row.crypto, _prec))

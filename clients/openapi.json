@@ -821,6 +821,11 @@
               }
             ],
             "title": "Current Price"
+          },
+          "price_precision": {
+            "default": 8,
+            "title": "Price Precision",
+            "type": "integer"
           }
         },
         "required": [
@@ -831,22 +836,26 @@
         "type": "object"
       },
       "ComparisonResponse": {
+        "description": "Average buy price vs the market, and each coin's share of invested\ncost. No score is derived from the shares: the shares are the fact.",
         "properties": {
-          "diversification_score": {
-            "title": "Diversification Score",
-            "type": "number"
-          },
           "entries": {
             "items": {
               "$ref": "#/components/schemas/ComparisonEntry"
             },
             "title": "Entries",
             "type": "array"
+          },
+          "share_of_invested": {
+            "items": {
+              "$ref": "#/components/schemas/InvestedShare"
+            },
+            "title": "Share Of Invested",
+            "type": "array"
           }
         },
         "required": [
           "entries",
-          "diversification_score"
+          "share_of_invested"
         ],
         "title": "ComparisonResponse",
         "type": "object"
@@ -907,6 +916,11 @@
           "crypto": {
             "title": "Crypto",
             "type": "string"
+          },
+          "price_precision": {
+            "default": 8,
+            "title": "Price Precision",
+            "type": "integer"
           },
           "total_amount": {
             "title": "Total Amount",
@@ -1338,6 +1352,11 @@
             ],
             "title": "Market Value"
           },
+          "price_precision": {
+            "default": 8,
+            "title": "Price Precision",
+            "type": "integer"
+          },
           "total_amount": {
             "title": "Total Amount",
             "type": "number"
@@ -1418,6 +1437,24 @@
           "detail"
         ],
         "title": "IntegrationInfo",
+        "type": "object"
+      },
+      "InvestedShare": {
+        "properties": {
+          "crypto": {
+            "title": "Crypto",
+            "type": "string"
+          },
+          "share_pct": {
+            "title": "Share Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "crypto",
+          "share_pct"
+        ],
+        "title": "InvestedShare",
         "type": "object"
       },
       "KeyVerifyResponse": {
@@ -1689,18 +1726,8 @@
         "type": "object"
       },
       "PerformanceResponse": {
+        "description": "Per-holding figures only. No ranking (best/worst) is produced: every\npercentage is in the table and ordering them adds judgement, not fact.",
         "properties": {
-          "best_performer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Best Performer"
-          },
           "holdings": {
             "items": {
               "$ref": "#/components/schemas/HoldingPerformance"
@@ -1748,17 +1775,6 @@
               }
             ],
             "title": "Total Pnl Usdt"
-          },
-          "worst_performer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Worst Performer"
           }
         },
         "required": [
@@ -2044,7 +2060,7 @@
         "properties": {
           "amount_usd": {
             "maximum": 1000000.0,
-            "minimum": 10.0,
+            "minimum": 0.01,
             "title": "Amount Usd",
             "type": "number"
           },
@@ -2571,7 +2587,7 @@
             "anyOf": [
               {
                 "maximum": 1000000.0,
-                "minimum": 10.0,
+                "minimum": 0.01,
                 "type": "number"
               },
               {
@@ -3488,6 +3504,11 @@
             ],
             "title": "Order Id"
           },
+          "price_precision": {
+            "default": 8,
+            "title": "Price Precision",
+            "type": "integer"
+          },
           "purchase_id": {
             "format": "uuid",
             "title": "Purchase Id",
@@ -4061,8 +4082,8 @@
             "title": "Level",
             "type": "string"
           },
-          "recommendation": {
-            "title": "Recommendation",
+          "summary": {
+            "title": "Summary",
             "type": "string"
           },
           "volatility_30d_pct": {
@@ -4080,7 +4101,7 @@
         "required": [
           "crypto",
           "level",
-          "recommendation"
+          "summary"
         ],
         "title": "VolatilityEntry",
         "type": "object"
@@ -5248,7 +5269,7 @@
     },
     "/api/analytics/comparison": {
       "get": {
-        "description": "Average buy price vs the market now, plus a diversification score\n(100 \u00d7 (1 \u2212 Herfindahl index) over invested value).",
+        "description": "Average buy price vs the market now, and each coin's share of the\ntotal cost invested.",
         "operationId": "comparison_api_analytics_comparison_get",
         "responses": {
           "200": {
@@ -5275,7 +5296,7 @@
     },
     "/api/analytics/performance": {
       "get": {
-        "description": "Unrealized P&L per holding against live prices, with best/worst performers.",
+        "description": "Unrealized P&L per holding against live prices.",
         "operationId": "performance_api_analytics_performance_get",
         "responses": {
           "200": {
@@ -5329,7 +5350,7 @@
     },
     "/api/analytics/volatility": {
       "get": {
-        "description": "30-day daily-return volatility per held/scheduled coin, with a DCA-cadence\nsuggestion: higher volatility rewards smaller, more frequent buys.",
+        "description": "30-day daily-return volatility per held or scheduled coin, bucketed\nlow (< 2%) / moderate (2\u20135%) / high (>= 5%). A description of the\nmetric only; no cadence or sizing guidance is produced.",
         "operationId": "volatility_api_analytics_volatility_get",
         "responses": {
           "200": {

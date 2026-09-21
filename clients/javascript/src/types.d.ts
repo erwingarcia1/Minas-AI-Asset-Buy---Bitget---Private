@@ -148,11 +148,13 @@ export interface ComparisonEntry {
   buy_price_vs_market_pct?: number | null;
   crypto: string;
   current_price?: number | null;
+  price_precision?: number;
 }
 
+/** Average buy price vs the market, and each coin's share of invested cost. No score is derived from the shares: the shares are the fact. */
 export interface ComparisonResponse {
-  diversification_score: number;
   entries: ComparisonEntry[];
+  share_of_invested: InvestedShare[];
 }
 
 export interface CreateApplicantRequest {
@@ -169,6 +171,7 @@ export interface CreateApplicantResponse {
 
 export interface CryptoHolding {
   crypto: string;
+  price_precision?: number;
   total_amount: number;
   total_cost_usdt: number;
 }
@@ -250,6 +253,7 @@ export interface HoldingPerformance {
   current_price?: number | null;
   invested_usdt: number;
   market_value?: number | null;
+  price_precision?: number;
   total_amount: number;
   unrealized_pnl_pct?: number | null;
   unrealized_pnl_usdt?: number | null;
@@ -265,6 +269,11 @@ export interface IntegrationInfo {
   kind: string;
   name: string;
   status: string;
+}
+
+export interface InvestedShare {
+  crypto: string;
+  share_pct: number;
 }
 
 export interface KeyVerifyResponse {
@@ -315,15 +324,14 @@ export interface ParkedAttempt {
   status: string;
 }
 
+/** Per-holding figures only. No ranking (best/worst) is produced: every percentage is in the table and ordering them adds judgement, not fact. */
 export interface PerformanceResponse {
-  best_performer?: string | null;
   holdings: HoldingPerformance[];
   price_available: boolean;
   total_invested_usdt: number;
   total_market_value?: number | null;
   total_pnl_pct?: number | null;
   total_pnl_usdt?: number | null;
-  worst_performer?: string | null;
 }
 
 export interface PlatformStats {
@@ -598,6 +606,7 @@ export interface TransactionResponse {
   fee_currency?: string | null;
   id: string;
   order_id?: string | null;
+  price_precision?: number;
   purchase_id: string;
   purchase_type: string;
   status: string;
@@ -695,7 +704,7 @@ export interface VerifyResponse {
 export interface VolatilityEntry {
   crypto: string;
   level: string;
-  recommendation: string;
+  summary: string;
   volatility_30d_pct?: number | null;
 }
 

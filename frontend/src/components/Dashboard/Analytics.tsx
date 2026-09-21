@@ -1,7 +1,7 @@
 import { analyticsAPI } from "@/api/endpoints";
 import { Alert, Loading } from "@/components/Common";
 import { useAsync } from "@/hooks/useAsync";
-import { fmtUsdt } from "@/utils/format";
+import { fmtPrice, fmtUsdt } from "@/utils/format";
 
 const pnlTone = (n?: number | null) => (n == null ? "" : n >= 0 ? "text-green-700" : "text-red-700");
 
@@ -17,14 +17,14 @@ export function EstimatesNote() {
 export default function Analytics() {
   const { data, loading, error, reload } = useAsync(() =>
     Promise.all([analyticsAPI.performance(), analyticsAPI.recurring(), analyticsAPI.volatility(), analyticsAPI.comparison()])
-      .then(([perf, recurring, vol, comparison]) => ({ perf, recurring, vol: vol.entries, diversification: comparison.diversification_score })),
+      .then(([perf, recurring, vol, comparison]) => ({ perf, recurring, vol: vol.entries, shares: comparison.share_of_invested })),
   );
 
   if (loading) return <Loading label="Crunching numbers…" />;
   if (error || !data) {
     return <Alert kind="error">Couldn't load analytics. <button className="ml-2 underline" onClick={() => void reload()}>Retry</button></Alert>;
   }
-  const { perf, recurring, vol, diversification } = data;
+  const { perf, recurring, vol, shares } = data;
 
   return (
     <section aria-label="Analytics" className="space-y-6">
@@ -52,10 +52,9 @@ export default function Analytics() {
             </p>
           </div>
         </div>
-        {perf.best_performer && (
-          <p className="mt-2 text-sm text-slate-600">
-            Best: <b>{perf.best_performer}</b> · Worst: <b>{perf.worst_performer}</b>
-            {diversification != null && <> · Diversification score: <b>{diversification}</b>/100</>}
+        {shares.length > 0 && (
+          <p className="mt-2 text-sm text-slate-600" data-testid="share-of-invested">
+            Share of invested value (by cost, not current value): {shares.map((s, i) => <span key={s.crypto}>{i > 0 ? " · " : ""}<b>{s.crypto}</b> {s.share_pct}%</span>)}
           </p>
         )}
         {perf.holdings.length > 0 && (
@@ -66,8 +65,8 @@ export default function Analytics() {
                 {perf.holdings.map((h) => (
                   <tr key={h.crypto} className="border-t border-slate-100">
                     <td className="py-2 font-medium">{h.crypto}</td>
-                    <td>{fmtUsdt(h.average_buy_price)}</td>
-                    <td>{h.current_price != null ? fmtUsdt(h.current_price) : "—"}</td>
+                    <td>{fmtPrice(h.average_buy_price, h.price_precision)}</td>
+                    <td>{h.current_price != null ? fmtPrice(h.current_price, h.price_precision) : "—"}</td>
                     <td className={pnlTone(h.unrealized_pnl_pct)}>{h.unrealized_pnl_pct != null ? `${h.unrealized_pnl_pct}%` : "—"}</td>
                   </tr>
                 ))}
@@ -87,8 +86,8 @@ export default function Analytics() {
           <EstimatesNote />
         </div>
         <div className="card space-y-2">
-          <h2 className="font-semibold">Volatility guidance</h2>
-          {vol.length === 0 ? <p className="text-sm text-slate-500">No holdings to assess yet.</p> : (
+          <h2 className="font-semibold">30-day volatility</h2>
+          {vol.length === 0 ? <p className="text-sm text-slate-500">No holdings or scheduled purchases yet.</p> : (
             <ul className="space-y-2 text-sm">
               {vol.map((v) => (
                 <li key={v.crypto}>
@@ -96,7 +95,7 @@ export default function Analytics() {
                   <span className={v.level === "high" ? "text-red-700" : v.level === "moderate" ? "text-amber-600" : "text-slate-500"}>
                     ({v.level}{v.volatility_30d_pct != null ? ` · ${v.volatility_30d_pct}%` : ""})
                   </span>
-                  <span className="block text-slate-600">{v.recommendation}</span>
+                  <span className="block text-slate-600">{v.summary}</span>
                 </li>
               ))}
             </ul>

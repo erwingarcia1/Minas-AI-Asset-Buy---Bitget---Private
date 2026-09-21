@@ -170,12 +170,13 @@ class ComparisonEntry(TypedDict):
     buy_price_vs_market_pct: NotRequired[Optional[float]]
     crypto: str
     current_price: NotRequired[Optional[float]]
+    price_precision: NotRequired[int]
 
 
 class ComparisonResponse(TypedDict):
-    """ComparisonResponse."""
-    diversification_score: float
+    """Average buy price vs the market, and each coin's share of invested cost. No score is derived from the shares: the shares are the fact."""
     entries: List[ComparisonEntry]
+    share_of_invested: List[InvestedShare]
 
 
 class CreateApplicantRequest(TypedDict):
@@ -195,6 +196,7 @@ class CreateApplicantResponse(TypedDict):
 class CryptoHolding(TypedDict):
     """CryptoHolding."""
     crypto: str
+    price_precision: NotRequired[int]
     total_amount: float
     total_cost_usdt: float
 
@@ -286,6 +288,7 @@ class HoldingPerformance(TypedDict):
     current_price: NotRequired[Optional[float]]
     invested_usdt: float
     market_value: NotRequired[Optional[float]]
+    price_precision: NotRequired[int]
     total_amount: float
     unrealized_pnl_pct: NotRequired[Optional[float]]
     unrealized_pnl_usdt: NotRequired[Optional[float]]
@@ -303,6 +306,12 @@ class IntegrationInfo(TypedDict):
     kind: str
     name: str
     status: str
+
+
+class InvestedShare(TypedDict):
+    """InvestedShare."""
+    crypto: str
+    share_pct: float
 
 
 class KeyVerifyResponse(TypedDict):
@@ -360,15 +369,13 @@ class ParkedAttempt(TypedDict):
 
 
 class PerformanceResponse(TypedDict):
-    """PerformanceResponse."""
-    best_performer: NotRequired[Optional[str]]
+    """Per-holding figures only. No ranking (best/worst) is produced: every percentage is in the table and ordering them adds judgement, not fact."""
     holdings: List[HoldingPerformance]
     price_available: bool
     total_invested_usdt: float
     total_market_value: NotRequired[Optional[float]]
     total_pnl_pct: NotRequired[Optional[float]]
     total_pnl_usdt: NotRequired[Optional[float]]
-    worst_performer: NotRequired[Optional[str]]
 
 
 class PlatformStats(TypedDict):
@@ -669,6 +676,7 @@ class TransactionResponse(TypedDict):
     fee_currency: NotRequired[Optional[str]]
     id: str
     order_id: NotRequired[Optional[str]]
+    price_precision: NotRequired[int]
     purchase_id: str
     purchase_type: str
     status: str
@@ -776,7 +784,7 @@ class VolatilityEntry(TypedDict):
     """VolatilityEntry."""
     crypto: str
     level: str
-    recommendation: str
+    summary: str
     volatility_30d_pct: NotRequired[Optional[float]]
 
 

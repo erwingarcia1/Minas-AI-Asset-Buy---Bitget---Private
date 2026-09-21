@@ -68,7 +68,8 @@ class EmailService:
         coin = p.crypto_symbol
         amount = tx.amount_executed or 0.0
         cost = tx.cost_usd if tx.cost_usd is not None else p.amount_usd
-        price = f" at {tx.fill_price:.2f}" if tx.fill_price else ""
+        from api.services.bitget_market import fmt_price
+        price = f" at {fmt_price(tx.fill_price, coin)}" if tx.fill_price else ""
         prefix = "[DRY RUN] " if event.dry_run else ""
         from api.services.history import fmt_amount, presented_status
         if event.type == "buy_executed":
