@@ -68,6 +68,12 @@ tag `v0.6.5-pre-audit` is the last commit carrying everything below.
   remain); the unread settings `supported_cryptos`, `binance_api_key`,
   `binance_api_secret` and their `.env.example` / compose lines; the log-only
   `POST /api/webhooks/resend` stub.
+* Stragglers: `BINANCE_API_*` lines in `.env.production.example`, the stale
+  `.env.example` comment, the bot-deploy sections of `deploy/AWS_EC2.md`,
+  `deploy/ALIBABA_CLOUD.md` (entirely a bot guide), comments in
+  `docker-compose.yml`, `deployment/nginx.web.conf`, `docs/DEPLOYMENT.md`,
+  and the root `.dockerignore` (served only the deleted root `Dockerfile`;
+  `Dockerfile.api` has its own ignore file, verified by building).
 * `deployment/kubernetes.yaml` (self-labelled stub) and
   `deployment/nginx.conf` (nothing mounted it; the served config is
   `deployment/nginx.web.conf` behind caddy). Docs re-pointed.
