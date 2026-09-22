@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
 from api.database import get_db
+from api.routes._deps import user_or_404
 from api.models import User
 
 router = APIRouter()
@@ -169,8 +170,4 @@ async def get_user_by_id(
     db: AsyncSession = Depends(get_db),
 ):
     """Get any user's public profile by ID (requires authentication)."""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return await user_or_404(db, user_id)

@@ -45,7 +45,7 @@
 
 # PHASE 1: COMPLETED ✅ — Infrastructure & API Routes
 
-**26 endpoints live** (24 business routes + 2 service routes; FastAPI additionally auto-serves `/docs` and `/openapi.json`). All verified by a 33-check end-to-end smoke run against live dev Postgres on 2026-08-31.
+**Snapshot of 2026-08-31: 26 endpoints were live then.** As of 2026-09-22 the API serves 85 routes (82 router routes plus `/health`, `/metrics` and `/`); the rows below are the 2026-08-31 inventory, and the `/api/purchases` rows describe routes retired by migration 014 on 2026-09-11 (replaced by `/api/v2/purchases`).
 
 | # | Method | Path | Status |
 |---:|---|---|---|
@@ -59,12 +59,12 @@
 | 8 | POST | `/api/exchange/keys` | ✅ Fernet-encrypted upsert |
 | 9 | GET | `/api/exchange/keys` | ✅ masked display (`AKIA...2345`) |
 | 10 | DELETE | `/api/exchange/keys/{key_id}` | ✅ owner-scoped, 404 |
-| 11 | POST | `/api/purchases/` | ✅ frequency validation, next-buy tomorrow |
-| 12 | GET | `/api/purchases/` | ✅ user-scoped list |
-| 13 | GET | `/api/purchases/{id}` | ✅ |
-| 14 | PUT | `/api/purchases/{id}` | ✅ partial update |
-| 15 | DELETE | `/api/purchases/{id}` | ✅ (⚠️ cascade-deletes history until #12) |
-| 16 | PATCH | `/api/purchases/{id}/toggle` | ✅ |
+| 11 | POST | `/api/purchases/` | retired 2026-09-11 → `/api/v2/purchases` |
+| 12 | GET | `/api/purchases/` | retired 2026-09-11 → `/api/v2/purchases` |
+| 13 | GET | `/api/purchases/{id}` | retired 2026-09-11 → `/api/v2/purchases` |
+| 14 | PUT | `/api/purchases/{id}` | retired 2026-09-11 → `/api/v2/purchases` |
+| 15 | DELETE | `/api/purchases/{id}` | retired 2026-09-11 → `/api/v2/purchases` |
+| 16 | PATCH | `/api/purchases/{id}/toggle` | retired 2026-09-11 → `/api/v2/purchases` |
 | 17 | GET | `/api/transactions/` | ✅ pagination + status filter |
 | 18 | GET | `/api/transactions/{id}` | ✅ |
 | 19 | GET | `/api/transactions/stats/summary` | ✅ single-query aggregates |
@@ -663,7 +663,7 @@ CSV/PDF exports of transaction history and cost-basis summaries (tax-season frie
 
 ## Phase 7 — Production Readiness (added 2026-09-08)
 
-Tracking issues for the launch gate in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md). All are labelled `phase-7`, `production`, `blocker` and require manual credential provisioning — none change application code except #34.
+Tracking issues for the launch gate in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md). All are labelled `phase-7`, `production`, `blocker` and require manual credential provisioning — none change application code except #34. #31 was closed on 2026-09-21 with the caddy service; #29 (Twilio SMS) and #30 (FCM push) remain open and neither channel works today (see PRODUCTION_READINESS.md).
 
 | # | Title | Scope |
 |---|---|---|
@@ -671,7 +671,7 @@ Tracking issues for the launch gate in [`PRODUCTION_READINESS.md`](PRODUCTION_RE
 | #28 | Setup Resend Email | Obtain `RESEND_API_KEY`, verify sending domain, test sends |
 | #29 | Setup Twilio SMS | Obtain `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN`, test SMS |
 | #30 | Setup FCM Push | Obtain `FCM_SERVICE_ACCOUNT` JSON, test push notifications |
-| #31 | Configure TLS & DNS | SSL certificate, nginx, DNS records |
+| #31 | Configure TLS & DNS | done 2026-09-21: Let's Encrypt via the caddy service on autobuy.minastrade.com |
 | #32 | Setup Automated Backups | Daily `pg_dump`, off-host storage, tested restore |
 | #33 | Configure Pager Alerts | PagerDuty integration, critical alert routing |
 | #34 | Remove /test-purchase Endpoint | Done — routes deleted, SDKs regenerated, tests green |

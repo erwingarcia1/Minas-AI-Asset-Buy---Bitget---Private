@@ -53,7 +53,7 @@ async def test_executor_routes_by_purchase_exchange(db, user, monkeypatch):
     from api.models import APIKey
     from api.tasks import purchase_scheduler as ps
     monkeypatch.setattr(ps, "ExchangeClient", VenueRecorder, raising=False)
-    import api.services.binance_client as bc
+    import api.services.exchange_client as bc
     monkeypatch.setattr(bc, "ExchangeClient", VenueRecorder)
     VenueRecorder.calls = []
     key = APIKey(user_id=user.id, exchange="okx",

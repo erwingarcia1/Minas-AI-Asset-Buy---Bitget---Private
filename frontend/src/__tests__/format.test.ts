@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { fmtAmount, fmtCrypto, fmtPrice } from "@/utils/format";
-import { fmtCoin } from "@/utils/chains";
 
 describe("crypto amount formatting", () => {
   it("shows at most 8 decimals and trims trailing zeros, never exponent notation", () => {
@@ -13,7 +12,7 @@ describe("crypto amount formatting", () => {
     expect(fmtAmount(0.123456789123)).toBe("0.12345679");
     expect(fmtCrypto(0.00100000, "BTC")).toBe("0.001 BTC");
     expect(fmtCrypto(null)).toBe("—");
-    expect(fmtCoin(0.0005, "BTC")).toBe("0.0005 BTC");
+    expect(fmtCrypto(0.0005, "BTC")).toBe("0.0005 BTC");
   });
 });
 

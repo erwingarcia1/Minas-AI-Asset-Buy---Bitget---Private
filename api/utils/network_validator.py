@@ -29,15 +29,39 @@ _BECH32_CONST, _BECH32M_CONST = 1, 0x2BC830A3
 
 # ----------------------------------------------------------------- base58
 
-def _b58decode(s: str) -> Optional[bytes]:
-    if not s or any(c not in _B58_INDEX for c in s):
+def b58decode(s: str, alphabet: str = _B58_ALPHABET) -> Optional[bytes]:
+    """Base58 over `alphabet` (Bitcoin's by default; the XRP Ledger uses a
+    different one). Leading zero bytes are encoded as the alphabet's first
+    character. None when a character is outside the alphabet."""
+    if not s:
         return None
     n = 0
     for c in s:
-        n = n * 58 + _B58_INDEX[c]
+        i = alphabet.find(c)
+        if i < 0:
+            return None
+        n = n * 58 + i
     body = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
-    pad = len(s) - len(s.lstrip("1"))
+    pad = len(s) - len(s.lstrip(alphabet[0]))
     return b"\x00" * pad + body
+
+
+def b58encode(data: bytes, alphabet: str = _B58_ALPHABET) -> str:
+    n = int.from_bytes(data, "big")
+    out = ""
+    while n:
+        n, r = divmod(n, 58)
+        out = alphabet[r] + out
+    return alphabet[0] * (len(data) - len(data.lstrip(b"\x00"))) + out
+
+
+def double_sha256_checksum_ok(payload: bytes) -> bool:
+    """Base58Check: the last 4 bytes equal the first 4 of sha256(sha256(body))."""
+    body, check = payload[:-4], payload[-4:]
+    return hashlib.sha256(hashlib.sha256(body).digest()).digest()[:4] == check
+
+
+_b58decode = b58decode   # former private name
 
 
 def _b58check_payload(s: str) -> Optional[bytes]:
@@ -45,10 +69,9 @@ def _b58check_payload(s: str) -> Optional[bytes]:
     raw = _b58decode(s)
     if raw is None or len(raw) < 5:
         return None
-    data, checksum = raw[:-4], raw[-4:]
-    if hashlib.sha256(hashlib.sha256(data).digest()).digest()[:4] != checksum:
+    if not double_sha256_checksum_ok(raw):
         return None
-    return data
+    return raw[:-4]
 
 
 # ----------------------------------------------------------------- bech32

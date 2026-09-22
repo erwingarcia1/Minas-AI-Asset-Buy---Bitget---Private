@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from api.utils.network_validator import (detect_chain, get_address_network, validate_bitcoin_address,
+from api.utils.network_validator import (b58decode, b58encode, detect_chain, double_sha256_checksum_ok, get_address_network,
+                                         validate_bitcoin_address,
                                          validate_ethereum_address, validate_solana_address,
                                          validate_tron_address)
 
@@ -91,30 +92,15 @@ _RIPPLE_B58 = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz"
 
 
 def _b58_decode(text: str, alphabet: str) -> Optional[bytes]:
-    n = 0
-    for ch in text:
-        i = alphabet.find(ch)
-        if i < 0:
-            return None
-        n = n * 58 + i
-    raw = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
-    pad = len(text) - len(text.lstrip(alphabet[0]))
-    return b"\x00" * pad + raw
+    return b58decode(text, alphabet)
 
 
 def _b58_encode(data: bytes, alphabet: str) -> str:
-    n = int.from_bytes(data, "big")
-    out = ""
-    while n:
-        n, r = divmod(n, 58)
-        out = alphabet[r] + out
-    return alphabet[0] * (len(data) - len(data.lstrip(b"\x00"))) + out
+    return b58encode(data, alphabet)
 
 
 def _xrp_checksum_ok(payload: bytes) -> bool:
-    import hashlib
-    body, check = payload[:-4], payload[-4:]
-    return hashlib.sha256(hashlib.sha256(body).digest()).digest()[:4] == check
+    return double_sha256_checksum_ok(payload)
 
 
 def parse_xrp_address(address: str) -> dict:

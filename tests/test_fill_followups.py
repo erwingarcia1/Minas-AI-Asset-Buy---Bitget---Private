@@ -197,11 +197,12 @@ async def park(db, user, key, **kw):
 
 
 async def test_admin_lists_reviews_and_records_a_confirmed_fill(db, user, bitget_key, admin, slack, monkeypatch):
-    from api.routes import admin as admin_routes
+    from api.routes.admin import purchases as admin_routes   # the module whose _gateway the review routes call
     p = await park(db, user, bitget_key, purchase_type="autobuy")
     H = auth_headers(admin)
     gw = FakeGateway(lookup_state="filled")          # the exchange now shows a proper fill for the client id
-    monkeypatch.setattr(admin_routes, "_gateway", lambda: gw)
+    from api.routes.admin import purchases as admin_purchases
+    monkeypatch.setattr(admin_purchases, "_gateway", lambda: gw)
     async with api() as c:
         listed = (await c.get("/api/admin/purchases", headers=H)).json()
         row = next(r for r in listed["items"] if r["id"] == str(p.id))
@@ -230,7 +231,7 @@ async def test_admin_lists_reviews_and_records_a_confirmed_fill(db, user, bitget
 
 
 async def test_record_fill_is_refused_when_the_exchange_does_not_show_a_sane_fill(db, user, bitget_key, admin, monkeypatch):
-    from api.routes import admin as admin_routes
+    from api.routes.admin import purchases as admin_routes   # the module whose _gateway the review routes call
     p = await park(db, user, bitget_key)
     H = auth_headers(admin)
     note = {"note": "checked the order on the exchange"}
@@ -251,7 +252,7 @@ async def test_record_fill_is_refused_when_the_exchange_does_not_show_a_sane_fil
 
 
 async def test_mark_not_sent_makes_the_purchase_due_again_and_cancel_stops_it(db, user, bitget_key, admin, monkeypatch, caplog):
-    from api.routes import admin as admin_routes
+    from api.routes.admin import purchases as admin_routes   # the module whose _gateway the review routes call
     monkeypatch.setattr(admin_routes, "_gateway", lambda: FakeGateway(lookup_state="not_found"))
     H = auth_headers(admin)
     p = await park(db, user, bitget_key)

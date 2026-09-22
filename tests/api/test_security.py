@@ -130,7 +130,7 @@ async def test_no_secrets_in_logs(db, user, binance_key, monkeypatch, caplog):
     """A full Auto-Buy execution through the real gateway (exchange stubbed) never logs key material."""
     from datetime import timedelta
     from api.models import utcnow
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
     from api.tasks import purchase_scheduler as ps
     from tests.api.conftest import make_autobuy_purchase
     from tests.test_purchase_scheduler import FakeLegacy

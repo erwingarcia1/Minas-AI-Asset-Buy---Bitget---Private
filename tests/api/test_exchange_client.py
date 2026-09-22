@@ -1,7 +1,7 @@
 import pytest
 
-import api.services.binance_client as bc_mod
-from api.services.binance_client import BinanceClient, BinanceClientError
+import api.services.exchange_client as bc_mod
+from api.services.exchange_client import ExchangeClient, ExchangeClientError
 from exchange_errors import ExchangeAPIError
 
 
@@ -37,7 +37,7 @@ def legacy(monkeypatch):
 
 
 def make():
-    return BinanceClient("k", "s")
+    return ExchangeClient("k", "s")
 
 
 def test_price_fetch(legacy):
@@ -46,7 +46,7 @@ def test_price_fetch(legacy):
 
 def test_price_error_normalized(legacy):
     legacy.fail_with = ExchangeAPIError("-1121", "Invalid symbol.")
-    with pytest.raises(BinanceClientError):
+    with pytest.raises(ExchangeClientError):
         make().get_price("NOPEUSDT")
 
 
@@ -68,18 +68,18 @@ def test_live_order_uses_fill_math(legacy):
 
 def test_live_order_rejects_below_min_notional(legacy):
     legacy.min_notional = "500"
-    with pytest.raises(BinanceClientError, match="below the 500"):
+    with pytest.raises(ExchangeClientError, match="below the 500"):
         make().execute_order("BTCUSDT", 100.0, dry_run=False)
     assert legacy.orders == []
 
 
 def test_live_order_rejects_halted_symbol(legacy):
     legacy.symbol_status = "HALT"
-    with pytest.raises(BinanceClientError, match="not trading"):
+    with pytest.raises(ExchangeClientError, match="not trading"):
         make().execute_order("BTCUSDT", 100.0, dry_run=False)
 
 
 def test_network_error_normalized(legacy):
     legacy.fail_with = ExchangeAPIError("HTTP", "connection reset")
-    with pytest.raises(BinanceClientError, match="connection reset"):
+    with pytest.raises(ExchangeClientError, match="connection reset"):
         make().execute_order("BTCUSDT", 100.0, dry_run=False)

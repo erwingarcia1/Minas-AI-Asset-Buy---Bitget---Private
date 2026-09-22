@@ -103,7 +103,7 @@ class APIKeyResponse(UTCModel):
 # --------------------------------------------------------------------------
 
 def _extra_permissions(key: APIKey) -> list:
-    from api.services.binance_client import BITGET_EXTRA_TOKENS
+    from api.services.exchange_client import BITGET_EXTRA_TOKENS
     if key.exchange != "bitget":
         return []
     return sorted(p for p in key.permission_list if p in BITGET_EXTRA_TOKENS)

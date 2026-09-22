@@ -113,7 +113,7 @@ class ExchangeGateway(Protocol):
 
 def _client_for(account: APIKey):
     from api.routes.exchange import decrypt_value
-    from api.services.binance_client import ExchangeClient
+    from api.services.exchange_client import ExchangeClient
     return ExchangeClient(decrypt_value(account.encrypted_api_key),
                           decrypt_value(account.encrypted_api_secret),
                           decrypt_value(account.encrypted_passphrase) if account.encrypted_passphrase else "",
@@ -141,10 +141,10 @@ class ExchangeClientGateway:
 
     @staticmethod
     def _wrap(exc: Exception, stage: str) -> ExecutionError:
-        from api.services.binance_client import BinanceClientError
+        from api.services.exchange_client import ExchangeClientError
         if isinstance(exc, ExecutionError):
             return exc
-        if isinstance(exc, BinanceClientError):
+        if isinstance(exc, ExchangeClientError):
             return ExecutionError(f"{exc.code}: {exc}", stage=stage, code=str(exc.code))
         return ExecutionError(f"{type(exc).__name__}: {exc}", stage=stage, code=type(exc).__name__)
 
