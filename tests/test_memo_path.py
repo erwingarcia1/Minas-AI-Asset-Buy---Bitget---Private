@@ -209,7 +209,8 @@ class _Venue:
 ])
 async def test_gateway_refuses_tag_chain_sends_without_the_memo(db, user, bitget_key, monkeypatch, dtype, memo, refused):
     _Venue.calls = []
-    monkeypatch.setattr(ps, "_client_for", lambda account: _Venue())
+    factory_calls = []
+    monkeypatch.setattr(ps, "_client_for", lambda account: factory_calls.append(1) or _Venue())
     # Built in memory, never persisted: since migration 024 the database itself refuses
     # exchange + NULL memo, so this exercises the executor's backstop on its own.
     p = Purchase(user_id=user.id, exchange_account_id=bitget_key.id, crypto_symbol="XRP", amount_usd=15.0, frequency="daily",
@@ -221,10 +222,12 @@ async def test_gateway_refuses_tag_chain_sends_without_the_memo(db, user, bitget
             gw.withdraw(bitget_key, p, 40.0, "abw-test", True)
         assert ei.value.code == "TAG_REQUIRED" and refused in str(ei.value)
         assert _Venue.calls == [], "nothing may reach the venue"
+        assert factory_calls, "the patched _client_for (via the shim) was what the gateway called"
     else:
         out = gw.withdraw(bitget_key, p, 40.0, "abw-test", True)
         assert out["memo"] == (memo or None)
         assert len(_Venue.calls) == 1 and _Venue.calls[0]["tag"] == (memo or None) and _Venue.calls[0]["network"] == "XRP"
+        assert factory_calls, "the patched _client_for (via the shim) was what the gateway called"
 
 
 async def test_withdrawal_parked_with_reason_when_tag_missing(db, user, bitget_key, monkeypatch):
@@ -233,7 +236,8 @@ async def test_withdrawal_parked_with_reason_when_tag_missing(db, user, bitget_k
     carries a blank memo: the one shape migration 024 cannot catch (the CHECK
     only knows NULL), so the executor must."""
     _Venue.calls = []
-    monkeypatch.setattr(ps, "_client_for", lambda account: _Venue())
+    factory_calls = []
+    monkeypatch.setattr(ps, "_client_for", lambda account: factory_calls.append(1) or _Venue())
 
     class Gw(ps.ExchangeClientGateway):
         def place_buy(self, account, purchase, client_oid, dry_run):
@@ -248,6 +252,7 @@ async def test_withdrawal_parked_with_reason_when_tag_missing(db, user, bitget_k
     await db.refresh(p)
     assert p.status == "withdrawal_failed" and "no destination tag is stored" in (p.last_error or "")
     assert _Venue.calls == []
+    assert factory_calls, "the patched _client_for (via the shim) was what the gateway called"
     rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id))).scalars().all()
     assert {r.tx_type: r.status for r in rows} == {"buy": "success", "withdrawal": "failed"}
 

@@ -35,6 +35,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key allowlists must name the new address. Public hostname to be served:
   `autobuy.minastrade.com` (A record → the Elastic IP).
 
+## [Unreleased] — 2026-09-22: Batch B3 of the codebase audit (PR 3): the executor split
+
+Move only. `api/tasks/purchase_scheduler.py` (1,146 lines, seven concerns) is
+now three modules, every function, class and constant moved as an exact
+source segment (52 names; source and AST hashes identical before and after):
+
+* `api/services/exchange_gateway.py` — `ExecutionError`, the `ExchangeGateway`
+  protocol, `_client_for`, `tag_requirement`, `ExchangeClientGateway`.
+* `api/services/purchase_executor.py` — due-purchase selection (SKIP LOCKED),
+  the fill guard, reconciliation before retry, `execute_one` (client_oid
+  committed before the order is sent), withdrawals and the memo backstop,
+  withdrawal polling, the batch driver with its advisory lock, run-result
+  recording.
+* `api/tasks/scheduler.py` — the APScheduler job wrappers, `build_scheduler`,
+  `job_event_listener`.
+
+`api/tasks/purchase_scheduler.py` stays as a shim that re-exports everything
+and forwards attribute writes to the owning modules, so every existing import
+and every monkeypatch (`ps._client_for`, `ps.execute_due_purchases`, …) still
+reaches the real code. The APScheduler job ids, triggers, misfire settings and
+coalescing are unchanged; only the function reference of each job moves from
+`api.tasks.purchase_scheduler:` to `api.tasks.scheduler:`. The jobstore is the
+in-memory default, so no persisted job needs to resolve the old path.
+
 ## [Unreleased] — 2026-09-22: Batch B of the codebase audit (PR 2: B1, B2, B4, B5)
 
 No behaviour change; the OpenAPI document is byte-identical before and after.

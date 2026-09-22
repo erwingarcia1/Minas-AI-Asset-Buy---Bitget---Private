@@ -90,9 +90,10 @@ class Venue:
 
 @pytest.fixture
 def venue(monkeypatch):
-    Venue.available, Venue.withdrawals = 1.0, []
-    monkeypatch.setattr(ps, "_client_for", lambda account: Venue())
-    return Venue
+    Venue.available, Venue.withdrawals, Venue.factory_calls = 1.0, [], []
+    monkeypatch.setattr(ps, "_client_for", lambda account: Venue.factory_calls.append(1) or Venue())
+    yield Venue
+    assert Venue.factory_calls, "the patched _client_for (via the shim) was what the gateway called"
 
 
 @pytest.mark.parametrize("mode, expected_size, expected_received", [
