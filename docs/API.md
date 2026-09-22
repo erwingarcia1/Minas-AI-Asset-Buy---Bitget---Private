@@ -139,7 +139,7 @@ Both modes share the same list, history and scheduler, and every execution
 attempt records its `tx_type` (`buy`, and `withdrawal` as a separate row).
 The boolean `withdraw_immediately` is accepted as a deprecated alias and
 echoed in responses. A background job runs every 5 minutes
-(`api/tasks/purchase_scheduler.py`): only KYC-verified, non-suspended owners
+(`api/services/purchase_executor.py`; `api/tasks/purchase_scheduler.py` is a re-export shim): only KYC-verified, non-suspended owners
 are processed; every attempt is recorded as a `purchase_transactions` row;
 success advances `next_execution` (daily +24h, weekly +7d, monthly same day
 next month, one-time completes); three consecutive failures mark the purchase
