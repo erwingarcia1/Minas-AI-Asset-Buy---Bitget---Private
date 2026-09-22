@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — dashboard charts (separate from the codebase audit)
+## [Unreleased] — 2026-09-22: dashboard charts (PR #42), deployed
+
+Merged as 97759aa and deployed to the Tokyo server on 2026-09-22 19:27 UTC
+with `scripts/deploy.sh platform --branch main --web ~/web-charts` (run on the
+server). Verified after the deploy: health commit 97759aa, alembic 025,
+dry_run false, holdings and the 8 transaction rows byte-identical to the
+pre-deploy baseline (pre-deploy dump `~/backups/pre-charts-20260922T192446Z.sql.gz`),
+BUILD_INFO through nginx and through the public host, five jobs registered,
+purchase and withdrawal jobs ran ok, unfiltered log scan clean (the only
+warnings were two 401s from a revoked test session). Live site as the owner's
+account: donut total, performance market value and chart final point all
+26.38 USDT on the same load; every range rendered; the first cold load made
+16 Bitget candle calls (one per cached page), the second load made none; the
+new endpoint answered 200 on every request; the old
+`/api/dashboard/analytics/timeline` still answers.
 
 ### Added
 
