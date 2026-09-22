@@ -15,6 +15,9 @@ from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
 from fastapi import Request
 from api.services.rate_limit import limiter, user_or_ip_key
 
+import logging
+
+logger = logging.getLogger("autobuy.dashboard")
 router = APIRouter()
 
 
@@ -80,6 +83,37 @@ class TimelinePoint(BaseModel):
 class TimelineResponse(BaseModel):
     days: int
     timeline: List[TimelinePoint]
+
+
+class SeriesPoint(BaseModel):
+    t: int                 # unix seconds, end of the bucket (the last point is "now")
+    value: float           # holdings at t x price at t, USDT
+    invested: float        # cumulative cost of buys executed at or before t, USDT
+
+
+class SeriesBuy(BaseModel):
+    t: int
+    crypto: str
+    amount: float          # net acquired
+    cost_usd: float
+
+
+class PortfolioSeriesResponse(BaseModel):
+    """Portfolio value over a range: history from Bitget candle closes, the last
+    point at the same current price the performance card uses. A bucket with
+    no candle carries the previous close forward (carried_forward counts them)."""
+    range: str
+    granularity: str
+    bucket_seconds: int
+    points: List[SeriesPoint]
+    buys: List[SeriesBuy]
+    current_value: Optional[float] = None    # None when no coin could be priced now
+    invested: float
+    change_usdt: Optional[float] = None      # value change over the range, excluding what buys in the range added
+    change_pct: Optional[float] = None
+    carried_forward: int = 0
+    unpriced: List[str] = []
+    note: str
 
 
 # --------------------------------------------------------------------------
@@ -163,3 +197,28 @@ async def analytics_timeline(
     """Daily successful-buy totals for the last `days` days (zero-filled)."""
     points = await history.timeline(db, current_user.id, days, now=utc_now())
     return TimelineResponse(days=days, timeline=[TimelinePoint(**pt) for pt in points])
+
+
+@router.get("/portfolio/series", response_model=PortfolioSeriesResponse,
+            responses={503: {"description": "Bitget candles unavailable and nothing cached"}})
+@limiter.limit("30/minute", key_func=user_or_ip_key)
+async def portfolio_series(
+    request: Request, response: Response,
+    range: str = Query("30D", pattern="^(1D|7D|30D|90D|All)$"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only. Portfolio value and amount invested over the range, built from
+    this customer's successful buys and Bitget candles (see
+    api/services/portfolio_series.py). 503 when Bitget is unreachable and no
+    candle page is cached; the rest of the dashboard is unaffected."""
+    from fastapi import HTTPException
+    from api.services import portfolio_series as ps
+    from api.services.bitget_market import MarketDataUnavailable, UNAVAILABLE_MESSAGE
+    try:
+        series = await ps.build(db, current_user.id, range)
+    except MarketDataUnavailable as exc:
+        logger.warning("portfolio series: candles unavailable for user %s: %s", current_user.id, exc)
+        raise HTTPException(status_code=503, detail={"error": "exchange_data_unavailable",
+                                                    "details": {"message": UNAVAILABLE_MESSAGE}})
+    return PortfolioSeriesResponse(**series.__dict__)

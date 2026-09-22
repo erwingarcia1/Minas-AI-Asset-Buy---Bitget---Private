@@ -6,6 +6,7 @@ import type { AutoBuyPurchase, BlockchainNetwork, ChainInfo } from "@/types";
 import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain } from "@/utils/chains";
 import { chainSummary } from "./PurchaseForm";
 import { DestinationFields, destinationBody, destinationOk, type DestinationState } from "./DestinationFields";
+import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
 
 interface Props {
   purchase: AutoBuyPurchase;
@@ -54,6 +55,7 @@ export function SwitchToWithdrawDialog({ purchase, onDone, onCancel }: Props) {
         purchase_type: "autobuy", wallet_address: address.trim(), blockchain_network: network,
         confirm_wallet_address: confirm.trim(), ...destinationBody(needsTag, destination),
       });
+      notifyPortfolioChanged();
       onDone();
     } catch (err) { setError(errorMessage(err, "Could not switch the purchase")); }
     finally { setBusy(false); }

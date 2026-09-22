@@ -8,6 +8,7 @@ import { fmtCrypto } from "@/utils/format";
 import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES } from "@/utils/exchangeNetworks";
 import { DestinationFields, destinationBody, destinationOk, type DestinationState } from "./DestinationFields";
 import { capitalize } from "@/utils/format";
+import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
 
 const DEFAULTS = { crypto: "BTC", amount: "50", frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: true };
 
@@ -135,6 +136,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
         purchase_type: withdraw ? "autobuy" : "dca",
         withdraw_immediately: withdraw,
       });
+      notifyPortfolioChanged();
       const when = created.next_execution ? new Date(created.next_execution).toLocaleString() : "the next scheduler run";
       const memoNote = needsTag ? (destination.destinationType === "exchange" ? ` with ${chainInfo?.tag_label ?? "memo"} ${destination.memo.trim()}` : ` (self-custody, no ${chainInfo?.tag_label ?? "memo"})`) : "";
       const mode = withdraw ? `each buy is sent to your wallet on ${chain}${memoNote}` : "accumulating on exchange";

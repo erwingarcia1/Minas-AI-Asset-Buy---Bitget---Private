@@ -6,7 +6,7 @@ import type {
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance,
   QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
- RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview } from "@/types";
+ RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview, PortfolioSeries, SeriesRange } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
 
@@ -69,6 +69,8 @@ export const dashboardAPI = {
   overview: () => data<DashboardData>(api.get("/dashboard/")),
   quickStats: () => data<QuickStats>(api.get("/dashboard/stats")),
   timeline: (days = 30) => data<Timeline>(api.get("/dashboard/analytics/timeline", { params: { days } })),
+  /** Portfolio value over a range; 503 when Bitget candles are unreachable (the chart shows an unavailable state). */
+  portfolioSeries: (range: SeriesRange = "30D") => data<PortfolioSeries>(api.get("/dashboard/portfolio/series", { params: { range } })),
 };
 
 /** Auto-Buy purchases: buy on an exchange account, withdraw to a validated wallet. */

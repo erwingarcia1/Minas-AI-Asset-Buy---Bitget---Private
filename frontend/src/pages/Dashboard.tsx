@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { dashboardAPI } from "@/api/endpoints";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
 import Analytics from "@/components/Dashboard/Analytics";
-import InvestmentTimeline from "@/components/Dashboard/InvestmentTimeline";
+import PortfolioChart from "@/components/Dashboard/PortfolioChart";
 import { useAsync } from "@/hooks/useAsync";
 import { capitalize, fmtCrypto, fmtDay, fmtUsdt } from "@/utils/format";
 
@@ -18,13 +18,13 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
 
 export default function Dashboard() {
   const { data, loading, error, reload } = useAsync(
-    () => Promise.all([dashboardAPI.quickStats(), dashboardAPI.overview(), dashboardAPI.timeline(30)])
-      .then(([stats, overview, timeline]) => ({ stats, overview, timeline })),
+    () => Promise.all([dashboardAPI.quickStats(), dashboardAPI.overview()])
+      .then(([stats, overview]) => ({ stats, overview })),
   );
 
   if (loading) return <Loading />;
   if (error || !data) return <Alert kind="error">{error} <button className="ml-2 underline" onClick={() => void reload()}>Retry</button></Alert>;
-  const { stats, overview, timeline } = data;
+  const { stats, overview } = data;
 
   return (
     <div className="space-y-6">
@@ -62,7 +62,7 @@ export default function Dashboard() {
             </table>
           )}
         </section>
-        <InvestmentTimeline timeline={timeline} />
+        <PortfolioChart />
       </div>
       <section className="card" aria-label="Upcoming purchases">
         <h2 className="font-semibold">Upcoming purchases</h2>

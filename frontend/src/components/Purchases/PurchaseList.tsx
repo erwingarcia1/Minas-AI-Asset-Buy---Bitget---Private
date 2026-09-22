@@ -6,6 +6,7 @@ import { Alert, Loading, StatusBadge } from "@/components/Common";
 import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/types";
 import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
 import { capitalize, fmtAmount, fmtDate } from "@/utils/format";
+import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
 
 const FREQ: Record<string, string> = { one_time: "One-time", daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 /** Purchases parked after a filled buy whose withdrawal did not go through: the coins sit on the exchange. */
@@ -28,7 +29,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
   const apiLacksModes = purchases.length > 0 && purchases.every((p) => purchaseMode(p) === null);
 
   async function act(fn: () => Promise<unknown>) {
-    try { await fn(); onChanged(); } catch (e) { onError(errorMessage(e)); }
+    try { await fn(); notifyPortfolioChanged(); onChanged(); } catch (e) { onError(errorMessage(e)); }
   }
 
   return (

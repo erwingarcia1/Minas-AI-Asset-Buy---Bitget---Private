@@ -195,6 +195,19 @@ def stub_bitget_market(monkeypatch):
         return _cached_sync(key, producer)
     monkeypatch.setattr(bm, "_cached_sync", _cached_sync)
     monkeypatch.setattr(bm, "_cached", _cached)
+    # candles (portfolio chart): no cache, and no network unless a test stubs fetch_page itself
+    from api.services import candles
+
+    def _cached_page(key, ttl, produce):
+        try:
+            return produce()
+        except Exception as exc:
+            raise bm.MarketDataUnavailable(f"Bitget candles unavailable for {key}: {exc}") from exc
+
+    def fetch_page(symbol, granularity, end_ms, rows=candles.PAGE_ROWS):
+        raise RuntimeError("candles.fetch_page is not stubbed in this test")
+    monkeypatch.setattr(candles, "_cached_page", _cached_page)
+    monkeypatch.setattr(candles, "fetch_page", fetch_page)
     yield
 
 

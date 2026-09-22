@@ -119,6 +119,18 @@ class BitgetClient:
             return float(v) if v not in (None, "") else None
         return {"last": num("lastPr"), "ask": num("askPr"), "bid": num("bidPr"), "ts": t.get("ts")}
 
+    def get_candles(self, symbol, granularity, limit=100, end_time_ms=None, history=False):
+        """Public OHLCV candles for a spot symbol, oldest first:
+        [[ts_ms, open, high, low, close, base_vol, quote_vol, usdt_vol], ...] as strings.
+        /api/v2/spot/market/candles serves recent data (up to 1000 rows);
+        /api/v2/spot/market/history-candles serves older data (up to 200 rows,
+        needs endTime). Granularities include 15min, 1h, 4h, 1day."""
+        params = {"symbol": symbol, "granularity": granularity, "limit": str(limit)}
+        if end_time_ms is not None:
+            params["endTime"] = str(int(end_time_ms))
+        path = "/api/v2/spot/market/history-candles" if history else "/api/v2/spot/market/candles"
+        return self._request("GET", path, params=params, auth=False) or []
+
     def get_ticker_price(self, symbol):
         price = self.get_ticker(symbol)["last"]
         if price is None:
