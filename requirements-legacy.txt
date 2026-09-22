@@ -1,5 +1,0 @@
-# Dependencies for the legacy sub-account bot + admin web UI ONLY.
-# (The platform API installs the full requirements.txt; keeping these separate
-# keeps flask out of the API image and fastapi/sqlalchemy out of the bot image.)
-requests==2.31.0
-flask>=3.0

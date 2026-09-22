@@ -38,25 +38,13 @@ Then:
 ```bash
 sudo apt-get update && sudo apt-get install -y git
 git clone git@github.com:erwingarcia1/Minas-AI-Asset-Buy---Bitget---Private.git autobuy
-cd autobuy && bash deploy/bootstrap.sh
-# if told to log out/in: exit, ssh back, re-run  bash deploy/bootstrap.sh
 ```
 
 ## 3. Verify + start
 
-The bot + web UI live in `docker-compose.legacy.yml` (the root
-`docker-compose.yml` belongs to the platform API):
-
-```bash
-docker compose -f docker-compose.legacy.yml run --rm autobuy --selftest
-# PASS lines = server is good. The selftest checks all four exchanges
-# (Bitget, Bybit, OKX, Binance) and passes only when every venue is reachable.
-docker compose -f docker-compose.legacy.yml up -d
-```
-
-Later updates: `bash scripts/deploy.sh` on the server (or
-`bash scripts/remote_deploy.sh` from your laptop) — it fast-forwards the
-checkout, rebuilds, restarts, and health-checks.
+The platform stack (API, Postgres, Redis, nginx web, caddy) is deployed and
+verified by `scripts/deploy.sh platform` — see `docs/DEPLOYMENT.md` for the
+production checklist, the `.env` validation and the go-live runbook.
 
 ## 4. Tailscale (private access for you + your VAs)
 
@@ -75,41 +63,13 @@ visible only to devices on your tailnet.
 2. They install the Tailscale app on their computer and log in.
 3. They open the UI URL. That's it — no VPN config, no public exposure.
 
-**Recommended:** set `WEB_PASSWORD=...` in `.env` as a second layer
-(`sudo docker compose -f docker-compose.legacy.yml up -d webapp` after
-changing it — `up -d`, not `restart`, so the new env is actually injected).
+The platform app is also public at https://autobuy.minastrade.com behind caddy
+(see `docs/DEPLOYMENT.md`); Tailscale gives a private second route to it.
 
-## 5. Day-to-day flow
+## 5. Day-to-day flow and useful commands
 
-1. A VA opens the UI → **Add client** → fills Name, Email, License #,
-   Exchange, Sub Account, Ticker → Save → **Apply to bot**.
-2. The entry shows **"awaiting keys"** until you (not the VAs) add that
-   sub-account's API credentials to `.env` on the server, e.g. for a
-   sub-account named `sub1`:
-   ```
-   SUB1_API_KEY=...
-   SUB1_API_SECRET=...
-   SUB1_API_PASSPHRASE=...   # Bitget/OKX only — Bybit/Binance have no passphrase
-   ```
-   then `sudo docker compose -f docker-compose.legacy.yml up -d autobuy`
-   (recreates the container so the new variables are injected — a plain
-   `restart` keeps the old environment). Until then the bot simply skips
-   that client and keeps trading the others.
-3. Config changes applied from the UI are picked up by the bot within one
-   poll cycle (~30 s) — no restart needed. Only `.env` changes need the
-   container recreated (`up -d`).
-
-## 6. Useful commands
-
-On the Tokyo box docker needs root (`ubuntu` is not in the `docker` group
-and `.env` is root-owned), so prefix with `sudo`:
-
-```bash
-sudo docker compose -f docker-compose.legacy.yml logs -f autobuy   # watch the bot trade
-sudo docker compose -f docker-compose.legacy.yml logs -f webapp    # watch UI activity
-sudo docker compose -f docker-compose.legacy.yml up -d autobuy     # after editing .env
-sudo docker compose -f docker-compose.legacy.yml down              # stop everything
-```
-
-Back up `data/` (client registry + bot config) and `.env` — everything else
-is reproducible from the repo.
+Deploys, logs, backups and rollback are described in `docs/DEPLOYMENT.md`;
+the SSH shortcut is `bash scripts/server_ssh.sh` (address in
+`scripts/lib/server_host.sh`). On this box docker needs root, so prefix
+`docker` commands with `sudo`. Back up the Postgres database (`pg_dump`, see
+the runbook) and `.env` — everything else is reproducible from the repo.

@@ -7,7 +7,7 @@
 *Prepared 2026-09-01 · Covers the FastAPI platform in `api/` (Phase 1 complete).*
 
 > **Repo context:** this repository hosts two systems. The **legacy sub-account
-> auto-buy bot** (`autobuy.py`, four exchange clients, Flask `webapp/`, meme-buy
+> auto-buy bot** (`autobuy.py`, four exchange clients, Flask `webapp/`, meme-buy — removed from the repo on 2026-09-22, last present at tag v0.6.5-pre-audit;
 > subsystem) is mature and documented in the README. The **AutoBuy Crypto
 > Platform** (`api/`) is a new multi-tenant SaaS-style backend being built
 > alongside it. This document covers the platform only.

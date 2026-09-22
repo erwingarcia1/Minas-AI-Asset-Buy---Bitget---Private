@@ -2,10 +2,9 @@
 # One-command deploy from your laptop: SSH into the AWS server and run
 # scripts/deploy.sh there. All arguments are passed straight through:
 #
-#   bash scripts/remote_deploy.sh                    # update the live bot
+#   bash scripts/remote_deploy.sh                    # deploy the platform stack
 #   bash scripts/remote_deploy.sh --check            # read-only: what would change?
-#   bash scripts/remote_deploy.sh platform           # deploy the platform API stack
-#   bash scripts/remote_deploy.sh all --force        # both stacks, discard server-local git state
+#   bash scripts/remote_deploy.sh --force            # discard server-local git state first
 #
 # The LOCAL copy of scripts/deploy.sh is streamed over SSH, so this works even
 # when the server's checkout doesn't have the script yet (first deploy).

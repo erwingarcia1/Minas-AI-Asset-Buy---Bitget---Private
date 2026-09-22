@@ -29,7 +29,7 @@ goes to the same origin the page was served from:
 | Where | `/api` is served by |
 |---|---|
 | `npm run dev` | the Vite dev server proxy → `http://localhost:8000` (see `vite.config.ts`) |
-| production | nginx: the web vhost in `deployment/nginx.conf` serves `dist/` and forwards `/api/` and `/health` to the API |
+| production | nginx (`deployment/nginx.web.conf`, the `web` compose service) serves `dist/` and forwards `/api/` and `/health` to the API; caddy terminates TLS in front of it |
 
 To point a build at a different API host, set `VITE_API_BASE_URL` at build time
 (for example `VITE_API_BASE_URL=https://api.example.com/api npm run build`) and
@@ -68,4 +68,4 @@ advice; past performance doesn't guarantee future results" note.
 
 The only third-party origins the app needs are Sumsub's (`api.sumsub.com`,
 `in.sumsub.com`, `static.sumsub.com`). The web vhost in
-`deployment/nginx.conf` sets a CSP allowing exactly those.
+`deployment/nginx.web.conf` sets a CSP allowing exactly those.

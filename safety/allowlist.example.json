@@ -1,5 +1,0 @@
-{
-  "_comment": "Copy to a real path, add token addresses, point SAFETY_ALLOWLIST_FILE at it. EVM entries must be EIP-55 checksummed; Solana entries are base58 mints. An empty list means every token on that chain is rejected -- which is the correct default.",
-  "bsc": [],
-  "solana": []
-}

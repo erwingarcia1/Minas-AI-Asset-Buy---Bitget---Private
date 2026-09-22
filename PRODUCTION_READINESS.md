@@ -22,7 +22,7 @@
 
 ### Phase 3: Production Deployment ✅ COMPLETE (Sprint 3)
 - [x] Prometheus /metrics + alert thresholds + runbook (docs/ALERTING.md); CRITICAL alert on 5 consecutive execution failures (tested)
-- [x] Dockerfile.api: migrations-on-boot → gunicorn ×4 uvicorn workers; compose prod/monitoring profiles; nginx config
+- [x] Dockerfile.api: migrations-on-boot → gunicorn ×4 uvicorn workers; compose prod/monitoring profiles; nginx web config + caddy
 - [x] OpenAPI polish with documentation enforced by tests; docs/API.md, DEPLOYMENT.md, EXAMPLES.md
 - [x] React web app in `frontend/` (typed client, JWT lifecycle, auth-guarded routing, Sumsub WebSDK KYC)
 
@@ -47,7 +47,7 @@
 |---|---|
 | API tests | **190 passed** (+2 perf tests run per-process) |
 | E2E tests | 7 flows in `tests/e2e_tests.py`: register→login→profile, purchase→scheduler dry-run, transactions + dashboard, token refresh/revocation, rate limiting (per-IP + per-user), Python SDK against the live app |
-| Frontend tests | vitest suite in `frontend/` (KYC/Sumsub, password reset, purchase form, address validation, dashboard + analytics, admin console) + 7 mobile logic · TypeScript strict, clean; CI job `frontend-tests.yml` builds and tests on every change |
+| Frontend tests | vitest suite in `frontend/` (KYC/Sumsub, password reset, purchase form, address validation, dashboard + analytics, admin console) · TypeScript strict, clean; CI job `frontend-tests.yml` builds and tests on every change |
 | Coverage | **93%** on `api/` (CI gate at 85%, GitHub Actions with Postgres+Redis services) |
 | Security | bandit clean at high severity; secrets provably absent from logs |
 | Load (4 workers) | p50 18ms / **p95 245ms** @ 10 concurrent; 1,000-purchase scheduler backlog in 32s, zero duplicates |
@@ -61,7 +61,7 @@ Each blocker is tracked as a Phase 7 GitHub issue (labels `phase-7`, `production
 3. [ ] **Twilio SMS credentials** (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) → #29
 4. [ ] **FCM push service account** (`FCM_SERVICE_ACCOUNT`) → #30
 5. [ ] **Small-amount canary withdrawals with real money** on the Tokyo server (`AUTOBUY_DRY_RUN=0` since 2026-09-16; one real BTC buy so far, no withdrawal yet): XRP first (~6 XRP to Erwin's own account on another exchange, with its destination tag, which also verifies Bitget's `tag` request field), then BTC (~$41). Shape and order in `docs/DEPLOYMENT.md`, "Go-live runbook".
-6. [ ] TLS certificate + DNS for `api.autobuy.app`; deploy `deployment/nginx.conf` → #31
+6. [x] TLS certificate + DNS: `autobuy.minastrade.com` via the `caddy` service (done 2026-09-21, #31)
 7. [ ] Strong `SECRET_KEY` + `ENCRYPTION_KEY` in production env (boot guard enforces this)
 8. [ ] Automated database backups on a schedule + one tested restore → #32
 9. [ ] Prometheus scraping `/metrics` with the docs/ALERTING.md rules wired to a pager → #33
@@ -80,7 +80,7 @@ curl https://api.autobuy.app/health        # scheduler state included
 
 - **Weeks 1–2 (staging):** deploy, wire Sumsub/Resend sandbox, testnet trading run, load test, security re-check
 - **Weeks 3–4 (limited launch):** ~100 users, `AUTOBUY_DRY_RUN=0` behind small per-user caps, KYC + campaigns live
-- **Weeks 5–6:** open signup; begin Phase 5 mobile implementation
+- **Weeks 5–6:** open signup (the mobile scaffold was removed on 2026-09-22; a mobile app is unscheduled)
 
 ## Risks & mitigations
 

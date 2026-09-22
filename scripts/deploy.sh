@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Deploy/update this repo on the server (run ON the server, from the repo root).
 #
-#   bash scripts/deploy.sh [bot|platform|all] [--check] [--force] [--branch NAME]
 #
 # Normally you run this from your laptop via scripts/remote_deploy.sh, which
 # streams this script over SSH — so first-time deploys work even before the
@@ -9,33 +8,26 @@
 #
 # Safe by design:
 #   * git updates are fast-forward-only unless --force, and refuse to run if
-#     the pushed commit is missing the files the bot stack needs;
-#   * the new bot image must pass a --once --dry-run smoke test BEFORE the
 #     live containers are touched, and the old image is kept tagged
 #     bitget-autobuy:rollback (automatic rollback if the new one crash-loops);
-#   * .env, data/ (client registry + bot config) and secrets/ are gitignored
 #     and never written;
 #   * the platform stack runs under a separate compose project
-#     ("autobuy-platform") so it can never remove the bot's containers.
 set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/deploy.sh [bot|platform|all] [--check] [--force] [--branch NAME] [--web DIR]
+Usage: bash scripts/deploy.sh [platform] [--check] [--force] [--branch NAME] [--web DIR]
 
-  bot       (default) update + restart the live trading bot and admin web UI
-            (docker-compose.legacy.yml — the containers currently in production)
-  platform  deploy the FastAPI platform stack (docker-compose.yml, prod
-            profile: Postgres + Redis + API on :8000). Refuses to start
-            without SECRET_KEY / ENCRYPTION_KEY in .env.
-  all       both of the above
+  platform  (default, and the only target) deploy the FastAPI platform stack
+            (docker-compose.yml, prod profile: Postgres + Redis + API + web +
+            caddy). Refuses to start without SECRET_KEY / ENCRYPTION_KEY in .env.
 
   --check   read-only: fetch and report what a deploy would change, then exit
   --force   discard local commits/changes on the server and hard-reset to
             origin (never touches .env, data/, secrets/ — those are gitignored)
   --branch  deploy a specific branch (default: the branch checked out here)
-  --web DIR platform: ship a prebuilt web bundle (a `frontend/dist` built on a
-            laptop with `npm run build` and copied to DIR on this server) into
+  --web DIR ship a prebuilt web bundle (a `frontend/dist` built on a laptop
+            with `npm run build` and copied to DIR on this server) into
             frontend/dist before starting the API. Without --web the deploy
             refuses to complete unless frontend/dist was built from this
             checkout's frontend/ tree (frontend/dist/BUILD_INFO), so the served
@@ -43,25 +35,24 @@ Usage: bash scripts/deploy.sh [bot|platform|all] [--check] [--force] [--branch N
 EOF
 }
 
-# --- locate the repo root (works both as a file and piped via `bash -s`) ----
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
 fi
-if [ ! -f autobuy.py ] || [ ! -d .git ]; then
-    echo "ERROR: run from the repo root (autobuy.py + .git not found in $PWD)" >&2
+if [ ! -f docker-compose.yml ] || [ ! -d .git ]; then
+    echo "ERROR: run from the repo root (docker-compose.yml + .git not found in $PWD)" >&2
     echo "       e.g.  cd ~/autobuy && bash scripts/deploy.sh" >&2
     exit 1
 fi
 
 # --- parse args -------------------------------------------------------------
-TARGET=bot
+TARGET=platform
 CHECK=0
 FORCE=0
 BRANCH=""
 WEB_BUNDLE=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        bot|platform|all) TARGET="$1" ;;
+        platform) TARGET="$1" ;;
         --check)  CHECK=1 ;;
         --force)  FORCE=1 ;;
         --branch) BRANCH="${2:?--branch needs a value}"; shift ;;
@@ -129,29 +120,6 @@ else
     git log --oneline "HEAD..$REMOTE_REV" | sed 's/^/      /'
 fi
 
-# --- refuse to deploy a commit that cannot run the bot stack ----------------
-# (catches a partial push: the compose/requirements/Dockerfile set must land
-#  together, or the rebuilt webapp image would crash-loop on missing flask)
-if [ "$TARGET" != platform ]; then
-    PUSH_PROBLEM=""
-    for f in docker-compose.legacy.yml requirements-legacy.txt; do
-        git cat-file -e "$REMOTE_REV:$f" 2>/dev/null || PUSH_PROBLEM="$f is missing from the pushed commit"
-    done
-    if [ -z "$PUSH_PROBLEM" ] && ! git show "$REMOTE_REV:Dockerfile" | grep -q requirements-legacy.txt; then
-        PUSH_PROBLEM="the pushed Dockerfile still installs requirements.txt (no flask — webapp would crash-loop)"
-    fi
-    if [ -n "$PUSH_PROBLEM" ]; then
-        if [ "$CHECK" = 1 ]; then
-            echo "==> WARNING: $PUSH_PROBLEM — a bot deploy would refuse to run."
-        else
-            echo "ERROR: $PUSH_PROBLEM." >&2
-            echo "       Commit docker-compose.legacy.yml, requirements-legacy.txt, the" >&2
-            echo "       Dockerfile edit and scripts/ together, push, then re-run." >&2
-            exit 1
-        fi
-    fi
-fi
-
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "==> NOTE: server checkout has local modifications:"
     git status --porcelain | sed 's/^/      /'
@@ -188,61 +156,12 @@ if [ "$LOCAL_REV" != "$REMOTE_REV" ]; then
     echo "==> Now at: $(git log -1 --oneline)"
 fi
 
-# --- sanity checks shared by both stacks ------------------------------------
+# --- sanity checks ----------------------------------------------------------
 if ! $SUDO test -f .env; then
-    echo "ERROR: .env not found in $PWD — the bot's API keys / the platform's" >&2
-    echo "       secrets live there. Create it first (see README)." >&2
+    echo "ERROR: .env not found in $PWD — the platform's secrets live there." >&2
+    echo "       Create it first (see docs/DEPLOYMENT.md)." >&2
     exit 1
 fi
-
-LEGACY="-f docker-compose.legacy.yml"
-
-deploy_bot() {
-    echo "==> [bot] Keeping the current image as bitget-autobuy:rollback ..."
-    $SUDO docker tag bitget-autobuy:latest bitget-autobuy:rollback 2>/dev/null \
-        || echo "      (no existing image to keep — first build on this box)"
-
-    echo "==> [bot] Building the new image ..."
-    # shellcheck disable=SC2086
-    compose $LEGACY build
-
-    echo "==> [bot] Smoke test: one --dry-run pass with the NEW image (live bot untouched) ..."
-    # shellcheck disable=SC2086
-    if ! compose $LEGACY run --rm autobuy --once --dry-run; then
-        echo "ERROR: the new image failed its dry-run pass — live containers were NOT touched." >&2
-        exit 1
-    fi
-
-    echo "==> [bot] Restarting bot + web UI on the new image ..."
-    # shellcheck disable=SC2086
-    compose $LEGACY up -d
-
-    echo "==> [bot] Watching for crash loops (30s) ..."
-    local _round name state restarts
-    for _round in 1 2 3 4 5 6; do
-        sleep 5
-        for name in bitget-autobuy bitget-autobuy-webapp; do
-            state="$($SUDO docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
-            restarts="$($SUDO docker inspect -f '{{.RestartCount}}' "$name" 2>/dev/null || echo 999)"
-            if [ "$state" != running ] || [ "$restarts" != 0 ]; then
-                echo "ERROR: $name is $state (restarts: $restarts). Recent logs:" >&2
-                # shellcheck disable=SC2086
-                compose $LEGACY logs --tail 30 >&2 || true
-                if $SUDO docker image inspect bitget-autobuy:rollback >/dev/null 2>&1; then
-                    echo "==> [bot] Rolling back to the previous image ..." >&2
-                    $SUDO docker tag bitget-autobuy:rollback bitget-autobuy:latest
-                    # shellcheck disable=SC2086
-                    compose $LEGACY up -d --force-recreate
-                    echo "==> [bot] Rollback done — investigate before redeploying." >&2
-                fi
-                exit 1
-            fi
-        done
-    done
-    echo "==> [bot] Healthy. Last log lines:"
-    # shellcheck disable=SC2086
-    compose $LEGACY logs --tail 5 autobuy 2>/dev/null | sed 's/^/      /' || true
-}
 
 deploy_platform() {
     echo "==> [platform] Checking the server .env (API_ENV must be exactly production, secrets, email, links) ..."
@@ -351,11 +270,7 @@ deploy_platform() {
     exit 1
 }
 
-case "$TARGET" in
-    bot)      deploy_bot ;;
-    platform) deploy_platform ;;
-    all)      deploy_bot; deploy_platform ;;
-esac
+deploy_platform
 
 echo "==> Pruning dangling images older than 48h (rollback image is tagged, so it survives) ..."
 $SUDO docker image prune -f --filter "until=48h" >/dev/null || true

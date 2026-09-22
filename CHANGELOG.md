@@ -35,6 +35,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key allowlists must name the new address. Public hostname to be served:
   `autobuy.minastrade.com` (A record → the Elastic IP).
 
+## [Unreleased] — 2026-09-22: Batch A of the codebase audit (PR 1)
+
+Deletions only; no behaviour change for the platform. Audit and plan:
+tag `v0.6.5-pre-audit` is the last commit carrying everything below.
+
+### Removed
+
+* **The legacy sub-account auto-buy bot** (`autobuy.py`, `memebuy_cli.py`,
+  `webapp/`, `memebuy/`, `chains/`, `payout/`, `safety/`,
+  `docker-compose.legacy.yml`, the root `Dockerfile`, both
+  `config*.example.json`, `requirements-legacy.txt`,
+  `requirements-onchain.txt`, `deploy/bootstrap.sh`, `deploy/autobuy.service`,
+  `docs/MEME_BUY.md`) and its ten test files. It was not running on the
+  server (no legacy compose project, no container); a stopped bot in the
+  repo is how someone redeploys it by accident. `scripts/deploy.sh` lost the
+  `bot` and `all` targets and the bot-stack guard; `platform` is the default
+  and only target. The four exchange-client modules and `exchange_errors.py`
+  at the repo root stay: the platform imports them.
+* `mobile/` (Expo scaffold): unreferenced by CI, scripts or the web app, and
+  written against the retired `/api/purchases` routes.
+* Web app: `purchaseAPI` (six methods calling routes that 404, zero call
+  sites) and the legacy `Purchase`, `PurchaseCreate`, `PurchaseUpdate`,
+  `Frequency` types; the mainnet/testnet validation generation
+  (`addressVerdict`, `validateAddressForNetwork`, the stale `CRYPTO_CHAINS`
+  mirror that still listed USDT, `EXCHANGE_NETWORKS`, `NETWORKS`,
+  `canExchangeWithdrawToNetwork`); the unimported `SUPPORTED_CRYPTOS` and
+  `FREQUENCIES` in `format.ts` that carried BNB/ADA/DOGE/LTC and a `biweekly`
+  the API does not offer.
+* API: `validate_address_for_network` and the mainnet/testnet half of
+  `api/utils/exchange_networks.py` (only `CRYPTO_CHAINS` / `SUPPORTED_CRYPTOS`
+  remain); the unread settings `supported_cryptos`, `binance_api_key`,
+  `binance_api_secret` and their `.env.example` / compose lines; the log-only
+  `POST /api/webhooks/resend` stub.
+* Stragglers: `BINANCE_API_*` lines in `.env.production.example`, the stale
+  `.env.example` comment, the bot-deploy sections of `deploy/AWS_EC2.md`,
+  `deploy/ALIBABA_CLOUD.md` (entirely a bot guide), comments in
+  `docker-compose.yml`, `deployment/nginx.web.conf`, `docs/DEPLOYMENT.md`,
+  and the root `.dockerignore` (served only the deleted root `Dockerfile`;
+  `Dockerfile.api` has its own ignore file, verified by building).
+* `deployment/kubernetes.yaml` (self-labelled stub) and
+  `deployment/nginx.conf` (nothing mounted it; the served config is
+  `deployment/nginx.web.conf` behind caddy). Docs re-pointed.
+
+### Tests removed, by name (backend 1,179 → see PR for the exact count)
+
+`tests/test_memebuy.py` (99), `tests/test_safety_gate.py` (113),
+`tests/test_solana_swap.py` (55), `tests/test_bitget_swap.py` (67),
+`tests/test_payout.py` (63), `tests/test_bsc_swap.py` (49),
+`tests/test_basket.py` (36), `tests/test_webapp.py` (25, already excluded
+from CI), `tests/test_autobuy.py` (20), `tests/test_multi_exchange.py` (16),
+`tests/test_exchange_networks.py` (8; its one live assertion, the purchase
+coin list, moved to `tests/test_network_validator.py`),
+`TestAddressForNetwork` in `tests/test_network_validator.py` (4),
+`test_resend_webhook_stub` in `tests/api/test_coverage_gaps.py` (1).
+Frontend: "address must match network and coin" and "exchange network
+support" in `addressValidation.test.ts` (2).
+
+Two of the removed bot tests exercised the kept `bitget_client.py` (request
+signing, error-envelope handling); they were restored as
+`tests/test_bitget_client.py`. Every other removed test imported only deleted
+code (verified from each file's imports at the tag; none imported `api.*`).
+
 ## [0.6.4] — 2026-09-21: holdings are net and located; prices follow the pair; analytics states facts
 
 Corrections from the first live XRP and XLM buys on the production server.

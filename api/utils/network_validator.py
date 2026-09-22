@@ -18,7 +18,7 @@ import re
 from typing import Optional
 
 __all__ = ["validate_bitcoin_address", "validate_ethereum_address", "validate_solana_address",
-           "validate_tron_address", "get_address_network", "validate_address_for_network", "detect_chain"]
+           "validate_tron_address", "get_address_network", "detect_chain"]
 
 _B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _B58_INDEX = {c: i for i, c in enumerate(_B58_ALPHABET)}
@@ -169,8 +169,7 @@ def get_address_network(address: str) -> Optional[str]:
 
     Only Bitcoin encodes the network in the address. Ethereum and Solana
     addresses are identical on every network, so they report 'mainnet' (the
-    conventional default); use :func:`validate_address_for_network` to accept
-    them for testnet as well. Returns None for an invalid address.
+    conventional default). Returns None for an invalid address.
     """
     chain = detect_chain(address)
     if chain == "bitcoin":
@@ -178,20 +177,3 @@ def get_address_network(address: str) -> Optional[str]:
     if chain in ("ethereum", "solana"):
         return "mainnet"
     return None
-
-
-def validate_address_for_network(address: str, network: str, chain: Optional[str] = None) -> bool:
-    """True when `address` is valid and usable on `network` ('mainnet' | 'testnet').
-
-    Pass `chain` ('bitcoin' | 'ethereum' | 'solana') to also require the
-    address format to match the coin being delivered.
-    """
-    network = (network or "").lower()
-    if network not in ("mainnet", "testnet"):
-        return False
-    actual = detect_chain(address)
-    if actual is None or (chain and actual != chain.lower()):
-        return False
-    if actual == "bitcoin":
-        return _bitcoin_network(address) == network
-    return True  # ethereum / solana: same address on every network

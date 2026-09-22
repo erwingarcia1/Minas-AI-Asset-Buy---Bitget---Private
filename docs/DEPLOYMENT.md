@@ -9,11 +9,9 @@ docker compose --profile monitoring up -d                # + Prometheus (:9090)
 ```
 
 The compose project is pinned to `autobuy-platform` (top-level `name:` in
-docker-compose.yml), so these commands are safe to run on the production box
-where the legacy bot's project (`autobuy`, docker-compose.legacy.yml) is also
-running — the two stacks can never displace each other's containers. Never
-run `--remove-orphans` against the legacy project. On the server, deploys go
-through `scripts/deploy.sh platform` (see the README's AWS section).
+docker-compose.yml), so the containers are addressed the same way from any
+checkout path. On the server, deploys go through `scripts/deploy.sh platform`
+(see the README's AWS section).
 
 The compose profile is exactly `prod` (`profiles: ["prod"]` on the api
 service). Any other profile name makes `docker compose up -d` a silent no-op:
@@ -27,7 +25,6 @@ in production and the Vite proxy in development.
 
 The entrypoint applies Alembic migrations, then serves via **gunicorn with 4
 uvicorn workers** (measured: p95 245ms @10 concurrent vs 1.6s single-worker).
-The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse them.
 
 ## Production host
 
@@ -251,7 +248,7 @@ The tailnet URL keeps working as a private path to the same `web` container.
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-`deployment/nginx.conf` has two vhosts: `api.example.com` (API only) and
+The former `deployment/nginx.conf` (removed 2026-09-22; the served config is `deployment/nginx.web.conf` behind caddy) had two vhosts: `api.example.com` (API only) and
 `app.example.com`, which serves `frontend/dist` with an SPA fallback, forwards
 `/api/` and `/health` to the API upstream, and sets a Content-Security-Policy
 that allows only Sumsub's origins (`api.sumsub.com`, `in.sumsub.com`,
@@ -300,7 +297,7 @@ testing steps: `docs/API.md` → "Email (Resend)".
 
 ## Monitoring
 
-Prometheus scrapes `/metrics` (keep it private — nginx config already denies
+Prometheus scrapes `/metrics` (keep it private — `deployment/nginx.web.conf` already denies
 public access). Thresholds, PromQL sketches, and the runbook: `docs/ALERTING.md`.
 `/health` reports per-component state including the scheduler's last tick.
 

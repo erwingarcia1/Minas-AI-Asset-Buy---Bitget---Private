@@ -547,7 +547,7 @@ Role-gated admin surface (`role` column via Alembic): user list with KYC overrid
 
 **Type:** Feature
 
-**Labels:** phase-5, mobile, low, backlog
+**Labels:** phase-5, mobile, low, backlog — *the Expo scaffold was removed on 2026-09-22; this issue starts from scratch if picked up*
 
 **Story Points:** 21
 
