@@ -126,9 +126,10 @@ async def test_spoofed_host_header_never_changes_emailed_links(client, db, monke
     monkeypatch.setattr(settings, "app_base_url", "https://app.example.test")
     sent = []
 
-    async def fake_send(to_email, subject, html_content, from_email=None, **kw):
-        sent.append(kw.get("text_content", "")); return "e1"
-    monkeypatch.setattr(resend, "send_email", fake_send)
+    async def fake_enqueue(to, subject, html, text, template="generic", **kw):   # queued to the outbox (audit C2)
+        sent.append(text); return True
+    from api.services import email_outbox
+    monkeypatch.setattr(email_outbox, "enqueue", fake_enqueue)
     u = User(email=f"spoof-{uuid.uuid4().hex[:8]}@example.com", password_hash=hash_password("Old-Passw0rd!"))
     db.add(u); await db.commit()
     try:
@@ -256,9 +257,10 @@ async def test_password_changed_email_after_reset_and_after_change(client, accou
     monkeypatch.setattr(settings, "support_email", "help@example.test")
     sent = []
 
-    async def fake_send(to_email, subject, html_content, from_email=None, **kw):
-        sent.append((to_email, subject, kw.get("text_content", ""))); return "e1"
-    monkeypatch.setattr(resend, "send_email", fake_send)
+    async def fake_enqueue(to, subject, html, text, template="generic", **kw):   # queued to the outbox (audit C2)
+        sent.append((to, subject, text)); return True
+    from api.services import email_outbox
+    monkeypatch.setattr(email_outbox, "enqueue", fake_enqueue)
     async with client as c:
         # 1. change-password (token minted before any change is still valid)
         assert (await c.post("/api/auth/change-password", headers=auth_headers(account),
@@ -278,6 +280,13 @@ async def test_password_changed_email_after_reset_and_after_change(client, accou
 
 
 async def test_password_change_survives_email_failure(client, account, monkeypatch, caplog):
+    """Outbox unavailable AND the inline fallback fails: the password still changes (audit C2)."""
+    from api.services import email_outbox
+
+    async def outbox_down(*a, **k):
+        return False
+    monkeypatch.setattr(email_outbox, "enqueue", outbox_down)
+
     async def boom(*a, **k):
         raise ResendError("Resend 500: down", status=500)
     monkeypatch.setattr(resend, "send_email", boom)

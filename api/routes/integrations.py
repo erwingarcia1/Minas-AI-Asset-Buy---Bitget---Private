@@ -39,7 +39,7 @@ async def available(
             WebhookEndpoint.user_id == current_user.id,
             WebhookEndpoint.enabled.is_(True)))).scalar_one()
     items = []
-    for venue in ("binance", "bitget", "bybit", "okx"):
+    for venue in ("binance", "bitget"):
         items.append(IntegrationInfo(
             name=venue, kind="exchange",
             status="connected" if venue in keys else "available",

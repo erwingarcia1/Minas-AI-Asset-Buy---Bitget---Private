@@ -22,8 +22,7 @@ import hashlib
 import logging
 import secrets
 
-from api.integrations import resend
-from api.integrations.resend import ResendError
+from api.services.email_service import email_service
 from api.utils.links import build_app_link
 
 logger = logging.getLogger("autobuy.auth")
@@ -430,10 +429,11 @@ async def _send_password_reset_email(email: str, link: str) -> None:
     html = (f"<p>We received a request to reset the password for your {app} account.</p>"
             f"<p><a href=\"{link}\">Reset my password</a> (valid for 1 hour)</p>"
             "<p>If you did not request this, you can ignore this email; your password will not change.</p>")
-    try:
-        await resend.send_email(email, f"Reset your {app} password", html, text_content=text, template="password_reset")
-    except ResendError as exc:
-        logger.error("password reset email not delivered to %s: %s", email, exc)
+    # Security category: queued through the outbox (next drain within a minute) with 6 delivery
+    # attempts over ~15 minutes, instead of one inline attempt that a provider blip lost for good.
+    if not await email_service.queue(email, f"Reset your {app} password", html, text, template="password_reset",
+                                     category="security"):
+        logger.error("password reset email not delivered to %s: outbox unavailable and inline attempt failed", email)
 
 
 def _client_ip(request: Request) -> str:
@@ -458,11 +458,9 @@ async def _send_password_changed_email(email: str, when: datetime, ip: str, hold
     html = (f"<p>The password for your {app} account was changed.</p>"
             f"<p><strong>When:</strong> {stamp}<br/><strong>From IP address:</strong> {ip}</p>"
             f"<p>Every other session has been signed out.{hold} If this wasn't you, {contact}.</p>")
-    try:
-        await resend.send_email(email, f"Your {app} password was changed", html, text_content=text,
-                                template="password_changed")
-    except ResendError as exc:
-        logger.error("password changed notice not delivered to %s: %s", email, exc)
+    if not await email_service.queue(email, f"Your {app} password was changed", html, text,
+                                     template="password_changed", category="security"):
+        logger.error("password changed notice not delivered to %s: outbox unavailable and inline attempt failed", email)
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)

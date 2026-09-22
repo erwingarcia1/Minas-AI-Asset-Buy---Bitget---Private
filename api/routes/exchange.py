@@ -23,7 +23,7 @@ from api.services.rate_limit import limiter, user_or_ip_key
 
 router = APIRouter()
 
-SUPPORTED_EXCHANGES = {"binance", "bitget", "bybit", "okx"}
+SUPPORTED_EXCHANGES = {"binance", "bitget"}   # Bybit/OKX removed 2026-09-22 (audit C1); Binance goes with C3
 
 
 # --------------------------------------------------------------------------
@@ -68,7 +68,7 @@ class APIKeyCreate(BaseModel):
     exchange: str = Field(default="binance")
     api_key: str = Field(min_length=8, max_length=256)
     api_secret: str = Field(min_length=8, max_length=256)
-    passphrase: str = Field(default="", max_length=256)  # OKX requires one
+    passphrase: str = Field(default="", max_length=256)  # Bitget requires one
 
     @field_validator("exchange")
     @classmethod
@@ -140,9 +140,6 @@ async def add_or_update_key(
     db: AsyncSession = Depends(get_db),
 ):
     """Add a new API key for an exchange, or update the existing one."""
-    if payload.exchange == "okx" and not payload.passphrase:
-        raise HTTPException(status_code=422,
-                            detail="OKX API keys require their passphrase")
     result = await db.execute(
         select(APIKey).where(
             APIKey.user_id == current_user.id, APIKey.exchange == payload.exchange

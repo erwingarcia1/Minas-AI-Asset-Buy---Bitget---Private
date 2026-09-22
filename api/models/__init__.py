@@ -43,10 +43,10 @@ class APIKey(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    exchange = Column(String(50), nullable=False)  # binance, bitget, bybit, okx
+    exchange = Column(String(50), nullable=False)  # bitget (binance until C3)
     encrypted_api_key = Column(String(500), nullable=False)
     encrypted_api_secret = Column(String(500), nullable=False)
-    encrypted_passphrase = Column(String(500), nullable=True)  # OKX requires one
+    encrypted_passphrase = Column(String(500), nullable=True)  # Bitget requires one
     verified = Column(Boolean, nullable=False, default=False)   # executor gate; mirrors verification_status
     # Outcome of the last verification (migration 015). The error text is
     # what the exchange said, never credentials.
@@ -79,7 +79,7 @@ class Notification(Base):
     channel = Column(String(10), nullable=False)   # email | sms | push
     template = Column(String(50), nullable=False)
     subject = Column(String(255), nullable=False)
-    status = Column(String(20), nullable=False)    # sent | failed | skipped_pref | skipped_quiet
+    status = Column(String(20), nullable=False)    # sent | queued (outbox) | failed | skipped_pref | skipped_quiet
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 

@@ -100,10 +100,11 @@ async def test_password_changed_email_ignores_every_opt_out(db, user, monkeypatc
     from datetime import datetime, timezone
     box = []
 
-    async def fake_send(to_email, subject, html_content, **kw):
+    async def fake_enqueue(to, subject, html, text, template="generic", **kw):   # queued to the outbox (audit C2)
         box.append(subject)
-        return "id"
-    monkeypatch.setattr(auth_mod.resend, "send_email", fake_send)
+        return True
+    from api.services import email_outbox
+    monkeypatch.setattr(email_outbox, "enqueue", fake_enqueue)
     user.notification_preferences = json.dumps({"email_enabled": False, "email_purchase_confirmations": False,
                                                 "email_weekly_summary": False, "email_milestones": False})
     await db.commit()

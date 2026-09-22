@@ -27,10 +27,6 @@ from api.services.history import BUY_TYPES
 
 logger = logging.getLogger("autobuy.tasks.purchases")
 
-# Exchange network codes for withdrawals (Binance naming; testnet uses the same
-# code against the exchange's testnet endpoint).
-WITHDRAW_NETWORK_CODES = {"BTC": "BTC", "ETH": "ETH", "USDT": "ETH", "USDC": "ETH", "SOL": "SOL"}
-
 
 class ExecutionError(Exception):
     """A failed attempt; the message is stored on the transaction.
@@ -203,8 +199,7 @@ class ExchangeClientGateway:
                             f"needed to send {size:.8f} with the {fee:.8f} fee ({plan['mode']} mode)",
                             stage="withdraw", code="INSUFFICIENT_BALANCE")
             result = client.withdraw(purchase.crypto_symbol, purchase.wallet_address, size,
-                                     network=chain if account.exchange == "bitget"
-                                     else WITHDRAW_NETWORK_CODES.get(purchase.crypto_symbol, chain),
+                                     network=chain,
                                      client_oid=client_oid, dry_run=dry_run,
                                      travel_rule=purchase.travel_rule_dict() or None,
                                      # only tag chains carry a memo; passed only when present

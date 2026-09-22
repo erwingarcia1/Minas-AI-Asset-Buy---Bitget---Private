@@ -34,18 +34,14 @@ INVALID_CODES = {
     # 40006 invalid ACCESS_KEY · 40009 signature error · 40011/40012 wrong passphrase
     # · 40037 apikey does not exist · 40014 incorrect permissions (treated below)
     "bitget": {"40006", "40009", "40011", "40012", "40037", "40013"},
-    "bybit": {"10003", "10004", "33004"},
-    "okx": {"50111", "50113", "50101"},
 }
 IP_CODES = {
     "bitget": {"40018"},          # Invalid IP
-    "bybit": {"10010"},           # request IP not in the whitelist
-    "okx": {"50110"},             # IP not on the allowlist
     "binance": set(),             # Binance folds it into -2015 ("Invalid API-key, IP, or permissions")
 }
 TRANSPORT_CODES = {"NETWORK", "HTTP"}
 
-VENUE_NAMES = {"binance": "Binance", "bitget": "Bitget", "bybit": "Bybit", "okx": "OKX"}
+VENUE_NAMES = {"binance": "Binance", "bitget": "Bitget"}
 
 
 @dataclass
@@ -73,7 +69,7 @@ def classify(exchange: str, exc: ExchangeClientError) -> tuple[str, str]:
                                   "Add the server's IP to the key's allowlist, or create the key without an IP restriction.")
     if code in INVALID_CODES.get(exchange, set()) or exchange == "binance" and code == "-2015":
         return "invalid_key", (f"{venue} rejected the credentials (error {code}): {msg[:160]}. "
-                               "Check the key, secret" + (", passphrase" if exchange in ("bitget", "okx") else "")
+                               "Check the key, secret" + (", passphrase" if exchange == "bitget" else "")
                                + " and, on Binance, the IP allowlist.")
     return "error", f"{venue} error {code}: {msg[:200]}"
 

@@ -1,11 +1,13 @@
 """Venue-agnostic exchange client for the platform.
 
-The root-level exchange clients (`bitget_client` and the other legacy
-modules) handle signing, precision, min-notional and error normalization;
-this wrapper adapts them to the platform's needs (dry-run simulation, fill
-math, permission interpretation) without rewriting any of it. `exchange`
-picks which one signs the calls. All methods are synchronous (the clients
-use `requests`); async callers run them via `asyncio.to_thread`.
+The root-level exchange clients (`bitget_client`, and `binance_client` until
+audit item C3 retires it) handle signing, precision, min-notional and error
+normalization; this wrapper adapts them to the platform's needs (dry-run
+simulation, fill math, permission interpretation) without rewriting any of it.
+`exchange` picks which one signs the calls. All methods are synchronous (the
+clients use `requests`); async callers run them via `asyncio.to_thread`.
+Bybit and OKX support was removed on 2026-09-22 (audit Batch C1): Bitget is
+the only venue keys can be created for.
 
 Renamed from api/services/binance_client.py on 2026-09-22; that path is a
 one-release alias re-exporting everything here.
@@ -15,8 +17,6 @@ import uuid
 
 from binance_client import BinanceClient as _LegacyBinance
 from bitget_client import BitgetClient as _LegacyBitget
-from bybit_client import BybitClient as _LegacyBybit
-from okx_client import OKXClient as _LegacyOKX
 from exchange_errors import ExchangeAPIError
 
 from api.services.metrics import time_exchange
@@ -26,8 +26,6 @@ logger = logging.getLogger("autobuy.exchange_client")
 LEGACY_CLIENTS = {
     "binance": _LegacyBinance,
     "bitget": _LegacyBitget,
-    "bybit": _LegacyBybit,
-    "okx": _LegacyOKX,
 }
 
 # kept for existing imports/monkeypatches
@@ -93,9 +91,9 @@ class ExchangeClientError(Exception):
 
 
 class ExchangeClient:
-    """Venue-agnostic wrapper: all four legacy clients share the same
-    normalized interface, so `exchange` just picks which one signs the calls
-    and which symbol format applies."""
+    """Venue-agnostic wrapper: the Bitget and (until C3) Binance transports
+    share the same normalized interface, so `exchange` just picks which one
+    signs the calls and which symbol format applies."""
 
     def __init__(self, api_key: str, api_secret: str, passphrase: str = "",
                  exchange: str = "binance"):
@@ -122,9 +120,9 @@ class ExchangeClient:
         """Account trade/withdraw permissions (authenticated). Used to verify keys.
 
         Returns {can_trade, can_withdraw, permissions, permissions_known}.
-        Binance and Bitget report the key's permissions; Bybit/OKX only prove
-        the key works (a balance read), so ``permissions_known`` is False and
-        can_trade/can_withdraw are None.
+        Bitget reports the key's permissions as authority codes (see
+        interpret_bitget_authorities); an empty or unknown list yields
+        ``permissions_known`` False with can_trade/can_withdraw None.
         """
         try:
             if self.exchange == "binance":
@@ -136,13 +134,9 @@ class ExchangeClient:
                     "permissions": data.get("permissions") or [],
                     "permissions_known": True,
                 }
-            if self.exchange == "bitget":
-                info = self._client.get_account_info()
-                auths = [a.lower() for a in info.get("authorities") or []]
-                return {**interpret_bitget_authorities(auths), "permissions": auths}
-            # other venues: an authenticated balance read proves the key works
-            self._client.get_spot_available("USDT")
-            return {"can_trade": None, "can_withdraw": None, "permissions": [], "permissions_known": False}
+            info = self._client.get_account_info()
+            auths = [a.lower() for a in info.get("authorities") or []]
+            return {**interpret_bitget_authorities(auths), "permissions": auths}
         except ExchangeAPIError as exc:
             raise ExchangeClientError(exc.message if hasattr(exc, "message") else str(exc),
                                      str(getattr(exc, "code", "BINANCE"))) from exc
@@ -168,11 +162,11 @@ class ExchangeClient:
                 # would pay), falling back to the last trade only when the
                 # venue's ticker has no ask. No rounding, no fixed fallback: a
                 # missing or non-positive price fails the run.
-                if hasattr(self._client, "get_ticker"):
+                if self.exchange == "bitget":
                     ticker = self._client.get_ticker(symbol)
                     price = ticker.get("ask") or ticker.get("last")
                     source = "ask" if ticker.get("ask") else "last"
-                else:
+                else:   # Binance transport (switched off in production; retired in C3): last trade only
                     ticker = {"last": self._client.get_ticker_price(symbol)}
                     price, source = ticker["last"], "last"
                 if not price or price <= 0:
@@ -225,17 +219,12 @@ class ExchangeClient:
         chains that use one; only Bitget receives it).
 
         Returns {withdrawal_id, amount, dry_run}. Dry runs validate inputs and
-        submit nothing. Only Binance withdrawals are implemented; other venues
-        raise ExchangeClientError(code="WITHDRAW_UNSUPPORTED") so the caller can
-        record an honest failure instead of pretending the coins moved.
+        submit nothing.
         """
         if amount <= 0:
             raise ExchangeClientError("withdrawal amount must be positive", "AMOUNT")
         if dry_run:
             return {"withdrawal_id": f"DRY-WD-{uuid.uuid4().hex[:12]}", "amount": amount, "dry_run": True}
-        if not hasattr(self._client, "withdraw"):
-            raise ExchangeClientError(
-                f"withdrawals are not implemented for {self.exchange}", "WITHDRAW_UNSUPPORTED")
         try:
             with time_exchange("withdraw"):
                 kwargs = {"travel_rule": travel_rule} if (travel_rule and self.exchange == "bitget") else {}
@@ -263,10 +252,8 @@ class ExchangeClient:
 
     def withdrawal_status(self, coin: str, client_oid: str | None, withdrawal_id: str | None,
                           since_ms: int, until_ms: int) -> dict:
-        """The exchange's record of one withdrawal (Bitget only):
+        """The exchange's record of one withdrawal:
         {found, raw_status, tx_hash, fee, done, ok}. `ok` is None while in flight."""
-        if not hasattr(self._client, "get_withdrawal_records"):
-            raise ExchangeClientError(f"withdrawal records are not implemented for {self.exchange}", "UNSUPPORTED")
         try:
             with time_exchange("withdrawal_records"):
                 rows = self._client.get_withdrawal_records(coin, since_ms, until_ms, client_oid=client_oid,
@@ -334,8 +321,6 @@ class ExchangeClient:
             with time_exchange("order_info"):
                 order = self._client.get_order_info(symbol, order_id=order_id) if order_id else \
                     self._client.get_order_info(symbol, client_oid=client_oid)
-        except TypeError:  # legacy clients take (symbol, order_id) only
-            order = self._client.get_order_info(symbol, order_id)
         except ExchangeAPIError as exc:
             raise ExchangeClientError(exc.message, str(getattr(exc, "code", "EXCHANGE"))) from exc
         if order is None:
@@ -347,8 +332,6 @@ class ExchangeClient:
         {"state": filled | open | cancelled | not_found, "fill": {...} | None}."""
         try:
             order = self._client.get_order_info(symbol, client_oid=client_oid)
-        except TypeError:
-            raise ExchangeClientError(f"{self.exchange} client cannot look orders up by client id", "LOOKUP_UNSUPPORTED")
         except ExchangeAPIError as exc:
             raise ExchangeClientError(exc.message, str(getattr(exc, "code", "EXCHANGE"))) from exc
         if order is None:
@@ -376,9 +359,7 @@ class ExchangeClient:
     # ------------------------------------------------------------- withdrawal data
 
     def get_coin_chains(self, coin: str) -> list:
-        """Withdrawal chains for a coin (Bitget: /api/v2/spot/public/coins)."""
-        if not hasattr(self._client, "get_coin_info"):
-            raise ExchangeClientError(f"{self.exchange} client has no coin/chain data", "UNSUPPORTED")
+        """Withdrawal chains for a coin (/api/v2/spot/public/coins)."""
         try:
             return self._client.get_coin_info(coin)
         except ExchangeAPIError as exc:
