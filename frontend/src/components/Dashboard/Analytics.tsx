@@ -1,6 +1,9 @@
 import { analyticsAPI } from "@/api/endpoints";
 import { Alert, Loading } from "@/components/Common";
+import AllocationDonut from "@/components/Dashboard/AllocationDonut";
 import { useAsync } from "@/hooks/useAsync";
+import { usePortfolioRefresh } from "@/hooks/usePortfolioRefresh";
+import { assetColor } from "@/utils/assetColors";
 import { fmtPrice, fmtUsdt } from "@/utils/format";
 
 const pnlTone = (n?: number | null) => (n == null ? "" : n >= 0 ? "text-green-700" : "text-red-700");
@@ -15,16 +18,17 @@ export function EstimatesNote() {
 }
 
 export default function Analytics() {
-  const { data, loading, error, reload } = useAsync(() =>
-    Promise.all([analyticsAPI.performance(), analyticsAPI.recurring(), analyticsAPI.volatility(), analyticsAPI.comparison()])
-      .then(([perf, recurring, vol, comparison]) => ({ perf, recurring, vol: vol.entries, shares: comparison.share_of_invested })),
+  const { data, loading, error, reload, refresh } = useAsync(() =>
+    Promise.all([analyticsAPI.performance(), analyticsAPI.recurring(), analyticsAPI.volatility()])
+      .then(([perf, recurring, vol]) => ({ perf, recurring, vol: vol.entries })),
   );
+  usePortfolioRefresh(refresh);   // same policy as the portfolio chart, so the donut total and the chart's last point move together
 
   if (loading) return <Loading label="Crunching numbers…" />;
   if (error || !data) {
     return <Alert kind="error">Couldn't load analytics. <button className="ml-2 underline" onClick={() => void reload()}>Retry</button></Alert>;
   }
-  const { perf, recurring, vol, shares } = data;
+  const { perf, recurring, vol } = data;
 
   return (
     <section aria-label="Analytics" className="space-y-6">
@@ -52,19 +56,16 @@ export default function Analytics() {
             </p>
           </div>
         </div>
-        {shares.length > 0 && (
-          <p className="mt-2 text-sm text-slate-600" data-testid="share-of-invested">
-            Share of invested value (by cost, not current value): {shares.map((s, i) => <span key={s.crypto}>{i > 0 ? " · " : ""}<b>{s.crypto}</b> {s.share_pct}%</span>)}
-          </p>
-        )}
+        <div className="mt-4 grid gap-6 lg:grid-cols-2">
+          <AllocationDonut holdings={perf.holdings} priceAvailable={perf.price_available} totalMarketValue={perf.total_market_value} />
         {perf.holdings.length > 0 && (
-          <div className="mt-3 overflow-x-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-slate-500"><tr><th className="py-1">Asset</th><th>Avg buy</th><th>Now</th><th>P&amp;L</th></tr></thead>
               <tbody>
                 {perf.holdings.map((h) => (
                   <tr key={h.crypto} className="border-t border-slate-100">
-                    <td className="py-2 font-medium">{h.crypto}</td>
+                    <td className="py-2 font-medium"><span aria-hidden className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: assetColor(h.crypto) }} />{h.crypto}</td>
                     <td>{fmtPrice(h.average_buy_price, h.price_precision)}</td>
                     <td>{h.current_price != null ? fmtPrice(h.current_price, h.price_precision) : "—"}</td>
                     <td className={pnlTone(h.unrealized_pnl_pct)}>{h.unrealized_pnl_pct != null ? `${h.unrealized_pnl_pct}%` : "—"}</td>
@@ -74,6 +75,7 @@ export default function Analytics() {
             </table>
           </div>
         )}
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

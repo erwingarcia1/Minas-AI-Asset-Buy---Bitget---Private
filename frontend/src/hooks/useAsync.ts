@@ -20,6 +20,13 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[] = []) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
+  /** Re-run the loader without the loading state: the current data stays on
+   *  screen and is replaced when the new result arrives; a failure is ignored. */
+  const refresh = useCallback(async () => {
+    try { setData(await loader()); } catch { /* keep what is shown */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
   useEffect(() => { void reload(); }, [reload]);
-  return { data, loading, error, reload, setData };
+  return { data, loading, error, reload, refresh, setData };
 }

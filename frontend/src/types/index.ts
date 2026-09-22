@@ -339,6 +339,18 @@ export interface Comparison { entries: ComparisonEntry[]; share_of_invested: Inv
 export interface TimelinePoint { date: string; transaction_count: number; total_usdt: number }
 export interface Timeline { days: number; timeline: TimelinePoint[] }
 
+// ---- portfolio value over time (GET /api/dashboard/portfolio/series) -------------
+export type SeriesRange = "1D" | "7D" | "30D" | "90D" | "All";
+export interface SeriesPoint { t: number; value: number; invested: number }   // t: unix seconds (bucket end; last point = now)
+export interface SeriesBuy { t: number; crypto: string; amount: number; cost_usd: number }
+export interface PortfolioSeries {
+  range: SeriesRange; granularity: string; bucket_seconds: number;
+  points: SeriesPoint[]; buys: SeriesBuy[];
+  current_value?: number | null; invested: number;
+  change_usdt?: number | null; change_pct?: number | null;
+  carried_forward: number; unpriced: string[]; note: string;
+}
+
 // ---- reports (GET /api/reports/*) ------------------------------------------------
 export interface ReportPerformance {
   has_data: boolean; price_available?: boolean; total_invested_usdt?: number; current_value_usdt?: number;

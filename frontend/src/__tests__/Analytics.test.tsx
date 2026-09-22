@@ -27,7 +27,12 @@ describe("Analytics", () => {
     expect(screen.getByText("435.00 USDT")).toBeInTheDocument();
     expect(screen.getByText("30-day volatility 6.1% (high).")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "30-day volatility" })).toBeInTheDocument();
-    expect(screen.getByTestId("share-of-invested")).toHaveTextContent("Share of invested value (by cost, not current value): BTC 75% · XLM 15% · XRP 10%");
+    // the allocation donut replaces the share-of-invested line: by current value by default, cost on toggle
+    expect(analyticsAPI.comparison).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("share-of-invested")).toBeNull();
+    expect(screen.getByTestId("donut-total")).toHaveTextContent("603.00 USDT");
+    expect(screen.getByRole("button", { name: /^BTC: 99\.5%, 600\.00 USDT, 0\.01 BTC$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^XLM: 0\.5%, 3\.00 USDT, 14\.30568 XLM$/ })).toBeInTheDocument();
     expect(screen.queryByText(/Best:|Worst:|Diversification score|cadence|guidance/)).toBeNull();
     // prices follow the pair's precision: BTC 2 decimals, XLM 5
     expect(screen.getByText("50,000.00 USDT")).toBeInTheDocument();

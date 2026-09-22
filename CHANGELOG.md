@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — dashboard charts (separate from the codebase audit)
+
+### Added
+
+* **Portfolio value chart** replaces "Invested — last 30 days" on the dashboard:
+  headline value and change over the range (1D · 7D · 30D · 90D · All), a
+  filled value area with a dashed step line for the amount invested, buy
+  markers, crosshair with the buys of that bucket, touch drag on mobile. The
+  change figure excludes what buys made in the range added (a simple return,
+  not time-weighted) and says so. Read-only endpoint
+  `GET /api/dashboard/portfolio/series?range=` (`api/services/candles.py`,
+  `api/services/portfolio_series.py`): holdings at each point are the net
+  acquired quantities of the buys executed by then × Bitget candle closes
+  (15min / 1h / 4h / 1Dutc, pages cached in Redis per pair: one bucket for the
+  newest page, 24 h for closed pages, never per user); a bucket with no candle
+  carries the previous close forward and the response counts them
+  (`carried_forward`); the final point uses `market_data.get_price` summed the
+  way the performance card sums it, so the chart's last value, the allocation
+  total and the performance market value agree by construction. 503 with
+  `exchange_data_unavailable` when Bitget is unreachable and nothing is
+  cached; the chart shows an unavailable state and the rest of the dashboard
+  renders.
+* **Allocation donut** replaces the "Share of invested value" line in the
+  performance card: share of current value by default, cost on a labelled
+  toggle, hover/focus details (asset, acquired quantity, USDT, share), a text
+  legend, one colour per asset (`frontend/src/utils/assetColors.ts`, also used
+  in the performance table), more than six assets collapse into "Other".
+* Dashboard refresh policy (no polling loop): the charts and performance
+  figures refetch when the tab regains visibility or focus, right after a
+  purchase is created, changed or deleted anywhere in the app, and at most
+  every 5 minutes while the tab stays visible (`usePortfolioRefresh`).
+* Root `bitget_client.py`: `get_candles()` for the public candle endpoints
+  (additive; no money path touched).
+
 ## [Unreleased]
 
 ### Added
