@@ -35,6 +35,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key allowlists must name the new address. Public hostname to be served:
   `autobuy.minastrade.com` (A record → the Elastic IP).
 
+## [Unreleased] — 2026-09-22: Batch B of the codebase audit (PR 2: B1, B2, B4, B5)
+
+No behaviour change; the OpenAPI document is byte-identical before and after.
+
+### Changed
+
+* **B1** `api/services/binance_client.py` → `api/services/exchange_client.py`;
+  `BinanceClient` → `ExchangeClient`, `BinanceClientError` →
+  `ExchangeClientError`. The old module path and class names remain as a
+  one-release alias (`api/services/binance_client.py` re-exports; patching
+  attributes there does not affect the real module). Prometheus metrics
+  renamed: `binance_api_calls_total` → `exchange_api_calls_total`,
+  `binance_api_duration_seconds` → `exchange_api_duration_seconds`; the timer
+  `metrics.time_binance` → `time_exchange` (old name aliased for one
+  release). `docs/ALERTING.md` rule updated; saved Prometheus rules must be.
+* **B2** shared helpers in `api/routes/_deps.py`: `user_or_404` (was pasted
+  six times), `purchase_or_404` (three loaders with the same 404), `gateway`
+  (was defined twice), `PrecisionMemo` as a request dependency (was four
+  copies of the same memo). One read-through cache in
+  `api/services/cache.py`; `bitget_market` keeps fail-closed
+  (`MarketDataUnavailable`) and `market_data` keeps degrade-to-None, exactly
+  as before — pinned by `tests/api/test_cache_policy.py` through both real
+  callers (read failure → producer runs; producer failure → refused / None;
+  write failure → value still returned).
+* CI: the push trigger now matches branch names with a slash (`**`).
+* **B4** `api/routes/admin.py` split into `api/routes/admin/{users,purchases,ops}.py`
+  with `_deps.py`; purchase request/response schemas moved to
+  `api/schemas/purchases.py`; Base58 decode/encode and the double-SHA256
+  checksum live once in `api/utils/network_validator.py`; the web app's
+  `fmtCoin` folded into `fmtCrypto`; the tests/ vs tests/api/ rule is written
+  in both conftests.
+* **B5** docs corrected against the code: the copy-paste examples in
+  `docs/API.md` and `docs/EXAMPLES.md` no longer send `mainnet` or a Binance
+  key; coin lists match the six purchase coins; `SETUP_GUIDE.md` migrations
+  table runs to 025; `ROADMAP.md` and `GITHUB_ISSUES.md` no longer plan a
+  Binance testnet run or list `/api/purchases` as live;
+  `docs/PRODUCT_BACKLOG.md` carries a historical banner;
+  `PRODUCTION_READINESS.md` states plainly that **SMS (Twilio) and push
+  (FCM) do not work today** (the FCM code targets an endpoint Google retired
+  in 2024), and its counts are current (25 migrations, 85 routes, TLS done on
+  autobuy.minastrade.com via caddy).
+
 ## [Unreleased] — 2026-09-22: Batch A of the codebase audit (PR 1)
 
 Deletions only; no behaviour change for the platform. Audit and plan:

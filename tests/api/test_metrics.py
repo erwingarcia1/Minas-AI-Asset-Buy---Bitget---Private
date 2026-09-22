@@ -27,7 +27,7 @@ async def test_metrics_endpoint_prometheus_format():
     families = {f.name for f in text_string_to_metric_families(r.text)}
     # counter families are exported without the _total suffix
     assert {"http_requests", "http_request_duration_seconds",
-            "transactions", "binance_api_calls",
+            "transactions", "exchange_api_calls",
             "active_purchases_total", "scheduler_consecutive_failures"} <= families
 
 
@@ -68,15 +68,15 @@ async def test_transaction_metric_recorded(db, user, binance_key):
 
 
 def test_binance_call_timer_counts_errors():
-    before_ok = m.binance_api_calls_total.labels("get_price", "ok")._value.get()
-    before_err = m.binance_api_calls_total.labels("get_price", "error")._value.get()
-    with m.time_binance("get_price"):
+    before_ok = m.exchange_api_calls_total.labels("get_price", "ok")._value.get()
+    before_err = m.exchange_api_calls_total.labels("get_price", "error")._value.get()
+    with m.time_exchange("get_price"):
         pass
     with pytest.raises(ValueError):
-        with m.time_binance("get_price"):
+        with m.time_exchange("get_price"):
             raise ValueError("boom")
-    assert m.binance_api_calls_total.labels("get_price", "ok")._value.get() == before_ok + 1
-    assert m.binance_api_calls_total.labels("get_price", "error")._value.get() == before_err + 1
+    assert m.exchange_api_calls_total.labels("get_price", "ok")._value.get() == before_ok + 1
+    assert m.exchange_api_calls_total.labels("get_price", "error")._value.get() == before_err + 1
 
 
 async def test_consecutive_failure_alert_fires(db, user, binance_key, monkeypatch, caplog):

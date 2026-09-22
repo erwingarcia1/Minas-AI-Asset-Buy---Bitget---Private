@@ -151,7 +151,7 @@ async def test_missing_exchange_account_is_a_failure(db, user, binance_key):
 
 async def test_gateway_dry_run_via_real_client_is_simulated(db, user, binance_key, monkeypatch):
     """The production gateway prices, buys and withdraws through ExchangeClient; in dry-run nothing is sent."""
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
 
     class FakeLegacy:
         def __init__(self, *a, **k): pass
@@ -178,7 +178,7 @@ class FakeLegacy:
 
 
 async def test_autobuy_mode_withdraws_and_records_withdrawal_tx(db, user, binance_key, monkeypatch):
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
     FakeLegacy.withdrawals.clear()
     p = await make_purchase(db, user, binance_key, purchase_type="autobuy", amount_usd=100, next_execution=NOW)
@@ -192,7 +192,7 @@ async def test_autobuy_mode_withdraws_and_records_withdrawal_tx(db, user, binanc
 
 
 async def test_dca_mode_skips_withdrawal_and_records_a_buy_row(db, user, binance_key, monkeypatch):
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
     FakeLegacy.withdrawals.clear()
     p2 = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
@@ -305,7 +305,7 @@ def test_build_scheduler_sets_grace_and_listener():
 
 async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binance_key, monkeypatch, caplog):
     import logging
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
 
     class TickerClient:
         def __init__(self, *a, **k): pass
@@ -324,7 +324,7 @@ async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binanc
 
 
 async def test_dry_run_fails_closed_when_no_live_price(db, user, binance_key, monkeypatch):
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
 
     class NoPrice:
         def __init__(self, *a, **k): pass

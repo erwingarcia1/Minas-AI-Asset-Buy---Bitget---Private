@@ -30,11 +30,11 @@ active_purchases_total = Gauge(
 transactions_total = Counter(
     "transactions_total", "Transactions recorded",
     ["status", "crypto"], registry=registry)
-binance_api_calls_total = Counter(
-    "binance_api_calls_total", "Binance API calls",
+exchange_api_calls_total = Counter(
+    "exchange_api_calls_total", "Exchange API calls (Bitget trading and public market data)",
     ["operation", "result"], registry=registry)
-binance_api_duration_seconds = Histogram(
-    "binance_api_duration_seconds", "Binance API call latency",
+exchange_api_duration_seconds = Histogram(
+    "exchange_api_duration_seconds", "Exchange API call latency",
     ["operation"], registry=registry, buckets=LATENCY_BUCKETS)
 email_send_duration_seconds = Histogram(
     "email_send_duration_seconds", "Email send latency",
@@ -68,15 +68,18 @@ def record_http(method: str, path: str, status: int, duration_s: float) -> None:
 
 
 @contextmanager
-def time_binance(operation: str):
-    """Times a Binance call and counts its result."""
+def time_exchange(operation: str):
+    """Times an exchange API call and counts its result."""
     start = time.perf_counter()
     try:
         yield
     except Exception:
-        binance_api_calls_total.labels(operation, "error").inc()
+        exchange_api_calls_total.labels(operation, "error").inc()
         raise
     finally:
-        binance_api_duration_seconds.labels(operation).observe(
+        exchange_api_duration_seconds.labels(operation).observe(
             time.perf_counter() - start)
-    binance_api_calls_total.labels(operation, "ok").inc()
+    exchange_api_calls_total.labels(operation, "ok").inc()
+
+
+time_binance = time_exchange   # former name, kept for one release (2026-09-22)

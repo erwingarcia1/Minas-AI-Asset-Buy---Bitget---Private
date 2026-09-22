@@ -14,6 +14,20 @@ Isolation guarantees:
 * The test database is created if missing and migrated to Alembic head once
   per session. The only sanctioned way to wipe Redis is ``flush_test_redis()``,
   which re-checks the db index before FLUSHDB.
+
+Where a test lives (documented 2026-09-22, audit Batch B4):
+
+* ``tests/api/`` — HTTP-level tests of one router or service through the app,
+  using the ``db`` / ``user`` / ``binance_key`` fixtures and ``auth_headers``
+  from ``tests/api/conftest.py``. One file per router or service module.
+* ``tests/`` (root) — the purchase pipeline end to end: executor, gateway,
+  fill guard, withdrawals, holdings, the /api/v2/purchases flows, and the
+  cross-cutting guards (env plumbing, public proxy). These use
+  ``tests/conftest_autobuy.py`` (``make_purchase``, ``make_key``, ``auth``)
+  and ``tests/fake_gateway.py``. Root-level ``test_bitget_client.py`` /
+  ``test_binance_client.py`` etc. test the exchange transports at the repo root.
+* This file (autouse fixtures) applies to both: Bitget market data is stubbed,
+  fake gateway ids reset, and the isolation guards above hold everywhere.
 """
 import os
 import pathlib
@@ -169,6 +183,7 @@ def stub_bitget_market(monkeypatch):
     monkeypatch.setattr(bm, "fetch_chains", fetch_chains)
     bm.live_ask_unstubbed = bm.live_ask   # for tests that exercise the real price lookup's error handling
     monkeypatch.setattr(bm, "live_ask", lambda coin: SAMPLE_ASK.get(coin.upper(), 100.0))
+    bm.cached_real, bm.cached_sync_real = bm._cached, bm._cached_sync   # tests of the cache policy restore these
     # no cache: each test's stub is authoritative (failures still surface as MarketDataUnavailable, as in production)
     def _cached_sync(key, producer):
         try:

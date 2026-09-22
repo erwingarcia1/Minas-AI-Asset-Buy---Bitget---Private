@@ -208,14 +208,14 @@ async def test_list_and_delete_own_key(client, db, user, binance_key):
 # ---------------------------------------------------------------- misc branches
 
 def test_binance_account_info_and_balance(monkeypatch):
-    import api.services.binance_client as bc_mod
+    import api.services.exchange_client as bc_mod
     class FakeLegacy:
         def __init__(self, **kw): pass
         def _request(self, method, path, params=None, auth=False):
             return {"canTrade": True, "canWithdraw": False, "permissions": ["SPOT"]}
         def get_spot_available(self, coin): return 3.14
     monkeypatch.setattr(bc_mod, "_LegacyClient", lambda **kw: FakeLegacy())
-    c = bc_mod.BinanceClient("k", "s")
+    c = bc_mod.ExchangeClient("k", "s")
     assert c.get_account_info() == {"can_trade": True, "can_withdraw": False, "permissions": ["SPOT"], "permissions_known": True}
     assert c.get_account_balance("BTC") == 3.14
 

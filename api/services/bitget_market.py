@@ -17,6 +17,7 @@ from typing import Optional
 import redis as redis_sync
 
 from api.config import settings
+from api.services.cache import cached_json, cached_json_sync
 
 logger = logging.getLogger("autobuy.bitget_market")
 
@@ -107,49 +108,26 @@ def _sync_redis():
     return redis_sync.Redis.from_url(settings.redis_url, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
 
 
-def _cached_sync(key: str, producer):
-    try:
-        r = _sync_redis()
-        try:
-            raw = r.get(key)
-            if raw is not None:
-                return json.loads(raw)
-        finally:
-            r.close()
-    except Exception:
-        logger.warning("bitget market cache read failed for %s", key)
-    try:
-        value = producer()
-    except Exception as exc:
+def _unavailable(key: str):
+    def raise_it(exc: Exception):
         raise MarketDataUnavailable(f"Bitget market data unavailable for {key}: {exc}") from exc
-    try:
-        r = _sync_redis()
-        try:
-            r.setex(key, CACHE_TTL_S, json.dumps(value))
-        finally:
-            r.close()
-    except Exception:
-        logger.warning("bitget market cache write failed for %s", key)
-    return value
+    return raise_it
+
+
+def _cached_sync(key: str, producer):
+    """Fail closed: a producer failure raises MarketDataUnavailable (tests patch this name)."""
+    return cached_json_sync(key, CACHE_TTL_S, producer, redis_factory=_sync_redis, on_produce_error=_unavailable(key),
+                            read_warning="bitget market cache read failed for %s",
+                            write_warning="bitget market cache write failed for %s")
 
 
 async def _cached(key: str, producer):
-    from api.services.redis_client import get_redis
-    try:
-        raw = await get_redis().get(key)
-        if raw is not None:
-            return json.loads(raw)
-    except Exception:
-        logger.warning("bitget market cache read failed for %s", key)
-    try:
-        value = await asyncio.to_thread(producer)
-    except Exception as exc:
-        raise MarketDataUnavailable(f"Bitget market data unavailable for {key}: {exc}") from exc
-    try:
-        await get_redis().setex(key, CACHE_TTL_S, json.dumps(value))
-    except Exception:
-        logger.warning("bitget market cache write failed for %s", key)
-    return value
+    """Async twin of _cached_sync; the producer is a sync function run in a thread."""
+    async def produce():
+        return await asyncio.to_thread(producer)
+    return await cached_json(key, CACHE_TTL_S, produce, on_produce_error=_unavailable(key),
+                             read_warning="bitget market cache read failed for %s",
+                             write_warning="bitget market cache write failed for %s")
 
 
 def _symbol_value(coin: str):

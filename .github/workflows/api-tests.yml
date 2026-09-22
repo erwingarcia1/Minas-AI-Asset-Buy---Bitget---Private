@@ -2,7 +2,7 @@ name: API tests
 
 on:
   push:
-    branches: ["*"]
+    branches: ["**"]
     paths: ["api/**", "tests/**", "alembic/**", "templates/**", "requirements.txt", ".github/workflows/api-tests.yml"]
   pull_request:
     paths: ["api/**", "tests/**", "alembic/**", "templates/**", "requirements.txt"]

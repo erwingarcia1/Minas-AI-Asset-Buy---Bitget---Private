@@ -11,7 +11,8 @@ import statistics
 
 from binance_client import BinanceClient as _LegacyClient
 
-from api.services.metrics import time_binance
+from api.services.cache import cached_json
+from api.services.metrics import time_exchange
 from api.services.redis_client import get_redis
 
 logger = logging.getLogger("autobuy.market")
@@ -25,29 +26,19 @@ class MarketData:
         self._client = client or _LegacyClient()
 
     async def _cached(self, key: str, ttl: int, producer):
-        try:
-            cached = await get_redis().get(key)
-            if cached is not None:
-                return json.loads(cached)
-        except Exception:
-            logger.warning("market cache read failed for %s", key)
-        try:
-            value = await producer()
-        except Exception as exc:
+        """Degrade: a producer failure is logged and yields None; a failed cache write is silent."""
+        def degrade(exc: Exception):
             logger.warning("market data fetch failed for %s: %s", key, exc)
             return None
-        try:
-            await get_redis().setex(key, ttl, json.dumps(value))
-        except Exception:
-            pass
-        return value
+        return await cached_json(key, ttl, producer, on_produce_error=degrade,
+                                 read_warning="market cache read failed for %s", write_warning=None)
 
     async def get_price(self, crypto: str) -> float | None:
         """Current spot price in USDT, or None when unavailable."""
         symbol = f"{crypto.upper()}USDT"
 
         async def fetch():
-            with time_binance("public_price"):
+            with time_exchange("public_price"):
                 return await asyncio.to_thread(self._client.get_ticker_price, symbol)
 
         return await self._cached(f"market:price:{symbol}", PRICE_TTL_S, fetch)
@@ -57,7 +48,7 @@ class MarketData:
         symbol = f"{crypto.upper()}USDT"
 
         async def fetch():
-            with time_binance("public_klines"):
+            with time_exchange("public_klines"):
                 klines = await asyncio.to_thread(
                     self._client._request, "GET", "/api/v3/klines",
                     {"symbol": symbol, "interval": "1d", "limit": 31})

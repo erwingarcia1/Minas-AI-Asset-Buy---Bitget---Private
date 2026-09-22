@@ -8,13 +8,13 @@ import pytest
 
 from api.auth import create_access_token
 from api.services import key_verification as kv
-from api.services.binance_client import BinanceClientError
+from api.services.exchange_client import ExchangeClientError
 
 SECRETS = ("test-api-key-000001", "test-api-secret-01")
 
 
 class Venue:
-    """Fake BinanceClient: records what it was built with, answers get_account_info."""
+    """Fake ExchangeClient: records what it was built with, answers get_account_info."""
     built = []
     info = {"can_trade": True, "can_withdraw": False, "permissions": ["readonly", "trade"], "permissions_known": True}
     error = None
@@ -33,7 +33,7 @@ class Venue:
 def reset_venue(monkeypatch):
     Venue.built, Venue.error = [], None
     Venue.info = {"can_trade": True, "can_withdraw": False, "permissions": ["readonly", "trade"], "permissions_known": True}
-    monkeypatch.setattr(kv, "BinanceClient", Venue)
+    monkeypatch.setattr(kv, "ExchangeClient", Venue)
     yield
 
 
@@ -95,7 +95,7 @@ async def test_withdrawal_permission_is_recorded_and_warned(db, user, binance_ke
 
 
 async def test_bad_credentials(db, user, binance_key, client, caplog):
-    Venue.error = BinanceClientError("Bitget error 40012: apikey/password is incorrect", "40012")
+    Venue.error = ExchangeClientError("Bitget error 40012: apikey/password is incorrect", "40012")
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
@@ -110,7 +110,7 @@ async def test_bad_credentials(db, user, binance_key, client, caplog):
 
 
 async def test_ip_allowlist_rejection(db, user, binance_key, client):
-    Venue.error = BinanceClientError("Bitget error 40018: Invalid IP", "40018")
+    Venue.error = ExchangeClientError("Bitget error 40018: Invalid IP", "40018")
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
@@ -119,7 +119,7 @@ async def test_ip_allowlist_rejection(db, user, binance_key, client):
     assert "IP" in body["detail"] and "allowlist" in body["detail"]
     await assert_row(db, binance_key, verified=False, status="failed", error_contains="IP", before=before)
     # Binance folds the IP case into -2015; the message decides
-    Venue.error = BinanceClientError("Binance error -2015: Invalid API-key, IP, or permissions for action", "-2015")
+    Venue.error = ExchangeClientError("Binance error -2015: Invalid API-key, IP, or permissions for action", "-2015")
     binance_key.exchange = "binance"
     await db.commit()
     body = (await verify(client, user, binance_key)).json()
@@ -127,7 +127,7 @@ async def test_ip_allowlist_rejection(db, user, binance_key, client):
 
 
 async def test_venue_unreachable(db, user, binance_key, client):
-    Venue.error = BinanceClientError("Bitget error NETWORK: GET /api/v2/spot/account/info: ConnectionError: boom", "NETWORK")
+    Venue.error = ExchangeClientError("Bitget error NETWORK: GET /api/v2/spot/account/info: ConnectionError: boom", "NETWORK")
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
@@ -158,7 +158,7 @@ async def test_permissions_not_reported_still_verifies(db, user, binance_key, cl
 
 
 async def test_failed_then_retry_succeeds_and_clears_error(db, user, binance_key, client):
-    Venue.error = BinanceClientError("Bitget error 40037: Apikey does not exist", "40037")
+    Venue.error = ExchangeClientError("Bitget error 40037: Apikey does not exist", "40037")
     await verify(client, user, binance_key)
     await db.refresh(binance_key)
     assert binance_key.verification_status == "failed" and binance_key.verified_at is None
@@ -192,14 +192,14 @@ async def test_verify_unknown_key_is_404(user, client):
 
 
 def test_classify_covers_every_venue_family():
-    assert kv.classify("bitget", BinanceClientError("x", "40006"))[0] == "invalid_key"
-    assert kv.classify("bitget", BinanceClientError("x", "40009"))[0] == "invalid_key"
-    assert kv.classify("bitget", BinanceClientError("Invalid IP", "40018"))[0] == "ip_not_allowed"
-    assert kv.classify("okx", BinanceClientError("x", "50110"))[0] == "ip_not_allowed"
-    assert kv.classify("bybit", BinanceClientError("x", "10003"))[0] == "invalid_key"
-    assert kv.classify("bitget", BinanceClientError("x", "HTTP"))[0] == "unreachable"
-    assert kv.classify("bitget", BinanceClientError("request IP is not in the whitelist", "99999"))[0] == "ip_not_allowed"
-    assert kv.classify("bitget", BinanceClientError("something else", "40001"))[0] == "error"
+    assert kv.classify("bitget", ExchangeClientError("x", "40006"))[0] == "invalid_key"
+    assert kv.classify("bitget", ExchangeClientError("x", "40009"))[0] == "invalid_key"
+    assert kv.classify("bitget", ExchangeClientError("Invalid IP", "40018"))[0] == "ip_not_allowed"
+    assert kv.classify("okx", ExchangeClientError("x", "50110"))[0] == "ip_not_allowed"
+    assert kv.classify("bybit", ExchangeClientError("x", "10003"))[0] == "invalid_key"
+    assert kv.classify("bitget", ExchangeClientError("x", "HTTP"))[0] == "unreachable"
+    assert kv.classify("bitget", ExchangeClientError("request IP is not in the whitelist", "99999"))[0] == "ip_not_allowed"
+    assert kv.classify("bitget", ExchangeClientError("something else", "40001"))[0] == "error"
 
 
 async def test_executor_refuses_unverified_key(db, user, binance_key):
@@ -221,7 +221,7 @@ async def test_executor_refuses_unverified_key(db, user, binance_key):
 
 
 def test_bitget_authorities_interpretation():
-    from api.services.binance_client import interpret_bitget_authorities as f
+    from api.services.exchange_client import interpret_bitget_authorities as f
     # documented words
     assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": []}
     assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": []}
@@ -239,14 +239,14 @@ def test_bitget_authorities_interpretation():
     ("wtow", False, ["wtow"]),  # Wallet -> Transfer (internal, not an external withdrawal)
 ])
 def test_each_confirmed_bitget_code_is_mapped_and_none_grants_withdrawal(code, trade, extra):
-    from api.services.binance_client import interpret_bitget_authorities as f
+    from api.services.exchange_client import interpret_bitget_authorities as f
     r = f([code])
     assert r["can_trade"] is trade and r["can_withdraw"] is False and r["unconfirmed"] == [] and r["extra"] == extra
     assert r["permissions_known"] is True
 
 
 def test_live_bitget_key_with_all_five_codes_cannot_withdraw():
-    from api.services.binance_client import interpret_bitget_authorities as f
+    from api.services.exchange_client import interpret_bitget_authorities as f
     live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
     assert live == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [],
                     "extra": ["p2pw", "smow", "taxw", "wtow"]}

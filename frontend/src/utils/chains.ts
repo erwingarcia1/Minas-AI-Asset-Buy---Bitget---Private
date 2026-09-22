@@ -1,4 +1,3 @@
-import { fmtAmount } from "@/utils/format";
 import type { ChainFamily } from "@/types";
 import { detectChain, getAddressNetwork, isDenylisted, sha256, DENYLIST_REASON } from "@/utils/addressValidation";
 
@@ -192,4 +191,3 @@ export function tagVerdictForChain(tag: string, chain: string): { ok: boolean; r
   return { ok: false, reason: `${chain} does not use a memo or tag` };
 }
 
-export const fmtCoin = (n: number, coin: string, digits = 8) => `${fmtAmount(n, digits)} ${coin}`;

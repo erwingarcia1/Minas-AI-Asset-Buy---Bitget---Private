@@ -1,7 +1,7 @@
 # AutoBuy Crypto API — Reference
 
 Automated cryptocurrency purchasing: users schedule recurring USDT buys
-(daily / weekly / biweekly / monthly) that the platform executes on Binance,
+(one-time / daily / weekly / monthly) that the platform executes on Bitget,
 gated by KYC verification and verified, encrypted API keys.
 
 Interactive docs: **`/docs`** (Swagger UI) · **`/redoc`** (ReDoc) ·
@@ -25,15 +25,15 @@ AUTH="Authorization: Bearer $ACCESS"
 # 3. Verify identity (returns a Sumsub WebSDK token for the frontend widget)
 curl -s -X POST $BASE/api/kyc/initiate -H "$AUTH"
 
-# 4. Store + verify a Binance API key (spot-trade only; no withdrawal permission)
+# 4. Store + verify a Bitget API key (spot-trade only; no withdrawal permission)
 KEY=$(curl -s $BASE/api/exchange/keys -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"exchange":"binance","api_key":"<key>","api_secret":"<secret>"}')
+  -d '{"exchange":"bitget","api_key":"<key>","api_secret":"<secret>"}')
 curl -s -X POST $BASE/api/exchange/keys/$(echo $KEY | jq -r .id)/verify -H "$AUTH"
 
 # 5. Buy $100 of BTC weekly and send it to your wallet (Auto-Buy)
 curl -s $BASE/api/v2/purchases -H "$AUTH" -H 'content-type: application/json' \
   -d '{"crypto_symbol":"BTC","amount_usd":100,"frequency":"weekly","purchase_type":"autobuy",
-       "wallet_address":"bc1q...","blockchain_network":"mainnet","exchange_account_id":"'$(echo $KEY | jq -r .id)'"}'
+       "wallet_address":"bc1q...","blockchain_network":"BTC","exchange_account_id":"'$(echo $KEY | jq -r .id)'"}'
 
 # 6. Watch it happen
 curl -s $BASE/api/transactions/ -H "$AUTH"

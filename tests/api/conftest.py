@@ -1,3 +1,9 @@
+"""Fixtures for tests/api/: HTTP-level tests of one router or service.
+
+Rate limiting is off, the DB pool is disabled (pooled asyncpg connections pin
+to one event loop) and no real email can be sent. See the docstring in
+tests/conftest.py for the tests/ vs tests/api/ rule.
+"""
 import os
 os.environ.setdefault("RATE_LIMIT_ENABLED", "0")
 os.environ.setdefault("AUTOBUY_DB_POOL", "null")  # pooled conns pin to one event loop

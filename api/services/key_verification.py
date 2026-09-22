@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from api.models import APIKey
-from api.services.binance_client import BinanceClient, BinanceClientError
+from api.services.exchange_client import ExchangeClient, ExchangeClientError
 
 logger = logging.getLogger("autobuy.exchange")
 
@@ -59,7 +59,7 @@ class Verification:
     extra_permissions: list = field(default_factory=list)   # recognised codes AutoBuy does not need
 
 
-def classify(exchange: str, exc: BinanceClientError) -> tuple[str, str]:
+def classify(exchange: str, exc: ExchangeClientError) -> tuple[str, str]:
     """(result, readable detail) for a venue error. Never includes credentials:
     the venue's own message is about codes, IPs and signatures."""
     code = str(exc.code)
@@ -78,7 +78,7 @@ def classify(exchange: str, exc: BinanceClientError) -> tuple[str, str]:
     return "error", f"{venue} error {code}: {msg[:200]}"
 
 
-def _check(client: BinanceClient) -> dict:
+def _check(client: ExchangeClient) -> dict:
     return client.get_account_info()
 
 
@@ -86,7 +86,7 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
     """Run the check and persist the outcome on ``key``. Never raises for venue
     problems; only unexpected programming errors propagate."""
     from api.routes.exchange import decrypt_value
-    factory = client_factory or BinanceClient
+    factory = client_factory or ExchangeClient
     client = factory(decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
                      passphrase=decrypt_value(key.encrypted_passphrase) if key.encrypted_passphrase else "",
                      exchange=key.exchange)
@@ -96,7 +96,7 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
 
     try:
         info = await asyncio.to_thread(_check, client)
-    except BinanceClientError as exc:
+    except ExchangeClientError as exc:
         result, detail = classify(key.exchange, exc)
         outcome = Verification(verified=False, result=result, detail=detail, error_code=str(exc.code))
         _record(key, outcome, now)

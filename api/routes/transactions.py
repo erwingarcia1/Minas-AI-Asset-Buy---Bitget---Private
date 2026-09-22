@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_db
 from api.models import User
 from api.routes.user import UTCModel, get_current_user
+from api.routes._deps import PrecisionMemo, precision_memo
 from api.services import history
 from api.services.rate_limit import limiter, user_or_ip_key
 
@@ -32,14 +33,6 @@ def _validate_status(value: str) -> str:
 # --------------------------------------------------------------------------
 # Schemas
 # --------------------------------------------------------------------------
-
-async def _precision(coin: str, memo: dict) -> int:
-    """Pair price precision, one Bitget cache read per coin per request."""
-    if coin not in memo:
-        from api.services import bitget_market
-        memo[coin] = await bitget_market.price_precision_async(coin)
-    return memo[coin]
-
 
 class TransactionResponse(UTCModel):
     """One execution attempt. ``cost_usdt``/``exchange_rate``/``binance_order_id``
@@ -114,12 +107,12 @@ async def list_transactions(
     status_filter: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """List the authenticated user's execution attempts, newest first, paginated."""
-    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     status = _validate_status(status_filter) if status_filter is not None else None
     rows, total = await history.list_rows(db, current_user.id, status=status, limit=limit, offset=offset)
-    return TransactionListResponse(items=[TransactionResponse.from_row(r, await _precision(r.crypto, _prec)) for r in rows],
+    return TransactionListResponse(items=[TransactionResponse.from_row(r, await prec.get(r.crypto)) for r in rows],
                                    total=total, limit=limit, offset=offset)
 
 
@@ -139,11 +132,11 @@ async def transactions_by_crypto(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """List the user's attempts for one cryptocurrency."""
-    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     rows, _ = await history.list_rows(db, current_user.id, crypto=crypto, limit=limit, offset=offset)
-    return [TransactionResponse.from_row(r, await _precision(r.crypto, _prec)) for r in rows]
+    return [TransactionResponse.from_row(r, await prec.get(r.crypto)) for r in rows]
 
 
 @router.get("/status/{tx_status}", response_model=List[TransactionResponse])
@@ -153,12 +146,12 @@ async def transactions_by_status(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """List the user's attempts with a given status."""
-    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     rows, _ = await history.list_rows(db, current_user.id, status=_validate_status(tx_status),
                                       limit=limit, offset=offset)
-    return [TransactionResponse.from_row(r, await _precision(r.crypto, _prec)) for r in rows]
+    return [TransactionResponse.from_row(r, await prec.get(r.crypto)) for r in rows]
 
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
@@ -166,10 +159,10 @@ async def get_transaction(
     transaction_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """Get one attempt by id."""
-    _prec: dict = {}   # pair precision memo, one Bitget cache read per coin per request
     row = await history.get_row(db, current_user.id, transaction_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    return TransactionResponse.from_row(row, await _precision(row.crypto, _prec))
+    return TransactionResponse.from_row(row, await prec.get(row.crypto))

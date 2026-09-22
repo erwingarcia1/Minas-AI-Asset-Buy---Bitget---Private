@@ -31,7 +31,7 @@ The schema is versioned with Alembic; migration scripts live in `alembic/version
 alembic upgrade head
 ```
 
-**Create a new migration after changing `api/models.py`:**
+**Create a new migration after changing `api/models/`:**
 
 ```bash
 alembic revision --autogenerate -m "describe the change"
@@ -76,6 +76,11 @@ alembic upgrade head # apply the real fixes (002+)
 | `010`–`013` | Auto-Buy: `wallets`, `purchases`, `purchase_transactions` (+ purchase_type / tx_type enums, fill details). `purchase_transactions` is the only execution history |
 | `014` | Drops the retired legacy tables `transactions` and `recurring_purchases` (take a `pg_dump` first; the downgrade recreates them empty) |
 | `015` | `api_keys.verification_status` / `verification_error` / `verified_at` / `last_checked_at` / `withdrawal_enabled`, backfilled from the old boolean |
+| `016`–`021` | Exchange chain names for withdrawals, Bitget market data, travel-rule fields, key permissions, withdrawal sizing / optional chain |
+| `022` | `users.wallet_hold_until` / `wallet_hold_reason`: 24-hour hold on new withdrawal destinations after a password reset or change |
+| `023` | `destination_type` / `memo` on wallets and purchases, `withdrawal_memo` on transaction rows (XRP Ledger / Stellar tags) |
+| `024` | CHECK: an exchange destination must carry a memo (wallets, purchases) |
+| `025` | `purchase_transactions.withdrawal_fee_mode`: the fee mode each withdrawal was sent under |
 
 ## Running tests
 

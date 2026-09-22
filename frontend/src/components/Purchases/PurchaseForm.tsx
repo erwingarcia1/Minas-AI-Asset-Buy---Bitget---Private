@@ -3,7 +3,8 @@ import { autoBuyAPI, marketAPI, userAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert } from "@/components/Common";
 import type { ApiKey, AutoBuyFrequency, AutoBuyPurchaseCreated, ChainInfo, CoinMarket } from "@/types";
-import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain, fmtCoin } from "@/utils/chains";
+import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain } from "@/utils/chains";
+import { fmtCrypto } from "@/utils/format";
 import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES } from "@/utils/exchangeNetworks";
 import { DestinationFields, destinationBody, destinationOk, type DestinationState } from "./DestinationFields";
 import { capitalize } from "@/utils/format";
@@ -24,8 +25,8 @@ export const HEADROOM_NOTE = "includes 1% headroom for the price moving between 
 
 /** Fee / minimum line for a chain, priced when the API had an amount to price against. */
 export function chainSummary(c: ChainInfo, coin: string): string {
-  const fee = `fee ${fmtCoin(c.withdraw_fee, coin)}${c.fee_usd != null ? ` (~$${c.fee_usd.toFixed(2)})` : ""}`;
-  const min = `min ${fmtCoin(c.min_withdraw_amount, coin)}${c.min_purchase_usd != null ? ` (≈ $${c.min_purchase_usd.toFixed(2)} per buy, ${HEADROOM_NOTE})` : ""}`;
+  const fee = `fee ${fmtCrypto(c.withdraw_fee, coin)}${c.fee_usd != null ? ` (~$${c.fee_usd.toFixed(2)})` : ""}`;
+  const min = `min ${fmtCrypto(c.min_withdraw_amount, coin)}${c.min_purchase_usd != null ? ` (≈ $${c.min_purchase_usd.toFixed(2)} per buy, ${HEADROOM_NOTE})` : ""}`;
   return `${fee} · ${min}`;
 }
 
@@ -97,7 +98,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const pairWarning = market && !market.online ? `${market.pair} is not trading on Bitget right now.` : null;
   const chainWarning = withdraw && chainInfo
     ? !chainInfo.withdrawable ? `Bitget has ${crypto} withdrawals on ${chain} suspended.`
-      : chainInfo.meets_minimum === false ? `${amountNumber || 0} USD buys about ${fmtCoin(chainInfo.estimated_received ?? 0, crypto)} after fees, below Bitget's minimum withdrawal on ${chain}. Use at least about $${(chainInfo.min_purchase_usd ?? 0).toFixed(2)} (${HEADROOM_NOTE}).`
+      : chainInfo.meets_minimum === false ? `${amountNumber || 0} USD buys about ${fmtCrypto(chainInfo.estimated_received ?? 0, crypto)} after fees, below Bitget's minimum withdrawal on ${chain}. Use at least about $${(chainInfo.min_purchase_usd ?? 0).toFixed(2)} (${HEADROOM_NOTE}).`
       : null
     : null;
   // Accumulate never withdraws: the only floor is Bitget's minimum order for the pair (live).

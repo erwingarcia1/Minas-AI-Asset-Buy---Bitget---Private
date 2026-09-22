@@ -6,6 +6,8 @@
 
 *Prepared 2026-09-01 · Covers the FastAPI platform in `api/` (Phase 1 complete).*
 
+> **Historical document.** This is the plan as it stood on 2026-09-01. Most of the gaps below have since been built (execution on Bitget, key verification, Resend and Sumsub integrations, the admin console, analytics, SDKs); `/api/purchases` was retired on 2026-09-11 in favour of `/api/v2/purchases`. For what exists today read `docs/API.md` and `CHANGELOG.md`.
+
 > **Repo context:** this repository hosts two systems. The **legacy sub-account
 > auto-buy bot** (`autobuy.py`, four exchange clients, Flask `webapp/`, meme-buy — removed from the repo on 2026-09-22, last present at tag v0.6.5-pre-audit;
 > subsystem) is mature and documented in the README. The **AutoBuy Crypto
@@ -35,7 +37,7 @@ also cascade-deletes (see tech-debt note in §3).
 | `auth` (`/api/auth`) | `POST /register`, `/login`, `/verify`, `/refresh` |
 | `user` (`/api/user`) | `GET/PUT /profile`, `GET /{user_id}` |
 | `exchange` (`/api/exchange`) | `POST/GET /keys`, `DELETE /keys/{id}` |
-| `purchases` (`/api/purchases`) | `POST/GET /`, `GET/PUT/DELETE /{id}`, `PATCH /{id}/toggle` |
+| `purchases` (`/api/purchases`) | `POST/GET /`, `GET/PUT/DELETE /{id}`, `PATCH /{id}/toggle` — *retired 2026-09-11; now `/api/v2/purchases`* |
 | `transactions` (`/api/transactions`) | `GET /` (paginated), `GET /{id}`, `/stats/summary`, `/crypto/{c}`, `/status/{s}` |
 | `dashboard` (`/api/dashboard`) | `GET /`, `/stats`, `/analytics/timeline` |
 | `main` | `GET /health`, `GET /` |
