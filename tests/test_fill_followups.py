@@ -201,8 +201,8 @@ async def test_admin_lists_reviews_and_records_a_confirmed_fill(db, user, bitget
     p = await park(db, user, bitget_key, purchase_type="autobuy")
     H = auth_headers(admin)
     gw = FakeGateway(lookup_state="filled")          # the exchange now shows a proper fill for the client id
-    from api.routes.admin import purchases as admin_purchases
-    monkeypatch.setattr(admin_purchases, "_gateway", lambda: gw)
+    gateway_calls = []
+    monkeypatch.setattr(admin_routes, "_gateway", lambda: gateway_calls.append(1) or gw)
     async with api() as c:
         listed = (await c.get("/api/admin/purchases", headers=H)).json()
         row = next(r for r in listed["items"] if r["id"] == str(p.id))
@@ -225,6 +225,7 @@ async def test_admin_lists_reviews_and_records_a_confirmed_fill(db, user, bitget
     buy = next(t for t in rows if t.tx_type == "buy")
     assert buy.status == "success" and buy.amount_executed == pytest.approx(0.001) and "[admin: fill recorded" in buy.error_message
     assert gw.placed == [], "never re-bought"
+    assert gateway_calls, "the review/resolve routes used the patched gateway, not the real one"
     assert any(t.tx_type == "withdrawal" and t.status == "success" for t in rows), "autobuy: the withdrawal was sent after recording"
     p = await reload(db, p)
     assert p.status == "active" and p.failure_count == 0 and p.next_execution is not None
@@ -235,25 +236,34 @@ async def test_record_fill_is_refused_when_the_exchange_does_not_show_a_sane_fil
     p = await park(db, user, bitget_key)
     H = auth_headers(admin)
     note = {"note": "checked the order on the exchange"}
+    gateways = []
+    def patched(gw):
+        def factory():
+            gateways.append(gw)
+            return gw
+        monkeypatch.setattr(admin_routes, "_gateway", factory)
     async with api() as c:
-        monkeypatch.setattr(admin_routes, "_gateway", lambda: FakeGateway(lookup_state="open"))
+        patched(FakeGateway(lookup_state="open"))
         r = await c.post(f"/api/admin/purchases/{p.id}/resolve", headers=H, json={"action": "record_fill", **note})
         assert r.status_code == 409 and "reports the order as open" in r.json()["detail"]
-        monkeypatch.setattr(admin_routes, "_gateway", lambda: FakeGateway(lookup_state="filled", fill_factor=0.0))
+        patched(FakeGateway(lookup_state="filled", fill_factor=0.0))
         r = await c.post(f"/api/admin/purchases/{p.id}/resolve", headers=H, json={"action": "record_fill", **note})
         assert r.status_code == 409 and "does not pass the guard" in r.json()["detail"]
-        monkeypatch.setattr(admin_routes, "_gateway", lambda: FakeGateway(lookup_raises=True))
+        patched(FakeGateway(lookup_raises=True))
         review = (await c.get(f"/api/admin/purchases/{p.id}/review", headers=H)).json()
         assert review["lookups"][0]["state"] == "error" and "unreachable" in review["lookups"][0]["error"]
         r = await c.post(f"/api/admin/purchases/{p.id}/resolve", headers=H, json={"action": "mark_not_sent", **note})
         assert r.status_code == 409, "cannot mark not sent when the exchange could not be asked"
+    assert len(gateways) >= 4 and all(g.lookups for g in gateways), "every patched gateway was asked; the real one never was"
     p = await reload(db, p)
     assert p.status == "needs_review", "nothing changed"
 
 
 async def test_mark_not_sent_makes_the_purchase_due_again_and_cancel_stops_it(db, user, bitget_key, admin, monkeypatch, caplog):
     from api.routes.admin import purchases as admin_routes   # the module whose _gateway the review routes call
-    monkeypatch.setattr(admin_routes, "_gateway", lambda: FakeGateway(lookup_state="not_found"))
+    gw = FakeGateway(lookup_state="not_found")
+    gateway_calls = []
+    monkeypatch.setattr(admin_routes, "_gateway", lambda: gateway_calls.append(1) or gw)
     H = auth_headers(admin)
     p = await park(db, user, bitget_key)
     async with api() as c:
@@ -279,3 +289,4 @@ async def test_mark_not_sent_makes_the_purchase_due_again_and_cancel_stops_it(db
     assert r.status_code == 200 and r.json()["status"] == "cancelled"
     p2 = await reload(db, p2)
     assert p2.status == "cancelled" and p2.next_execution is None and "cancelled by admin" in p2.last_error
+    assert gateway_calls, "the resolve route used the patched gateway, not the real one"

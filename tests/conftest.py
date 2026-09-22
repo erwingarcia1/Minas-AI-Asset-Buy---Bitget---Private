@@ -183,6 +183,7 @@ def stub_bitget_market(monkeypatch):
     monkeypatch.setattr(bm, "fetch_chains", fetch_chains)
     bm.live_ask_unstubbed = bm.live_ask   # for tests that exercise the real price lookup's error handling
     monkeypatch.setattr(bm, "live_ask", lambda coin: SAMPLE_ASK.get(coin.upper(), 100.0))
+    bm.cached_real, bm.cached_sync_real = bm._cached, bm._cached_sync   # tests of the cache policy restore these
     # no cache: each test's stub is authoritative (failures still surface as MarketDataUnavailable, as in production)
     def _cached_sync(key, producer):
         try:

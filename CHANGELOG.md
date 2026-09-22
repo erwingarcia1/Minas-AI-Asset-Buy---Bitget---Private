@@ -56,7 +56,10 @@ No behaviour change; the OpenAPI document is byte-identical before and after.
   copies of the same memo). One read-through cache in
   `api/services/cache.py`; `bitget_market` keeps fail-closed
   (`MarketDataUnavailable`) and `market_data` keeps degrade-to-None, exactly
-  as before.
+  as before — pinned by `tests/api/test_cache_policy.py` through both real
+  callers (read failure → producer runs; producer failure → refused / None;
+  write failure → value still returned).
+* CI: the push trigger now matches branch names with a slash (`**`).
 * **B4** `api/routes/admin.py` split into `api/routes/admin/{users,purchases,ops}.py`
   with `_deps.py`; purchase request/response schemas moved to
   `api/schemas/purchases.py`; Base58 decode/encode and the double-SHA256
