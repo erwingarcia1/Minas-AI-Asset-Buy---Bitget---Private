@@ -10,7 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # The platform reuses the legacy exchange clients at the repo root.
-COPY binance_client.py bitget_client.py bybit_client.py okx_client.py exchange_errors.py ./
+COPY binance_client.py bitget_client.py exchange_errors.py ./
 COPY api/ api/
 COPY alembic/ alembic/
 COPY alembic.ini .

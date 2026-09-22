@@ -38,12 +38,14 @@ async def account(db):
 
 @pytest.fixture
 def sent(monkeypatch):
+    """Security emails are queued to the outbox (audit C2); capture at the outbox."""
     box = []
 
-    async def fake_send(to_email, subject, html_content, **kw):
-        box.append({"to": to_email, "subject": subject, "text": kw.get("text_content", "")})
-        return "email-1"
-    monkeypatch.setattr(resend, "send_email", fake_send)
+    async def fake_enqueue(to, subject, html, text, template="generic", *, category="confirmation", user_id=None, now=None):
+        box.append({"to": to, "subject": subject, "text": text, "html": html, "template": template, "category": category})
+        return True
+    from api.services import email_outbox
+    monkeypatch.setattr(email_outbox, "enqueue", fake_enqueue)
     return box
 
 

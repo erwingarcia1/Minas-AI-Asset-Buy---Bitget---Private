@@ -148,7 +148,7 @@ async def test_no_trade_permission(db, user, binance_key, client):
 
 async def test_permissions_not_reported_still_verifies(db, user, binance_key, client):
     Venue.info = {"can_trade": None, "can_withdraw": None, "permissions": [], "permissions_known": False}
-    binance_key.exchange = "bybit"
+    binance_key.exchange = "bitget"   # a Bitget key whose authorities list is empty/unrecognised
     await db.commit()
     before = binance_key.updated_at
     body = (await verify(client, user, binance_key)).json()
@@ -195,8 +195,6 @@ def test_classify_covers_every_venue_family():
     assert kv.classify("bitget", ExchangeClientError("x", "40006"))[0] == "invalid_key"
     assert kv.classify("bitget", ExchangeClientError("x", "40009"))[0] == "invalid_key"
     assert kv.classify("bitget", ExchangeClientError("Invalid IP", "40018"))[0] == "ip_not_allowed"
-    assert kv.classify("okx", ExchangeClientError("x", "50110"))[0] == "ip_not_allowed"
-    assert kv.classify("bybit", ExchangeClientError("x", "10003"))[0] == "invalid_key"
     assert kv.classify("bitget", ExchangeClientError("x", "HTTP"))[0] == "unreachable"
     assert kv.classify("bitget", ExchangeClientError("request IP is not in the whitelist", "99999"))[0] == "ip_not_allowed"
     assert kv.classify("bitget", ExchangeClientError("something else", "40001"))[0] == "error"

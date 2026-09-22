@@ -35,6 +35,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key allowlists must name the new address. Public hostname to be served:
   `autobuy.minastrade.com` (A record → the Elastic IP).
 
+## [Unreleased] — 2026-09-22: Batch C1 + C2 of the codebase audit (PR 4)
+
+### Removed (C1)
+
+* Bybit and OKX: the root `bybit_client.py` / `okx_client.py` and their
+  tests, the eager imports, the `hasattr` and `TypeError` fallbacks and the
+  "other venues" permission branch in `ExchangeClient`, their error-code
+  tables in key verification, the OKX passphrase rule, and
+  `WITHDRAW_NETWORK_CODES` in the gateway (the withdrawal network is the
+  purchase's chain, as it always was for Bitget). Bitget is the only venue a
+  key can be created for; the Binance transport stays only for analytics
+  prices until C3. `tests/api/test_bitget_wire.py` pins the exact requests
+  Bitget receives (market buy, lookup by client id, fill by order id, coin
+  info, withdraw with and without tag, withdrawal records) and passes
+  unchanged before and after.
+
+### Changed (C2)
+
+* Password reset, password changed and wallet-hold-lifted emails go through
+  the email outbox under the `security` category (6 attempts, ~15 minutes)
+  instead of one inline Resend call with no retry. Latency: from inline during
+  the request to the next `drain_email_outbox` run (every minute). Link and
+  token unchanged. The `wallet_hold_lifted` notification audit row now records
+  `queued` instead of `sent`.
+* Production note (2026-09-22): Resend answers 429 `daily_quota_exceeded` on
+  the production account; no email has been delivered since 2026-09-21 and
+  three purchase emails sit in the dead-letter list. C2 makes security emails
+  survive such a window for about 15 minutes; it does not fix the quota.
+
 ## [Unreleased] — 2026-09-22: Batch B3 of the codebase audit (PR 3): the executor split
 
 Move only. `api/tasks/purchase_scheduler.py` (1,146 lines, seven concerns) is

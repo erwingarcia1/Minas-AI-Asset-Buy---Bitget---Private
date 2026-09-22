@@ -7,7 +7,8 @@ from sqlalchemy import select
 
 from api.models import PurchaseTransaction
 from api.tasks import purchase_scheduler as ps
-from tests.conftest_autobuy import (BTC_MAIN, binance_key, client, db, make_key, make_purchase,  # noqa: F401
+from tests.conftest_autobuy import (bitget_key,  # noqa: F401
+                                    BTC_MAIN, binance_key, client, db, make_key, make_purchase,  # noqa: F401
                                     other_user, user)
 
 NOW = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
@@ -303,7 +304,9 @@ def test_build_scheduler_sets_grace_and_listener():
     assert any(cb is ps.job_event_listener and (mask & EVENT_JOB_MISSED) for cb, mask in sched._listeners)
 
 
-async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binance_key, monkeypatch, caplog):
+async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, bitget_key, monkeypatch, caplog):
+    """Bitget dry runs are priced at the live best ask (the Bitget transport is patched; audit C1
+    removed the duck-typed fallback that let a Binance-selected client answer this path)."""
     import logging
     from api.services import exchange_client as bc
 
@@ -313,8 +316,8 @@ async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binanc
         def spot_symbol(b, q): return f"{b}{q}"
         def get_ticker(self, symbol): return {"last": 77042.68, "ask": 77042.84, "bid": 77042.83, "ts": "1789130047195"}
         def get_ticker_price(self, symbol): return 77042.68
-    monkeypatch.setattr(bc, "_LegacyClient", TickerClient)
-    p = await make_purchase(db, user, binance_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
+    monkeypatch.setitem(bc.LEGACY_CLIENTS, "bitget", TickerClient)
+    p = await make_purchase(db, user, bitget_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
     with caplog.at_level(logging.INFO, logger="autobuy.exchange_client"):
         await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
     tx = (await tx_for(db, p))[0]
@@ -323,7 +326,7 @@ async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binanc
     assert any("dry-run priced BTCUSDT at ask 77042.84" in r.getMessage() for r in caplog.records)
 
 
-async def test_dry_run_fails_closed_when_no_live_price(db, user, binance_key, monkeypatch):
+async def test_dry_run_fails_closed_when_no_live_price(db, user, bitget_key, monkeypatch):
     from api.services import exchange_client as bc
 
     class NoPrice:
@@ -331,8 +334,8 @@ async def test_dry_run_fails_closed_when_no_live_price(db, user, binance_key, mo
         @staticmethod
         def spot_symbol(b, q): return f"{b}{q}"
         def get_ticker(self, symbol): return {"last": None, "ask": None, "bid": None, "ts": None}
-    monkeypatch.setattr(bc, "_LegacyClient", NoPrice)
-    p = await make_purchase(db, user, binance_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
+    monkeypatch.setitem(bc.LEGACY_CLIENTS, "bitget", NoPrice)
+    p = await make_purchase(db, user, bitget_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
     counts = await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
     assert counts["failed"] == 1
     tx = (await tx_for(db, p))[0]

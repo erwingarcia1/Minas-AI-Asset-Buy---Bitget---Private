@@ -82,7 +82,7 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 | email (`/api/email`) | `POST /send-verification` · `POST /send-notification` (own address only; admins may notify anyone) |
 | webhooks (`/api/webhooks`) | `POST /sumsub` (HMAC via `x-payload-digest` / `x-payload-digest-alg`) · `POST /resend` |
 | market (`/api/v2/market`) | `GET /coins/{coin}?amount_usd=` — the coin's Bitget USDT pair (online, minimum order, taker fee) and every withdrawal chain with fee, minimum, precision, address family and, when `amount_usd` is given, the fee in USD, the estimated coins received and whether the amount clears the minimum withdrawal (`meets_minimum`) |
-| exchange (`/api/exchange`) | `GET /supported` (exchanges this deployment accepts keys for, from `SUPPORTED_EXCHANGES`, default `bitget`; other exchanges are rejected with 422 `exchange_not_supported`) · `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` — one harmless authenticated call (account info on Binance/Bitget, a balance read on Bybit/OKX); the key records `verification_status` (pending \| verified \| failed), a readable `verification_error` (never credentials), `verified_at`, `last_checked_at`, `withdrawal_enabled` (warn the user; the executor still requires `verified`), the reported `permissions` and `extra_permissions`. Bitget codes confirmed from its "Edit API key" screen: `stow` Spot → Trade (required; missing → `no_trade_permission` "Spot trading permission is required"), `smow` Margin → Trade, `taxw` Taxation → Search, `p2pw` P2P → Search, `wtow` Wallet → Transfer (internal, not an external withdrawal) — these four are `extra_permissions` (non-blocking warning). Any other code, including whatever Bitget uses for Withdraw, is still reported as withdrawal possible (`withdrawal_enabled: null`) until confirmed |
+| exchange (`/api/exchange`) | `GET /supported` (exchanges this deployment accepts keys for, from `SUPPORTED_EXCHANGES`, default `bitget`; other exchanges are rejected with 422 `exchange_not_supported`) · `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` — one harmless authenticated call (Bitget account info); the key records `verification_status` (pending \| verified \| failed), a readable `verification_error` (never credentials), `verified_at`, `last_checked_at`, `withdrawal_enabled` (warn the user; the executor still requires `verified`), the reported `permissions` and `extra_permissions`. Bitget codes confirmed from its "Edit API key" screen: `stow` Spot → Trade (required; missing → `no_trade_permission` "Spot trading permission is required"), `smow` Margin → Trade, `taxw` Taxation → Search, `p2pw` P2P → Search, `wtow` Wallet → Transfer (internal, not an external withdrawal) — these four are `extra_permissions` (non-blocking warning). Any other code, including whatever Bitget uses for Withdraw, is still reported as withdrawal possible (`withdrawal_enabled: null`) until confirmed |
 | transactions (`/api/transactions`) | `GET /` · `/{id}` · `/crypto/{crypto}` · `/status/{status}` · `/stats/summary` — every Auto-Buy execution attempt (purchase_transactions): fill price, cost, fees, exchange, order id, and for withdrawals the address, network, fee and tx hash. `status` is pending \| completed \| failed |
 | dashboard (`/api/dashboard`) | `GET /` (active/upcoming = the user's active Auto-Buy purchases, both types; holdings from purchase_transactions: `total_amount` = acquired NET of the trading fee charged in the coin, `on_exchange` = acquired minus what each real withdrawal took off the Bitget balance, `sent_to_wallet` = what those withdrawals delivered; see "Holdings arithmetic") · `/stats` · `/analytics/timeline?days=N` |
 | service | `GET /health` (`schedulers`: pause switch + per-scheduler running/paused, last run, last result, consecutive failures for both the legacy recurring tick and the Auto-Buy job) · `GET /metrics` (Prometheus; keep private) |
@@ -145,7 +145,7 @@ success advances `next_execution` (daily +24h, weekly +7d, monthly same day
 next month, one-time completes); three consecutive failures mark the purchase
 `failed`. Buys and withdrawals are simulated while `AUTOBUY_DRY_RUN=1`.
 Only exchanges listed in `SUPPORTED_EXCHANGES` (default `bitget`) accept
-keys; the Binance/Bybit/OKX code paths remain but are switched off.
+keys. The Bybit and OKX code paths were removed on 2026-09-22 (audit C1); the Binance transport remains only for analytics prices until audit C3 retires it.
 
 ### Holdings arithmetic (since 2026-09-21)
 
@@ -309,6 +309,15 @@ row lands in the user's notification history, and the user is emailed.
 409 when no hold is active.
 
 ## Purchase emails are queued
+
+Since 2026-09-22 (audit C2) the three security emails — password reset,
+password changed, withdrawal-address hold lifted — are queued the same way,
+under the `security` category (6 attempts with backoff 30 s … 8 min, about
+15 minutes in all) instead of one inline call to Resend. They leave on the
+next `drain_email_outbox` run, i.e. within about a minute, and a provider
+failure is retried rather than lost. The reset link and token are unchanged.
+The `wallet_hold_lifted` audit row records `queued` rather than `sent`.
+
 
 The executor never waits on the email provider. Purchase confirmations,
 failures and campaign emails are rendered on the purchase path and pushed

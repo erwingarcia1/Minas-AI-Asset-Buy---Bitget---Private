@@ -206,15 +206,14 @@ async def test_alerts_snapshot(admin):
 async def test_lift_wallet_hold_override(db, admin, user, monkeypatch, caplog):
     """Support override: admin only, typed email, reason; audited and the user is emailed."""
     import logging
-    from api.integrations import resend
     from api.models import Notification
-    from api.services import wallet_hold
+    from api.services import email_outbox, wallet_hold
     box = []
 
-    async def fake_send(to_email, subject, html_content, **kw):
-        box.append({"to": to_email, "subject": subject, "text": kw.get("text_content", "")})
-        return "email-1"
-    monkeypatch.setattr(resend, "send_email", fake_send)
+    async def fake_enqueue(to, subject, html, text, template="generic", *, category="confirmation", user_id=None, now=None):
+        box.append({"to": to, "subject": subject, "text": text, "category": category})   # queued to the outbox (audit C2)
+        return True
+    monkeypatch.setattr(email_outbox, "enqueue", fake_enqueue)
     wallet_hold.start_hold(user, "password_reset")
     await db.commit()
     url = f"/api/admin/users/{user.id}/lift-wallet-hold"
@@ -240,6 +239,7 @@ async def test_lift_wallet_hold_override(db, admin, user, monkeypatch, caplog):
     assert audit_rows[0].user_id == str(user.id) and audit_rows[0].lifted_at
     assert len(box) == 1 and box[0]["to"] == user.email and "hold was lifted" in box[0]["subject"]
     assert "support administrator lifted the hold" in box[0]["text"] and "If you did not ask for this" in box[0]["text"]
+    assert box[0]["category"] == "security"
     note = (await db.execute(select(Notification).where(Notification.user_id == user.id,
                                                          Notification.template == "wallet_hold_lifted"))).scalars().all()
-    assert len(note) == 1 and note[0].status == "sent"
+    assert len(note) == 1 and note[0].status == "queued"

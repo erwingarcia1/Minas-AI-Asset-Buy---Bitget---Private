@@ -110,8 +110,8 @@ async def notify_hold_lifted(db: AsyncSession, user: User, admin: User, reason: 
     """Security email (never optional) telling the user an admin lifted the hold,
     recorded in the notifications audit table. Never raises."""
     from api.config import settings
-    from api.integrations import resend
     from api.models import Notification
+    from api.services.email_service import email_service
     app = settings.app_name
     stamp = lifted_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     contact = f"contact {settings.support_email} immediately" if settings.support_email else "contact support immediately"
@@ -124,15 +124,15 @@ async def notify_hold_lifted(db: AsyncSession, user: User, admin: User, reason: 
             f"<strong>{stamp}</strong>, after you confirmed your identity.</p>"
             f"<p>New wallet addresses, switching a purchase to withdraw-immediately and autobuy purchases to new "
             f"addresses are allowed again.</p><p>If you did not ask for this, {contact}.</p>")
-    ok = True
-    try:
-        await resend.send_email(user.email, subject, html, text_content=text, template="wallet_hold_lifted")
-    except Exception as exc:
-        ok = False
-        logger.error("wallet hold lifted notice not delivered: user=%s reason=%s", user.id, exc)
+    # Security category: queued through the outbox (6 attempts over ~15 minutes); the audit row
+    # records "queued" rather than "sent", because delivery now happens on the next drain.
+    ok = await email_service.queue(user.email, subject, html, text, template="wallet_hold_lifted",
+                                   category="security", user_id=user.id)
+    if not ok:
+        logger.error("wallet hold lifted notice not delivered: user=%s (outbox unavailable and inline attempt failed)", user.id)
     try:
         db.add(Notification(user_id=user.id, channel="email", template="wallet_hold_lifted", subject=subject,
-                            status="sent" if ok else "failed"))
+                            status="queued" if ok else "failed"))
         await db.commit()
     except Exception:
         logger.exception("could not record the wallet-hold-lifted notification for user %s", user.id)
