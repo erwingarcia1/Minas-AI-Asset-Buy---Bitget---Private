@@ -12,7 +12,8 @@ vi.mock("@/api/endpoints", () => ({
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
 }));
 const authUser: Record<string, unknown> = { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z" };
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: authUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
+let currentUser: Record<string, unknown> | null = authUser;   // null = session still bootstrapping (a direct load of /settings)
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: currentUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
 import { notificationAPI, userAPI } from "@/api/endpoints";
 
 const PREFS = { email_enabled: true, email_purchase_confirmations: true, email_weekly_summary: true, email_milestones: true,
@@ -71,6 +72,50 @@ describe("Settings: exchange keys", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save key" }));
     await waitFor(() => expect(userAPI.verifyExchangeKey).toHaveBeenCalledWith("k1"));
     await screen.findByText(/rejected the credentials \(error 40012\)/);
+  });
+});
+
+describe("Settings: exchange key fields stay out of autofill and password managers", () => {
+  it("uses masked text inputs with anti-autofill attributes, no form, and leaves the password form alone", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Exchange API keys");
+    const key = screen.getByLabelText("API key");
+    const secret = screen.getByLabelText("API secret");
+    const phrase = screen.getByLabelText("Passphrase (Bitget/OKX)");
+    for (const el of [key, secret, phrase]) {
+      expect(el).toHaveAttribute("type", "text");
+      expect(el).toHaveAttribute("autocomplete", "one-time-code");
+      expect(el).toHaveAttribute("data-lpignore", "true");
+      expect(el).toHaveAttribute("data-1p-ignore");
+      expect(el).toHaveAttribute("data-form-type", "other");
+      expect(el.closest("form")).toBeNull();
+      expect(el.id).not.toMatch(/email|user|login|password|pass$|secret/i);
+      expect(el.getAttribute("name")).not.toMatch(/email|user|login|password|pass$|secret/i);
+    }
+    expect(secret).toHaveClass("secret-masked");
+    expect(screen.getByRole("button", { name: "Show API secret" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save key" })).toHaveAttribute("type", "button");
+    expect(container.querySelectorAll('input[type="password"]')).toHaveLength(2);
+    // the change-password form is untouched: real password fields with proper autocomplete, inside a form
+    const current = container.querySelector('input[autocomplete="current-password"]') as HTMLInputElement;
+    const next = container.querySelector('input[autocomplete="new-password"]') as HTMLInputElement;
+    expect(current).toHaveAttribute("type", "password");
+    expect(next).toHaveAttribute("type", "password");
+    expect(current.closest("form")).not.toBeNull();
+  });
+});
+
+describe("Settings: direct page load", () => {
+  it("renders once the session bootstrap delivers the user (hooks keep their order across the early Loading return)", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    currentUser = null;
+    const { rerender } = render(<MemoryRouter><Settings /></MemoryRouter>);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+    currentUser = authUser;
+    rerender(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Exchange API keys");
+    expect(screen.queryByText(/Something went wrong|Rendered more hooks/)).toBeNull();
   });
 });
 
