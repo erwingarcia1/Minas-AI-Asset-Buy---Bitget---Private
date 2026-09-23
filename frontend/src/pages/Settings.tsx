@@ -39,6 +39,7 @@ export default function Settings() {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [passphrase, setPassphrase] = useState("");
+  const [verifying, setVerifying] = useState<string | null>(null);   // must sit above the early return: hooks run in the same order on every render
 
   if (!user) return <Loading />;
 
@@ -62,7 +63,6 @@ export default function Settings() {
     } catch (err) { setMailMsg({ kind: "error", text: errorMessage(err) }); }
   }
 
-  const [verifying, setVerifying] = useState<string | null>(null);
 
   async function verifyKey(id: string) {
     setKeyMsg(null); setVerifying(id);

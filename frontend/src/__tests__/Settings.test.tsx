@@ -12,7 +12,8 @@ vi.mock("@/api/endpoints", () => ({
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
 }));
 const authUser: Record<string, unknown> = { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z" };
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: authUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
+let currentUser: Record<string, unknown> | null = authUser;   // null = session still bootstrapping (a direct load of /settings)
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: currentUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
 import { notificationAPI, userAPI } from "@/api/endpoints";
 
 const PREFS = { email_enabled: true, email_purchase_confirmations: true, email_weekly_summary: true, email_milestones: true,
@@ -102,6 +103,19 @@ describe("Settings: exchange key fields stay out of autofill and password manage
     expect(current).toHaveAttribute("type", "password");
     expect(next).toHaveAttribute("type", "password");
     expect(current.closest("form")).not.toBeNull();
+  });
+});
+
+describe("Settings: direct page load", () => {
+  it("renders once the session bootstrap delivers the user (hooks keep their order across the early Loading return)", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    currentUser = null;
+    const { rerender } = render(<MemoryRouter><Settings /></MemoryRouter>);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+    currentUser = authUser;
+    rerender(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Exchange API keys");
+    expect(screen.queryByText(/Something went wrong|Rendered more hooks/)).toBeNull();
   });
 });
 
