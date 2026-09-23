@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-09-23: Settings credentials out of autofill (PR #44)
+
+### Changed
+
+* **Exchange API key fields no longer look like a login to the browser.** The
+  API secret is a masked `type="text"` input (`SecretInput`: CSS
+  text-security with a show/hide button) instead of `type="password"`, so
+  Chrome's password manager neither captures it nor offers to save it. API
+  key, secret and passphrase carry `autocomplete="one-time-code"`,
+  autocorrect/autocapitalize off, spellcheck off and the 1Password / LastPass /
+  Bitwarden ignore attributes; their ids and names are
+  `exchange_credential_public` / `_private` / `_phrase`; the fields are no
+  longer inside a `<form>` and "Save key" is a plain button. The change
+  password form is untouched (real password fields, `current-password` /
+  `new-password`).
+
+### Fixed
+
+* **Direct load of /settings crashed.** Settings declared its `verifying`
+  state after the early "no user yet" return, so opening `/settings` by URL
+  (reload or bookmark) rendered Loading with one hook fewer and then failed
+  with React error 310 once the profile arrived; reaching Settings through the
+  app never triggered it. Introduced in 6f3aeec on 2026-09-11 (v0.5.0), live on
+  the Tokyo server from the first server deploy (v0.6.0, 2026-09-17) until this
+  fix; reproduced on the live site on 2026-09-23. Regression test renders with
+  no user, then with one.
+
 ## [Unreleased] — 2026-09-22: dashboard charts (PR #42), deployed
 
 Merged as 97759aa and deployed to the Tokyo server on 2026-09-22 19:27 UTC
