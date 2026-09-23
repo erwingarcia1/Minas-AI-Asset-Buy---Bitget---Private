@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation } from "react-router-dom";
 import { authAPI, notificationAPI, userAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
-import { Alert, Loading, StatusBadge } from "@/components/Common";
+import { Alert, Loading, SecretInput, StatusBadge } from "@/components/Common";
+import { NO_AUTOFILL } from "@/utils/noAutofill";
 import Integrations from "@/components/Settings/Integrations";
 import Reports from "@/components/Settings/Reports";
 import { useAsync } from "@/hooks/useAsync";
@@ -72,8 +73,9 @@ export default function Settings() {
     finally { setVerifying(null); await keys.reload(); }
   }
 
-  async function addKey(e: FormEvent) {
-    e.preventDefault();
+  async function addKey() {
+    // no <form>: the key fields are never submitted natively, so the browser
+    // has no submission to attach a "save password" prompt to
     setKeyMsg(null);
     try {
       const k = await userAPI.addExchangeKey({ exchange, api_key: apiKey, api_secret: apiSecret, passphrase: passphrase || undefined });
@@ -154,16 +156,19 @@ export default function Settings() {
           </ul>
         )}
         {keyMsg && <Alert kind={keyMsg.kind}>{keyMsg.text}</Alert>}
-        <form onSubmit={addKey} className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2" role="group" aria-label="Add an exchange API key" data-testid="exchange-key-fields">
           <div><label className="label" htmlFor="key-exchange">Exchange</label>
             <select id="key-exchange" className="input" value={exchange} onChange={(e) => setExchange(e.target.value)}>
               {(supported.data ?? ["bitget"]).map((x) => <option key={x} value={x}>{x === "okx" ? "OKX" : capitalize(x)}</option>)}
             </select></div>
-          <div><label className="label" htmlFor="key-passphrase">Passphrase (Bitget/OKX)</label><input id="key-passphrase" className="input" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} /></div>
-          <div><label className="label" htmlFor="key-api-key">API key</label><input id="key-api-key" className="input" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" /></div>
-          <div><label className="label" htmlFor="key-api-secret">API secret</label><input id="key-api-secret" className="input" type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} autoComplete="off" /></div>
-          <div className="sm:col-span-2"><button className="btn-primary" type="submit" disabled={!apiKey || !apiSecret}>Save key</button></div>
-        </form>
+          <div><label className="label" htmlFor="exchange_credential_phrase">Passphrase (Bitget/OKX)</label>
+            <input id="exchange_credential_phrase" name="exchange_credential_phrase" className="input" type="text" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} {...NO_AUTOFILL} /></div>
+          <div><label className="label" htmlFor="exchange_credential_public">API key</label>
+            <input id="exchange_credential_public" name="exchange_credential_public" className="input" type="text" value={apiKey} onChange={(e) => setApiKey(e.target.value)} {...NO_AUTOFILL} /></div>
+          <div><label className="label" htmlFor="exchange_credential_private">API secret</label>
+            <SecretInput id="exchange_credential_private" name="exchange_credential_private" label="API secret" value={apiSecret} onChange={setApiSecret} /></div>
+          <div className="sm:col-span-2"><button className="btn-primary" type="button" disabled={!apiKey || !apiSecret} onClick={() => void addKey()}>Save key</button></div>
+        </div>
       </section>
 
       <section className="card space-y-4">

@@ -74,6 +74,37 @@ describe("Settings: exchange keys", () => {
   });
 });
 
+describe("Settings: exchange key fields stay out of autofill and password managers", () => {
+  it("uses masked text inputs with anti-autofill attributes, no form, and leaves the password form alone", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Exchange API keys");
+    const key = screen.getByLabelText("API key");
+    const secret = screen.getByLabelText("API secret");
+    const phrase = screen.getByLabelText("Passphrase (Bitget/OKX)");
+    for (const el of [key, secret, phrase]) {
+      expect(el).toHaveAttribute("type", "text");
+      expect(el).toHaveAttribute("autocomplete", "one-time-code");
+      expect(el).toHaveAttribute("data-lpignore", "true");
+      expect(el).toHaveAttribute("data-1p-ignore");
+      expect(el).toHaveAttribute("data-form-type", "other");
+      expect(el.closest("form")).toBeNull();
+      expect(el.id).not.toMatch(/email|user|login|password|pass$|secret/i);
+      expect(el.getAttribute("name")).not.toMatch(/email|user|login|password|pass$|secret/i);
+    }
+    expect(secret).toHaveClass("secret-masked");
+    expect(screen.getByRole("button", { name: "Show API secret" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save key" })).toHaveAttribute("type", "button");
+    expect(container.querySelectorAll('input[type="password"]')).toHaveLength(2);
+    // the change-password form is untouched: real password fields with proper autocomplete, inside a form
+    const current = container.querySelector('input[autocomplete="current-password"]') as HTMLInputElement;
+    const next = container.querySelector('input[autocomplete="new-password"]') as HTMLInputElement;
+    expect(current).toHaveAttribute("type", "password");
+    expect(next).toHaveAttribute("type", "password");
+    expect(current.closest("form")).not.toBeNull();
+  });
+});
+
 describe("Settings: unconfirmed withdrawal permission", () => {
   it("warns that the key may be able to withdraw when the exchange did not confirm otherwise", async () => {
     vi.mocked(userAPI.exchangeKeys).mockResolvedValue([{ ...VERIFIED_WITHDRAW, withdrawal_enabled: null }] as never);
