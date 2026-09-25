@@ -10,7 +10,7 @@ import { fmtCrypto, fmtUsdt } from "@/utils/format";
 
 export const RANGES: SeriesRange[] = ["1D", "7D", "30D", "90D", "All"];
 const RANGE_LABEL: Record<SeriesRange, string> = { "1D": "24 hours", "7D": "7 days", "30D": "30 days", "90D": "90 days", All: "all time" };
-const VALUE = "#1b5cf5";      // brand-600
+const VALUE = "#543477";      // brand-600 (was #1b5cf5 blue before the brand palette)
 const INVESTED = "#94a3b8";   // slate-400
 
 const tone = (n?: number | null) => (n == null ? "text-slate-500" : n >= 0 ? "text-green-700" : "text-red-700");

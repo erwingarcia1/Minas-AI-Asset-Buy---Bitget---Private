@@ -5,12 +5,12 @@ export const ASSET_COLORS: Record<string, string> = {
   BTC: "#f7931a",
   ETH: "#5b6ee1",
   USDC: "#2775ca",
-  SOL: "#7c3aed",
+  SOL: "#db2777",   // pink; the previous violet #7c3aed clashed with the brand purple (#543477)
   XRP: "#0e7490",
   XLM: "#0f9d75",
   Other: "#94a3b8",
 };
-const FALLBACKS = ["#d97706", "#db2777", "#4f46e5", "#0891b2", "#65a30d", "#9333ea"];
+const FALLBACKS = ["#d97706", "#db2777", "#4f46e5", "#0891b2", "#65a30d", "#ca8a04"];   // no purples: they would read as the brand colour
 
 export const MAX_SLICES = 6;
 

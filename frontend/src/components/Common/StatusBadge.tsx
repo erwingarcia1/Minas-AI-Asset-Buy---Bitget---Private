@@ -7,7 +7,7 @@ const colors: Record<string, string> = {
   active: "bg-brand-100 text-brand-800",
   paused: "bg-slate-100 text-slate-700",
   autobuy: "bg-brand-100 text-brand-800",
-  accumulate: "bg-violet-100 text-violet-800",
+  accumulate: "bg-tan-100 text-tan-800",   // warm tan as the secondary accent (violet would read as the brand purple)
   success: "bg-green-100 text-green-800",
   cancelled: "bg-slate-100 text-slate-500",
   needs_review: "bg-red-100 text-red-800",
