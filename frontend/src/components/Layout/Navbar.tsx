@@ -10,8 +10,8 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
         <button className="rounded p-2 text-slate-600 hover:bg-slate-100 md:hidden" onClick={onToggleSidebar} aria-label="Toggle navigation">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h14M3 10h14M3 15h14" /></svg>
         </button>
-        <Link to="/dashboard" className="flex items-center gap-2 font-semibold text-slate-900">
-          <img src="/favicon.svg" alt="" className="h-7 w-7" /> AutoBuy
+        <Link to="/dashboard" className="flex items-center gap-2 font-semibold text-brand-ink">
+          <img src="/icon-64.png" alt="" width={28} height={28} className="h-7 w-7" data-testid="brand-mark" /> AutoBuy
         </Link>
       </div>
       <div className="flex items-center gap-4 text-sm">

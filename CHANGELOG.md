@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-09-25: AI Wealth Builder symbol as the app mark (PR #45)
+
+### Changed
+
+* **App mark and favicon.** The AI Wealth Builder symbol (source of truth
+  `brand/aiwb-logo.png`, an 8625×8625 RGBA PNG; symbol only, never the
+  wordmark — the app is still AutoBuy) replaces the blue "A" mark in the
+  header and on the login/signup/reset pages, beside the AutoBuy wordmark at
+  the same size and position, wordmark in the symbol's deep purple #543477
+  (tailwind `brand-ink`, also the browser theme colour). Icons are transparent
+  PNGs resampled from the source: 512/192/180/64 keep the gradient
+  (#543477 → #61446f → #87735b); 16 and 32 px and `favicon.ico` are a flat
+  deep-purple silhouette because the gradient washes out at that size.
+  `manifest.json` (name AutoBuy Crypto, short_name AutoBuy, 192/512 icons) and
+  an apple-touch-icon are new; `favicon.svg` is gone. Button and link colours
+  are unchanged.
+
 ## [Unreleased] — 2026-09-23: Settings credentials out of autofill (PR #44)
 
 ### Changed
