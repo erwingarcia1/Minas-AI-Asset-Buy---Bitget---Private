@@ -9,6 +9,8 @@
   input, select, textarea { @apply bg-white text-slate-900; }
   input::placeholder, textarea::placeholder { @apply text-slate-400; }
   input:disabled, select:disabled, textarea:disabled { @apply bg-slate-100 text-slate-500; }
+  /* native checkboxes, radios, progress bars and range sliders take the brand purple */
+  input[type="checkbox"], input[type="radio"], progress, input[type="range"] { accent-color: theme(colors.brand.600); }
 }
 
 @layer components {

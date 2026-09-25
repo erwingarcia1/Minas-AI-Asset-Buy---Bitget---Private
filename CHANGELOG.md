@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-09-25: brand palette and link previews (PR #46)
+
+### Changed
+
+* **Brand purple across the app.** The tailwind `brand` scale is now built
+  from the symbol's deep purple #543477 (brand-600; tints towards white,
+  shades towards black), so primary buttons and their hover/disabled states,
+  focus rings, links, the active nav item, the admin tabs, the loading spinner,
+  info alerts and the active/autobuy chips take the purple. Native checkboxes
+  and radios use it as their accent colour. The warm tan #87735b is a sparing
+  secondary accent (the "accumulate" chip). Status colours (green / amber /
+  red, the verified badge) are unchanged. The portfolio chart's value area is
+  #543477 (was #1b5cf5). SOL's asset colour moved from violet #7c3aed to pink
+  #db2777 so it stays distinct from the brand purple; other asset colours
+  unchanged. Contrast (WCAG AA): white on brand-600 9.8:1, links 9.8:1, active
+  nav 10.5:1, chips 11.2:1, focus ring 6.3:1.
+
+### Added
+
+* **Link previews.** `og-image.png` (1200×630) and `og-image-square.png`
+  (1200×1200): the symbol beside "AutoBuy" on white. `index.html` carries the
+  Open Graph and Twitter Card tags with absolute
+  `https://autobuy.minastrade.com/…` URLs, a plain description, and the title
+  "AutoBuy", so any shared URL (login page included) unfurls with the logo.
+
 ## [Unreleased] — 2026-09-25: AI Wealth Builder symbol as the app mark (PR #45)
 
 ### Changed
