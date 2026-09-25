@@ -47,7 +47,7 @@ describe("Dashboard", () => {
     expect(screen.getAllByText("300.00 USDT").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Upcoming purchases")).toHaveTextContent("Weekly");
     expect(dashboardAPI.timeline).not.toHaveBeenCalled();
-    expect(dashboardAPI.portfolioSeries).toHaveBeenCalledWith("30D");
+    await waitFor(() => expect(dashboardAPI.portfolioSeries).toHaveBeenCalledWith("30D"));   // the chart's effect runs after the holdings render
     await waitFor(() => expect(screen.getByTestId("portfolio-current")).toHaveTextContent("310.50 USDT"));
     expect(screen.getByTestId("portfolio-change")).toHaveTextContent("+20.50 USDT (+7.07%) · 30D");
     expect(screen.getByTestId("portfolio-chart")).toBeInTheDocument();
