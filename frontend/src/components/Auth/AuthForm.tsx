@@ -5,13 +5,16 @@ import { isEmail, passwordProblem } from "@/utils/validation";
 interface Props {
   submitLabel: string;
   requireStrongPassword?: boolean;
-  onSubmit: (email: string, password: string) => Promise<void>;
+  /** Private beta: ask for the invite code and pass it to onSubmit. */
+  requireInviteCode?: boolean;
+  onSubmit: (email: string, password: string, inviteCode?: string) => Promise<void>;
 }
 
-export function AuthForm({ submitLabel, requireStrongPassword = false, onSubmit }: Props) {
+export function AuthForm({ submitLabel, requireStrongPassword = false, requireInviteCode = false, onSubmit }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -24,9 +27,10 @@ export function AuthForm({ submitLabel, requireStrongPassword = false, onSubmit 
       if (p) return setError(p);
       if (password !== confirm) return setError("Passwords do not match");
     } else if (!password) return setError("Enter your password");
+    if (requireInviteCode && !inviteCode.trim()) return setError("Enter your invite code");
     setBusy(true);
     try {
-      await onSubmit(email.trim().toLowerCase(), password);
+      await onSubmit(email.trim().toLowerCase(), password, requireInviteCode ? inviteCode.trim() : undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -49,6 +53,14 @@ export function AuthForm({ submitLabel, requireStrongPassword = false, onSubmit 
         <div>
           <label className="label" htmlFor="confirm">Confirm password</label>
           <input id="confirm" className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </div>
+      )}
+      {requireInviteCode && (
+        <div>
+          <label className="label" htmlFor="invite_code">Invite code</label>
+          <input id="invite_code" name="invite_code" className="input" type="text" autoComplete="off" autoCapitalize="off" spellCheck={false}
+                 value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} />
+          <p className="mt-1 text-xs text-slate-500">AutoBuy is in private beta. No code? Email support to request access.</p>
         </div>
       )}
       <button className="btn-primary w-full" type="submit" disabled={busy}>{busy ? "Please wait…" : submitLabel}</button>

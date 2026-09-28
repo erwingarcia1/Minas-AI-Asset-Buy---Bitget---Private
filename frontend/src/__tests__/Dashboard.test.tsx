@@ -44,6 +44,7 @@ describe("Dashboard", () => {
     expect(screen.getByTestId("holding-BTC")).toHaveTextContent("all on the exchange");
     expect(screen.getByTestId("holding-XRP")).toHaveTextContent("1.3320666");
     expect(screen.getByTestId("holding-XRP")).toHaveTextContent("0.0320666 on exchange · 1.1 in your wallet");
+    expect(screen.getByTestId("holdings-note")).toHaveTextContent("AutoBuy's holdings count only what it bought for you, so they won't reflect coins you move or add yourself.");
     expect(screen.getAllByText("300.00 USDT").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Upcoming purchases")).toHaveTextContent("Weekly");
     expect(dashboardAPI.timeline).not.toHaveBeenCalled();

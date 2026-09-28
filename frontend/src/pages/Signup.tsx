@@ -9,9 +9,9 @@ export default function Signup() {
   return (
     <AuthCard title="Create your account" subtitle="You'll verify your identity before the first purchase runs."
       footer={<>Already registered? <Link className="text-brand-600 hover:underline" to="/login">Sign in</Link></>}>
-      <AuthForm submitLabel="Create account" requireStrongPassword onSubmit={async (email, password) => {
+      <AuthForm submitLabel="Create account" requireStrongPassword requireInviteCode onSubmit={async (email, password, inviteCode) => {
         try {
-          await signup(email, password);
+          await signup(email, password, inviteCode);
           navigate("/kyc", { replace: true });
         } catch (e) {
           throw new Error(errorMessage(e));

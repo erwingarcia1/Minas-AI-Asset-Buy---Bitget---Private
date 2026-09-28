@@ -25,3 +25,16 @@
   .card { @apply rounded-lg border border-slate-200 bg-white p-6 shadow-sm; }
   .badge { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium; }
 }
+
+/* Private-beta ticker (components/Common/BetaTicker): transform-only marquee.
+   brand-800 #392351 ground, white text = 11.2:1. Hover/focus and the button pause it. */
+.beta-ticker { position: relative; display: flex; align-items: center; height: 28px; overflow: hidden; background: #392351; color: #fff; font-size: 12px; line-height: 28px; }
+.beta-ticker__track { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.beta-ticker__lane { display: flex; width: max-content; animation: beta-ticker-scroll 32s linear infinite; will-change: transform; }
+.beta-ticker__item { flex: 0 0 auto; padding: 0 3rem 0 0; white-space: nowrap; }
+.beta-ticker__static { display: block; padding: 0 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beta-ticker:hover .beta-ticker__lane, .beta-ticker:focus-within .beta-ticker__lane, .beta-ticker__lane.is-paused { animation-play-state: paused; }
+.beta-ticker__btn { flex: 0 0 auto; height: 28px; min-width: 40px; padding: 0 10px; font-size: 10px; color: #fff; background: #2c1b3e; border-left: 1px solid rgba(255,255,255,.18); }
+.beta-ticker__btn:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+@keyframes beta-ticker-scroll { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-50%, 0, 0); } }
+@media (prefers-reduced-motion: reduce) { .beta-ticker__lane { animation: none; } }

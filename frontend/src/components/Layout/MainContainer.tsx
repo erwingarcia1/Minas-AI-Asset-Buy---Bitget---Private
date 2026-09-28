@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { Navbar } from "./Navbar";
 import { Sidebar } from "./Sidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { BetaTicker } from "@/components/Common/BetaTicker";
 
 /** Authenticated shell: navbar + sidebar + routed page content. */
 export function MainContainer() {
@@ -15,6 +16,7 @@ export function MainContainer() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <BetaTicker />
       <Navbar onToggleSidebar={() => setOpen((v) => !v)} />
       <div className="flex">
         <Sidebar open={open} onClose={() => setOpen(false)} />

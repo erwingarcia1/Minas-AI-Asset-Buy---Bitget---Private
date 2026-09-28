@@ -147,3 +147,17 @@ describe("Admin: review queue for parked purchases", () => {
     expect(await screen.findByText(/resolved: now active/)).toBeInTheDocument();
   });
 });
+
+describe("Admin overview: signups per day", () => {
+  it("draws one bar per day from signups_by_day with an accessible count", async () => {
+    vi.mocked(adminAPI.stats).mockResolvedValue({ ...STATS, signups_by_day: [
+      { day: "2026-09-27", count: 0 }, { day: "2026-09-28", count: 3 }] } as never);
+    render(<MemoryRouter initialEntries={["/admin"]}><Routes><Route path="/admin" element={<Admin />} /></Routes></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("signups-by-day")).toBeInTheDocument());
+    const strip = screen.getByTestId("signups-by-day");
+    expect(strip).toHaveTextContent("Signups per day");
+    expect(strip.querySelectorAll("li")).toHaveLength(2);
+    expect(strip).toHaveTextContent("2026-09-28: 3 signups");
+    expect(strip).toHaveTextContent("leaked invite code");
+  });
+});

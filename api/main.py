@@ -186,9 +186,10 @@ async def root():
         "openapi_schema": "/openapi.json"
     }
 
-from api.routes import auth, dashboard, exchange, transactions, user
+from api.routes import auth, dashboard, exchange, transactions, user, public
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(public.router, prefix="/api/public", tags=["public"])
 app.include_router(user.router, prefix="/api/user", tags=["user"])
 app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])

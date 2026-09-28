@@ -366,6 +366,7 @@ export interface WebhookCreated extends Webhook { secret: string }
 export interface AdminStats {
   total_users: number; verified_users: number; suspended_users: number; total_invested_usdt: number;
   total_transactions: number; failed_transactions_24h: number; active_purchases: number; signups_7d: number; volume_7d_usdt: number;
+  signups_by_day?: { day: string; count: number }[];   // last 14 days (UTC), so a leaked invite code is visible
 }
 export interface AdminUserRow { id: string; email: string; role: string; kyc_status: string; suspended: boolean; created_at: string; invested_usdt: number;
   wallet_hold_until?: string | null; wallet_hold_reason?: string | null }
@@ -420,3 +421,6 @@ export interface DestinationCheck {
   funded: boolean | null;
   warning: string | null;
 }
+
+// ---- public facts for the landing page (GET /api/public/meta, anonymous) ---------
+export interface PublicMeta { coins: string[]; exchanges: string[]; support_email: string; server_ip: string }
