@@ -8,6 +8,7 @@ vi.mock("@/api/endpoints", () => ({
   userAPI: { exchangeKeys: vi.fn(), addExchangeKey: vi.fn(), verifyExchangeKey: vi.fn(), deleteExchangeKey: vi.fn(), sendVerification: vi.fn(),
              supportedExchanges: vi.fn().mockResolvedValue(["bitget"]) },
   reportsAPI: { performance: vi.fn().mockResolvedValue({ has_data: false }) },
+  publicAPI: { meta: vi.fn().mockResolvedValue({ coins: ["BTC"], exchanges: ["bitget"], support_email: "support@example.com", server_ip: "203.0.113.7" }) },
   notificationAPI: { preferences: vi.fn(), update: vi.fn() },
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
 }));
@@ -159,7 +160,8 @@ describe("Settings: Bitget guidance", () => {
     const g = screen.getByTestId("key-guidance");
     expect(g).toHaveTextContent(/Read.*Spot trade.*Leave Withdraw off/);
     expect(g).toHaveTextContent(/Whitelist our server's IP/);
-    expect(screen.getByTestId("server-ip-placeholder")).toHaveTextContent("our server IP will be shown here");
+    await waitFor(() => expect(screen.getByTestId("server-ip")).toHaveTextContent("203.0.113.7"));   // from /api/public/meta, never hardcoded
+    expect(screen.getByRole("button", { name: "Copy IP 203.0.113.7" })).toBeInTheDocument();
     expect(g).toHaveTextContent(/Bitget address book/);
   });
 });

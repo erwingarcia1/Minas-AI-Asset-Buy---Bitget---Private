@@ -6,7 +6,7 @@ import type {
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance,
   QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
- RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview, PortfolioSeries, SeriesRange } from "@/types";
+ RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview, PortfolioSeries, SeriesRange, PublicMeta } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
 
@@ -139,4 +139,9 @@ export const marketAPI = {
     data<CoinMarket>(api.get(`/v2/market/coins/${encodeURIComponent(coin)}`, { params: amountUsd ? { amount_usd: amountUsd } : undefined })),
   destination: (params: { chain: string; address: string; destination_type?: string; memo?: string }) =>
     data<DestinationCheck>(api.get("/v2/market/destination", { params })),
+};
+
+/** Anonymous facts for the landing page and setup guide (coins, exchanges, support address, server IP). */
+export const publicAPI = {
+  meta: () => data<PublicMeta>(api.get("/public/meta")),
 };

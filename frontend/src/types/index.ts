@@ -421,3 +421,6 @@ export interface DestinationCheck {
   funded: boolean | null;
   warning: string | null;
 }
+
+// ---- public facts for the landing page (GET /api/public/meta, anonymous) ---------
+export interface PublicMeta { coins: string[]; exchanges: string[]; support_email: string; server_ip: string }

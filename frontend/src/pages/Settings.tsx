@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation } from "react-router-dom";
-import { authAPI, notificationAPI, userAPI } from "@/api/endpoints";
+import { authAPI, notificationAPI, publicAPI, userAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
-import { Alert, Loading, SecretInput, StatusBadge } from "@/components/Common";
+import { Alert, CopyButton, Loading, SecretInput, StatusBadge } from "@/components/Common";
 import { NO_AUTOFILL } from "@/utils/noAutofill";
 import Integrations from "@/components/Settings/Integrations";
 import Reports from "@/components/Settings/Reports";
@@ -30,6 +30,7 @@ export default function Settings() {
   }, [location.pathname]);
   const keys = useAsync(() => userAPI.exchangeKeys());
   const supported = useAsync(() => userAPI.supportedExchanges().catch(() => ["bitget"]));
+  const meta = useAsync(() => publicAPI.meta().catch(() => null));
   const [pwMsg, setPwMsg] = useState<Msg>(null);
   const [mailMsg, setMailMsg] = useState<Msg>(null);
   const [keyMsg, setKeyMsg] = useState<Msg>(null);
@@ -113,7 +114,13 @@ export default function Settings() {
             <li><span className="font-medium">Accumulate on exchange:</span> a key with <span className="font-medium">Read</span> and <span className="font-medium">Spot trade</span> only. Leave Withdraw off.</li>
             <li><span className="font-medium">Withdraw immediately (send each buy to your wallet):</span> the key also needs <span className="font-medium">Withdraw</span>, and Bitget requires two things before it will send anything:
               <ul className="mt-1 list-disc space-y-1 pl-5">
-                <li>Whitelist our server's IP on the key. <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span></li>
+                <li>Whitelist our server's IP on the key.{" "}
+                  {meta.data?.server_ip ? (
+                    <span className="inline-flex flex-wrap items-center gap-2 align-middle">
+                      <code className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs" data-testid="server-ip">{meta.data.server_ip}</code>
+                      <CopyButton value={meta.data.server_ip} label="Copy IP" />
+                    </span>
+                  ) : <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span>}</li>
                 <li>Add your wallet address to your Bitget address book (withdrawal whitelist) first — Bitget rejects API withdrawals to unknown addresses.</li>
               </ul>
             </li>
