@@ -61,6 +61,11 @@ export default function Dashboard() {
               ))}</tbody>
             </table>
           )}
+          {overview.holdings.length > 0 && (
+            <p className="mt-3 text-xs text-slate-500" data-testid="holdings-note">
+              AutoBuy's holdings count only what it bought for you, so they won't reflect coins you move or add yourself.
+            </p>
+          )}
         </section>
         <PortfolioChart />
       </div>
