@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { post, instanceRequest, responseInterceptors } = vi.hoisted(() => ({
   post: vi.fn(), instanceRequest: vi.fn(), responseInterceptors: [] as Array<(err: unknown) => unknown>,
@@ -10,7 +10,7 @@ vi.mock("axios", () => {
     request: (...a: unknown[]) => instanceRequest(...a), post: vi.fn(), get: vi.fn(), put: vi.fn(), delete: vi.fn() };
   return { default: { create: () => instance, post: (...a: unknown[]) => post(...a), isAxiosError: () => false }, AxiosError: class {} };
 });
-import { SESSION_EXPIRED_NOTICE, bootstrapSession, csrfToken, refreshAccessToken } from "@/api/client";
+import { RATE_LIMITED_NOTICE, SESSION_EXPIRED_NOTICE, bootstrapSession, csrfToken, refreshAccessToken } from "@/api/client";
 import { ProtectedRoute, PublicOnlyRoute } from "@/components/Common/ProtectedRoute";
 import { purgeLegacyTokenStorage, useAuthStore } from "@/store/authStore";
 
@@ -131,5 +131,65 @@ describe("route guards wait for the session bootstrap", () => {
     useAuthStore.setState({ status: "authenticated", accessToken: "acc" });
     mount("/dashboard");
     expect(screen.getByText("dashboard")).toBeInTheDocument();
+  });
+});
+
+describe("refresh rate limit (429) never signs the user out", () => {
+  beforeEach(() => {
+    document.cookie = "autobuy_csrf=cookie-csrf; path=/";
+    useAuthStore.setState({ accessToken: null, csrfToken: null, user: null, status: "unknown", notice: null });
+    post.mockReset();
+    vi.useFakeTimers();
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("bootstrap retries a 429 with backoff and keeps the session once it succeeds", async () => {
+    post.mockRejectedValueOnce({ response: { status: 429, headers: {} } })
+        .mockRejectedValueOnce({ response: { status: 429, headers: { "retry-after": "2" } } })
+        .mockResolvedValue({ data: TOKENS });
+    const p = bootstrapSession();
+    await vi.advanceTimersByTimeAsync(1000);   // first backoff step
+    await vi.advanceTimersByTimeAsync(2000);   // Retry-After honoured
+    expect(await p).toBe(true);
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(useAuthStore.getState().accessToken).toBe("acc-123");
+    expect(useAuthStore.getState().notice).toBeNull();
+    expect(document.cookie).toContain("autobuy_csrf=cookie-csrf");
+  });
+
+  it("a 429 that outlasts the one-minute budget leaves the cookies in place and says so, instead of 'session expired'", async () => {
+    post.mockRejectedValue({ response: { status: 429, headers: {} } });
+    const p = bootstrapSession();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(await p).toBe(false);
+    expect(post).toHaveBeenCalledTimes(6);   // first try + 1 s, 2 s, 4 s, 8 s, 16 s
+    const s = useAuthStore.getState();
+    expect(s.status).toBe("anonymous");
+    expect(s.notice).toBe(RATE_LIMITED_NOTICE);
+    expect(document.cookie).toContain("autobuy_csrf=cookie-csrf");   // the next load simply works
+  });
+
+  it("a 401 on any request whose refresh is rate limited fails that request but keeps the session", async () => {
+    useAuthStore.getState().setTokens(TOKENS);
+    post.mockRejectedValue({ response: { status: 429, headers: { "retry-after": "60" } } });
+    const onError = responseInterceptors[0];
+    const pending = onError({ config: { url: "/user/profile", headers: {} }, response: { status: 401 } });
+    const settled = pending.then(() => "resolved", (e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(60_000);   // one Retry-After wait uses the whole budget; the second 429 is final
+    const outcome = await settled;
+    expect(post).toHaveBeenCalledTimes(2);
+    expect((outcome as { response: { status: number } }).response.status).toBe(429);
+    expect(useAuthStore.getState().accessToken).toBe("acc-123");
+    expect(useAuthStore.getState().notice).toBeNull();
+    expect(document.cookie).toContain("autobuy_csrf=cookie-csrf");
+  });
+
+  it("any other refresh failure is still a real sign-out", async () => {
+    post.mockRejectedValue({ response: { status: 401 } });
+    const p = bootstrapSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await p).toBe(false);
+    expect(useAuthStore.getState().notice).toBe(SESSION_EXPIRED_NOTICE);
+    expect(document.cookie).not.toContain("autobuy_csrf=cookie-csrf");
   });
 });
