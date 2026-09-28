@@ -69,6 +69,8 @@ describe("Landing page", () => {
     expect(screen.getAllByRole("link", { name: "Request access" })[0]).toHaveAttribute("href", "mailto:support@minastech.ca?subject=AutoBuy%20access%20request");
     expect(screen.getAllByRole("link", { name: "Log in" })[0]).toHaveAttribute("href", "/login");
     expect(screen.getByText(/three missed cycles in a row/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Profit Guard|Equity Guard|CoinTech/);
+    expect(screen.getByText(/one-time, daily, weekly or monthly/)).toBeInTheDocument();
     expect(screen.getByText(/won't reflect coins you move or add yourself/)).toBeInTheDocument();
     expect(screen.getByText(/not financial advice\. Private beta\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
@@ -83,6 +85,19 @@ describe("Landing page", () => {
     await waitFor(() => expect(screen.getByTestId("server-ip-missing")).toBeInTheDocument());
     expect(screen.getByTestId("coin-list").textContent).toContain("BTC");
     expect(screen.getAllByRole("link", { name: "Request access" })[0].getAttribute("href")).toContain("support@minastech.ca");
+  });
+});
+
+describe("legal placeholders", () => {
+  it("read as a finished beta notice, with no TODO visible to visitors", async () => {
+    const { default: Terms } = await import("@/pages/Terms");
+    const { default: Privacy } = await import("@/pages/Privacy");
+    for (const Page of [Terms, Privacy]) {
+      const { unmount } = render(<MemoryRouter><Page /></MemoryRouter>);
+      expect(screen.getByTestId("legal-todo")).toHaveTextContent(/being finalised for the private beta\. Email support with any question\./);
+      expect(document.body.textContent).not.toMatch(/TODO/);
+      unmount();
+    }
   });
 });
 

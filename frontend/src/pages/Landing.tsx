@@ -16,7 +16,6 @@ const FAQ: FaqItem[] = [
     a: "In your Bitget sub-account. Move them whenever you like. AutoBuy's holdings count only what it bought for you, so they won't reflect coins you move or add yourself." },
   { q: "Can the AutoBuy team trade on my account?",
     a: "The team cannot place new trades or change anything on your exchange. For support, an admin can re-run a purchase you created that failed." },
-  { q: "Do I need Profit Guard or Equity Guard?", a: "No. Those belong to CoinTech, a separate product." },
   { q: "Can I stop a purchase?", a: "Yes. Pause or delete it at any time." },
   { q: "Can I connect a bank account?", a: "No, only your exchange, so AutoBuy never holds your funds." },
   { q: "Which exchanges are supported?", a: "Bitget only, for now." },
@@ -77,7 +76,7 @@ export default function Landing() {
             Buy crypto on a schedule, on your own Bitget account.
           </h1>
           <p className="mt-4 max-w-2xl text-lg text-slate-600">
-            Your coins never leave your exchange. AutoBuy places the orders; Bitget holds the funds.
+            Your coins stay on Bitget, or go to your own wallet if you choose. AutoBuy places the orders; it never holds your funds.
           </p>
           <div className="mt-8"><Buttons mailto={mailto} size="!px-5 !py-2.5 text-base" /></div>
         </section>
@@ -91,8 +90,8 @@ export default function Landing() {
             <ol className="mt-8 grid gap-6 md:grid-cols-3">
               {[
                 "Connect your Bitget sub-account with a trade-only API key.",
-                "Choose the coin, amount and schedule: one-time, daily or weekly.",
-                "AutoBuy places the buy on time, and the coins land in your sub-account.",
+                "Choose the coin, amount and schedule: one-time, daily, weekly or monthly.",
+                "AutoBuy places the buy on time, and the coins land in your sub-account, or in your own wallet if you chose that.",
               ].map((step, i) => (
                 <li key={step} className="flex gap-4">
                   <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">{i + 1}</span>
