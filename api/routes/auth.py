@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from api.services.rate_limit import limiter, is_locked_out, register_failed_login, clear_failed_logins
 
 import hashlib
+import hmac
 import logging
 import secrets
 
@@ -65,6 +66,7 @@ def validate_password_strength(value: str) -> str:
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    invite_code: Optional[str] = Field(default=None, max_length=128)   # private beta
 
     _strength = field_validator("password")(validate_password_strength)
 
@@ -231,12 +233,30 @@ def _token_pair(user_id: str) -> TokenResponse:   # kept for callers/tests that 
 # Routes
 # --------------------------------------------------------------------------
 
+def _signup_gated() -> bool:
+    """Private beta: gated whenever a code is configured, and always in production."""
+    return bool(settings.signup_invite_code) or (settings.api_env or "").lower() == "production"
+
+
+def invite_message() -> str:
+    return f"Signup is by invitation. Contact {settings.support_email or 'support'}."
+
+
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def register(request: Request, response: Response, payload: RegisterRequest,
                    background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    """Register a new user with email and password."""
+    """Register a new user with email and password. During the private beta
+    the request must carry the invite code; the refusal is the same whatever
+    was wrong (missing, mismatched, or no code configured in production), so
+    it never reveals whether the code or the email was the problem."""
     email = payload.email.lower()
+    if _signup_gated():
+        expected = settings.signup_invite_code or ""
+        given = payload.invite_code or ""
+        if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+            logger.info("signup refused: invitation", extra={"reason": "no code configured" if not expected else "code mismatch"})
+            raise HTTPException(status_code=403, detail=invite_message())
     existing = await db.execute(select(User).where(User.email == email))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -245,6 +265,8 @@ async def register(request: Request, response: Response, payload: RegisterReques
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    if _signup_gated():
+        logger.info("signup_invite_used", extra={"user_id": str(user.id)})   # the code itself is never logged
     from api.services.email_campaigns import send_welcome
     background.add_task(send_welcome, user.email)
     return user

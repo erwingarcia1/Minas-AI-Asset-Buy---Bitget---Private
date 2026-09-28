@@ -24,6 +24,11 @@ from api.services.rate_limit import limiter, user_or_ip_key
 router = APIRouter()
 
 
+class SignupDay(BaseModel):
+    day: str      # YYYY-MM-DD (UTC)
+    count: int
+
+
 class PlatformStats(BaseModel):
     total_users: int
     verified_users: int
@@ -34,6 +39,7 @@ class PlatformStats(BaseModel):
     active_purchases: int
     signups_7d: int
     volume_7d_usdt: float
+    signups_by_day: List[SignupDay] = []   # last 14 days from users.created_at, so a leaked invite code shows up
 
 
 @router.get("/stats", response_model=PlatformStats)
@@ -54,9 +60,15 @@ async def platform_stats(
     totals = await history.platform_totals(db, day_ago, week_ago)
     active = (await db.execute(select(func.count(Purchase.id)).where(
         Purchase.status == "active"))).scalar_one()
+    since = (now - timedelta(days=13)).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_col = func.date(func.timezone("UTC", User.created_at))
+    per_day = dict((await db.execute(
+        select(day_col, func.count(User.id)).where(User.created_at >= since).group_by(day_col))).all())
+    days = [(since + timedelta(days=i)).date() for i in range(14)]
     return PlatformStats(
         total_users=row[0], verified_users=row[1], suspended_users=row[2],
-        signups_7d=row[3], active_purchases=active, **totals)
+        signups_7d=row[3], active_purchases=active,
+        signups_by_day=[SignupDay(day=d.isoformat(), count=int(per_day.get(d, 0))) for d in days], **totals)
 
 
 class AdminTransactionRow(UTCModel):

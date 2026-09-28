@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     # Public facts for the landing page (GET /api/public/meta): the server's egress IP customers
     # allowlist on their Bitget key. Set once per host; never hardcode it in the frontend.
     public_server_ip: str = os.getenv("PUBLIC_SERVER_IP", "")
+    # Private beta: registration needs this code (constant-time compared). Empty = open in
+    # development; in production an empty value closes registration entirely.
+    signup_invite_code: str = os.getenv("SIGNUP_INVITE_CODE", "")
     # Telegram ops alerts (api/services/telegram.py): both unset = no-op. The token is never logged or echoed.
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
