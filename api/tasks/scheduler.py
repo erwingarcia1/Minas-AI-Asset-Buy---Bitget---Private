@@ -47,6 +47,8 @@ async def _run_once() -> dict:
     # the run and a failed email never touches a purchase.
     from api.services import email_outbox
     await email_outbox.drain()
+    from api.services import telegram
+    await telegram.flush()   # one summary line per collapsed burst; never raises
     return counts
 
 

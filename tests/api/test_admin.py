@@ -41,6 +41,7 @@ ADMIN_ROUTES = [
     ("post", "/api/admin/purchases/{uid}/force-retry"),
     ("get", "/api/admin/alerts"),
     ("get", "/api/admin/emails/undelivered"),
+    ("post", "/api/admin/telegram/test"),
     ("get", "/api/admin/purchases"),
     ("get", "/api/admin/purchases/{uid}/review"),
     ("post", "/api/admin/purchases/{uid}/resolve"),

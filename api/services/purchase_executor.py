@@ -609,6 +609,8 @@ async def poll_withdrawals(db: AsyncSession, now: Optional[datetime] = None,
                     counts["confirmed"] += 1
                     await db.commit()
                     logger.info("withdrawal %s confirmed by the exchange: tx %s", wd.id, wd.tx_hash)
+                    from api.services import telegram
+                    await telegram.notify_withdrawal_confirmed(purchase, wd, settings.autobuy_dry_run)   # never raises
                 elif info.get("done"):
                     wd.status = "failed"
                     wd.error_message = f"exchange reported the withdrawal as {wd.raw_status}"[:500]

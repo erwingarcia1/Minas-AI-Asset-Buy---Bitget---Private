@@ -18,6 +18,7 @@ or webhook can never affect execution or another subscriber):
 4. Slack ops alert              – failures, and live (non dry-run) withdrawals
 5. outbound user webhooks       – ``purchase.<event>`` signed POSTs
 6. metrics                      – ``transactions_total`` counter
+7. Telegram ops alert           – every event, masked, rate limited (api/services/telegram.py)
 """
 from __future__ import annotations
 
@@ -191,3 +192,9 @@ async def _metrics(db, event: PurchaseEvent) -> None:
     if event.type in ("buy_executed", "buy_failed", "buy_needs_review"):
         label = {"buy_executed": "completed", "buy_failed": "failed", "buy_needs_review": "needs_review"}[event.type]
         transactions_total.labels(label, event.purchase.crypto_symbol).inc()
+
+
+@subscribe
+async def _telegram(db, event: PurchaseEvent) -> None:
+    from api.services import telegram
+    await telegram.on_purchase_event(event)

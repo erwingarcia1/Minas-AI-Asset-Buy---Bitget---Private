@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from api.models import Purchase, PurchaseTransaction, User
 from api.routes.user import UTCModel, get_current_user
 
 from api.routes.admin._deps import VALID_KYC, audit, logger, require_admin  # noqa: F401
+from api.services.rate_limit import limiter, user_or_ip_key
 
 router = APIRouter()
 
@@ -153,3 +154,23 @@ async def resume_scheduler(admin: User = Depends(require_admin)):
     await scheduler_state.resume()
     audit(admin, "schedulers_resumed")
 
+
+class TelegramTestResult(BaseModel):
+    configured: bool
+    sent: bool
+    error: Optional[str] = None   # Telegram's description or a network error; never the token
+
+
+@router.post("/telegram/test", response_model=TelegramTestResult)
+@limiter.limit("3/minute", key_func=user_or_ip_key)
+async def telegram_test(request: Request, response: Response, admin: User = Depends(require_admin)):
+    """Send one test message to the configured Telegram chat and report the
+    outcome, so the alert channel can be checked without a real buy."""
+    from api.services import telegram
+    if not telegram.configured():
+        audit(admin, "telegram_test", sent=False, error="not configured")
+        return TelegramTestResult(configured=False, sent=False, error="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are not both set")
+    result = await telegram.send_detailed(
+        f"🔔 {settings.app_name} test message from the admin console (admin {telegram.mask_email(admin.email)})", None, force=True)
+    audit(admin, "telegram_test", sent=result.ok, error=result.error)
+    return TelegramTestResult(configured=True, sent=result.ok, error=result.error)

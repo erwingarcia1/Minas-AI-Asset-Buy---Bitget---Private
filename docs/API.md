@@ -327,7 +327,7 @@ restarts); the scheduler sends them after each run and every minute
 or rejected email is re-scheduled with backoff (30 s, 1, 2, 4, 8 min — about
 15 minutes in total): confirmations get 4 attempts, failure and security
 emails 6. When the attempts are exhausted the message is logged at ERROR
-with recipient and template, listed at `GET /api/admin/emails/undelivered`
+with recipient and template, listed at `GET /api/admin/emails/undelivered`. `POST /api/admin/telegram/test` (admin, 3/minute) sends one Telegram test message and answers `{configured, sent, error}` (Telegram's description or a network error; never the token); Telegram alerts themselves are described in `api/services/telegram.py`
 (with the messages still retrying), recorded in the user's notification
 history as `failed`, and counted towards the `email_delivery_failures`
 admin alert (critical above `EMAIL_FAILURE_ALERT_THRESHOLD`, default 5 per
