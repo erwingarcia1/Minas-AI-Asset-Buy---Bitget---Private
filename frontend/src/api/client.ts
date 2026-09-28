@@ -40,18 +40,45 @@ api.interceptors.request.use((config) => {
 type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
 let refreshing: Promise<string> | null = null;
 
-/** Silent refresh from the httpOnly cookie. Plain axios: must not go through the interceptor. */
+export const SESSION_EXPIRED_NOTICE = "Your session expired, please sign in again.";
+export const RATE_LIMITED_NOTICE = "Too many requests from your network right now. Please wait a minute and reload; you are still signed in.";
+
+/** The refresh endpoint allows 10 calls a minute per IP, and everyone behind
+ *  one NAT shares that budget. A 429 is not an expired session: wait and try
+ *  again (Retry-After when the server sends it, else 1 s, 2 s, 4 s, 8 s, 16 s),
+ *  within a one-minute budget so the limiter's window has passed. */
+const REFRESH_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000];
+const REFRESH_RETRY_BUDGET_MS = 60_000;
+export const isRateLimited = (err: unknown): boolean => (err as { response?: { status?: number } })?.response?.status === 429;
+function retryAfterMs(err: unknown): number | null {
+  const raw = (err as { response?: { headers?: Record<string, string> } })?.response?.headers?.["retry-after"];
+  const secs = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(secs) && secs > 0 ? Math.min(secs, 60) * 1000 : null;
+}
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Silent refresh from the httpOnly cookie. Plain axios: must not go through
+ *  the interceptor. Retries a 429 with backoff; any other failure is final. */
 export async function refreshAccessToken(): Promise<string> {
   const csrf = csrfToken();
-  const { data } = await axios.post<TokenResponse>(`${API_BASE_URL}/auth/refresh`, undefined, {
-    withCredentials: true,
-    headers: csrf ? { [CSRF_HEADER]: csrf } : {},
-  });
-  useAuthStore.getState().setTokens(data);
-  return data.access_token;
+  let waited = 0;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { data } = await axios.post<TokenResponse>(`${API_BASE_URL}/auth/refresh`, undefined, {
+        withCredentials: true,
+        headers: csrf ? { [CSRF_HEADER]: csrf } : {},
+      });
+      useAuthStore.getState().setTokens(data);
+      return data.access_token;
+    } catch (err) {
+      if (!isRateLimited(err) || attempt >= REFRESH_BACKOFF_MS.length) throw err;
+      const wait = retryAfterMs(err) ?? REFRESH_BACKOFF_MS[attempt];
+      if (waited + wait > REFRESH_RETRY_BUDGET_MS) throw err;
+      waited += wait;
+      await sleep(wait);
+    }
+  }
 }
-
-export const SESSION_EXPIRED_NOTICE = "Your session expired, please sign in again.";
 
 /** Forget the readable CSRF cookie (the httpOnly refresh cookie is cleared by the API). */
 function forgetCsrfCookie(): void {
@@ -71,8 +98,12 @@ export async function bootstrapSession(): Promise<boolean> {
     refreshing = refreshing ?? refreshAccessToken();
     await refreshing;
     return true;
-  } catch {
-    if (hadSession) {
+  } catch (err) {
+    if (isRateLimited(err)) {
+      // still rate limited after the retries: the session is intact, only this load
+      // could not confirm it. Keep every cookie so the next load simply works.
+      useAuthStore.getState().logout(hadSession ? RATE_LIMITED_NOTICE : undefined);
+    } else if (hadSession) {
       forgetCsrfCookie();
       useAuthStore.getState().logout(SESSION_EXPIRED_NOTICE);
     } else {
@@ -97,8 +128,9 @@ api.interceptors.response.use(undefined, async (error: AxiosError<ApiErrorBody>)
       original._retried = true;
       original.headers.Authorization = `Bearer ${token}`;
       return api.request(original);
-    } catch {
+    } catch (refreshError) {
       refreshing = null;
+      if (isRateLimited(refreshError)) throw refreshError;   // the session stays; this request just failed with "too many requests"
     }
     forgetCsrfCookie();
     useAuthStore.getState().logout(SESSION_EXPIRED_NOTICE);
