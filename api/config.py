@@ -119,6 +119,11 @@ class Settings(BaseSettings):
 
     # Slack ops alerts (incoming webhook URL; unset = disabled)
     slack_webhook_url: str = os.getenv("SLACK_WEBHOOK_URL", "")
+    # Telegram ops alerts (api/services/telegram.py): both unset = no-op. The token is never logged or echoed.
+    telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    # At most this many Telegram messages per minute; excess is dropped and counted (compose passes "" when unset)
+    telegram_max_per_minute: int = int(os.getenv("TELEGRAM_MAX_PER_MINUTE") or "20")
 
     # Rate limiting
     rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "1") not in ("0", "false", "no")

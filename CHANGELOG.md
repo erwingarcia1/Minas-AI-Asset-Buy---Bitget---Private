@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-09-28: Telegram alerts for purchase and withdrawal events (PR #47)
+
+### Added
+
+* **Telegram ops alerts** (`api/services/telegram.py`), additional to the
+  email alert digest and Slack, never a replacement. One message per event,
+  sent after the database write: purchase completed (coin, USDT, quantity,
+  fill price, masked customer, whether it will be withdrawn), purchase failed
+  or stopped (reason, attempt), purchase parked for review (with "needs admin
+  review"), withdrawal sent, confirmed (tx id), failed, needs information.
+  Emails show two characters plus the domain, addresses the first 6 and last
+  4 characters; error reasons are scrubbed of emails and long ids; never an
+  API key, secret, token or memo. Fully non-blocking: 5 s timeout, one retry
+  on a transport error only, every path wrapped so a Telegram failure logs
+  one WARNING and cannot reach the executor or change an outcome; both
+  settings unset = silent no-op. The bot token never reaches a log line (a
+  redaction filter scrubs httpx's request-URL log). Rate limit
+  `TELEGRAM_MAX_PER_MINUTE` (default 20, excess dropped and counted); a burst
+  of identical failures (same reason) collapses into one message plus a
+  "repeated N more times in this run" summary at the end of the scheduler
+  run. Settings `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+  `TELEGRAM_MAX_PER_MINUTE` are forwarded by compose and documented in
+  `.env.example` (the env-plumbing test covers them).
+* `POST /api/admin/telegram/test` (admin only, 3/minute): sends one test
+  message and reports `configured`, `sent` and Telegram's error description,
+  never the token.
+
 ## [Unreleased] — 2026-09-25: brand palette and link previews (PR #46)
 
 ### Changed
