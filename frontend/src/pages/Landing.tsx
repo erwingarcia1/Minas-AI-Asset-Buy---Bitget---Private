@@ -54,7 +54,7 @@ export default function Landing() {
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <Link to="/" className="flex items-center gap-2 font-semibold text-brand-ink" aria-label="AutoBuy home">
-            <img src="/icon-64.png" alt="" width={28} height={28} className="h-7 w-7" data-testid="brand-mark" /> AutoBuy
+            <img src="/icon-64.png" alt="" width={28} height={28} className="h-7 w-7" data-testid="brand-mark" /><span className="hidden sm:inline">AutoBuy</span>
           </Link>
           <nav className="hidden items-center gap-5 text-sm text-slate-700 md:flex" aria-label="Page sections">
             <a className="hover:text-brand-600" href="#how-it-works">How it works</a>
@@ -62,8 +62,8 @@ export default function Landing() {
             <a className="hover:text-brand-600" href="#faq">FAQ</a>
           </nav>
           <div className="flex items-center gap-2">
-            <Link className="btn-secondary !px-3 !py-1.5" to="/login">Log in</Link>
-            <a className="btn-primary !px-3 !py-1.5" href={mailto}>Request access</a>
+            <Link className="btn-secondary whitespace-nowrap !px-3 !py-1.5" to="/login">Log in</Link>
+            <a className="btn-primary whitespace-nowrap !px-3 !py-1.5" href={mailto}>Request access</a>
           </div>
         </div>
       </header>
@@ -85,7 +85,7 @@ export default function Landing() {
         <section id="how-it-works" className="border-t border-slate-100 bg-slate-50 py-14" aria-labelledby="how-title">
           <div className="mx-auto max-w-6xl px-4">
             <h2 id="how-title" className="text-2xl font-semibold text-brand-ink">How it works</h2>
-            <div className="mt-8 rounded-xl border border-slate-200 bg-white p-4 md:p-6">
+            <div className="mt-8 overflow-x-auto rounded-xl border border-slate-200 bg-white p-4 md:p-6">
               <FlowAnimation />
             </div>
             <ol className="mt-8 grid gap-6 md:grid-cols-3">

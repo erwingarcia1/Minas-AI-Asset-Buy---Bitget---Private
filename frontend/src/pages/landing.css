@@ -1,5 +1,5 @@
 /* Landing page only (lazy chunk). Brand tokens from tailwind; the flow animation below. */
-.flow { aspect-ratio: 640 / 190; width: 100%; max-width: 720px; margin: 0 auto; }
+.flow { aspect-ratio: 640 / 190; width: 100%; min-width: 520px; max-width: 720px; margin: 0 auto; }   /* min-width keeps the labels legible on phones; the parent scrolls, the page never does */
 .flow__svg { display: block; width: 100%; height: 100%; overflow: visible; font-family: inherit; }
 .flow__rail { stroke: #cfc6d9; stroke-width: 2; }
 .flow__box { fill: #fff; stroke: #cfc6d9; stroke-width: 1.5; }
