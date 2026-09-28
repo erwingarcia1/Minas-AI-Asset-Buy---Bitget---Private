@@ -11,8 +11,8 @@ import type {
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
 
 export const authAPI = {
-  register: (email: string, password: string) =>
-    data<UserProfile>(api.post("/auth/register", { email, password })),
+  register: (email: string, password: string, inviteCode?: string) =>
+    data<UserProfile>(api.post("/auth/register", { email, password, ...(inviteCode ? { invite_code: inviteCode } : {}) })),
   login: (email: string, password: string) =>
     data<TokenResponse>(api.post("/auth/login", { email, password })),
   /** From the httpOnly cookie; the CSRF header is added here. */

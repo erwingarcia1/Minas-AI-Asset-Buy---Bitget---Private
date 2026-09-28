@@ -16,8 +16,8 @@ export function useAuth() {
     return profile;
   }, [setTokens, setUser]);
 
-  const signup = useCallback(async (email: string, password: string) => {
-    await authAPI.register(email, password);
+  const signup = useCallback(async (email: string, password: string, inviteCode?: string) => {
+    await authAPI.register(email, password, inviteCode);
     return login(email, password);
   }, [login]);
 
