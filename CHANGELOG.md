@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-09-28: public landing page, private-beta gate, ticker (PR #48)
+
+### Added
+
+* **Landing page at `/`** (lazy chunk, 15 KB / 4.7 KB gzipped; the app's chart
+  code is never loaded): header, hero with the "Private beta · by invitation"
+  badge, how-it-works with one inline-SVG loop (transform/opacity keyframes,
+  paused offscreen, static under prefers-reduced-motion, fixed aspect ratio),
+  safety, supported coins and fees, setup guide with a copy-to-clipboard
+  server IP, keyboard-accessible FAQ, final call to action, footer with
+  Terms/Privacy placeholders (`TODO(owner): legal text`), the risk line and
+  the copyright year. Signed-in visitors go straight to the dashboard; a
+  returning session waits for the silent refresh so the landing page never
+  flashes. Request access is a mailto to the support address.
+* **Private-beta ticker** on every page (`VITE_BETA_TICKER=0` removes it at
+  launch): transform-only seamless loop, brand-800 with white text (13.7:1),
+  pause on hover/focus and a visible pause/play button, static under reduced
+  motion, read once by screen readers, not dismissible.
+* **`GET /api/public/meta`** (anonymous, cacheable 5 min, 60/minute): coins,
+  exchanges, support email and the server's public IP (`PUBLIC_SERVER_IP`,
+  new setting). Settings shows that IP instead of its placeholder.
+* **Signup gate**: registration needs `SIGNUP_INVITE_CODE` whenever one is
+  configured and always in production (empty closes signup there);
+  constant-time comparison; one vague 403 for missing, wrong or unconfigured
+  code, checked before the email lookup; the code is never logged. Signup
+  asks for the code. Admin overview shows signups per day for 14 days from
+  `users.created_at` (no migration) so a leaked code is visible.
+* Dashboard: helper text under Holdings ("AutoBuy's holdings count only what
+  it bought for you…"). `robots.txt`.
+
 ## [Unreleased] — 2026-09-28: Telegram alerts for purchase and withdrawal events (PR #47)
 
 ### Added
