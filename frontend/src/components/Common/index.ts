@@ -4,3 +4,4 @@ export { ProtectedRoute, PublicOnlyRoute } from "./ProtectedRoute";
 export { Alert } from "./Alert";
 export { StatusBadge } from "./StatusBadge";
 export { default as SecretInput } from "./SecretInput";
+export { BetaTicker } from "./BetaTicker";
