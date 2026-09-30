@@ -23,7 +23,7 @@ const FAQ: FaqItem[] = [
 
 const SAFETY = [
   "AutoBuy never holds your money. Funds stay on Bitget.",
-  "Trade-only key: no withdrawal permission needed for buys kept on Bitget; sending coins to your own wallet needs Withdraw permission.",
+  "Trade-only key: buying needs no withdrawal permission. Leave Withdraw off.",
   "You restrict the key to our server's IP on Bitget, so it works from nowhere else.",
   "Keys are encrypted at rest.",
   "No bank account connection.",
@@ -76,7 +76,7 @@ export default function Landing() {
             Buy crypto on a schedule, on your own Bitget account.
           </h1>
           <p className="mt-4 max-w-2xl text-lg text-slate-600">
-            Your coins stay on Bitget, or go to your own wallet if you choose. AutoBuy places the orders; it never holds your funds.
+            Your coins stay in your Bitget sub-account. AutoBuy places the orders; it never holds your funds.
           </p>
           <div className="mt-8"><Buttons mailto={mailto} size="!px-5 !py-2.5 text-base" /></div>
         </section>
@@ -91,7 +91,7 @@ export default function Landing() {
               {[
                 "Connect your Bitget sub-account with a trade-only API key.",
                 "Choose the coin, amount and schedule: one-time, daily, weekly or monthly.",
-                "AutoBuy places the buy on time, and the coins land in your sub-account, or in your own wallet if you chose that.",
+                "AutoBuy places the buy on time, and the coins land in your sub-account.",
               ].map((step, i) => (
                 <li key={step} className="flex gap-4">
                   <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">{i + 1}</span>
@@ -132,8 +132,8 @@ export default function Landing() {
             <div>
               <h2 className="text-2xl font-semibold text-brand-ink">Fees</h2>
               <p className="mt-5 text-slate-700">
-                AutoBuy uses your Bitget account, so Bitget's own fees apply: a trading fee on each buy, taken in the coin you receive,
-                and a network fee if you withdraw to your own wallet. Minimum order sizes are set by Bitget.
+                AutoBuy uses your Bitget account, so Bitget's own fees apply: a trading fee on each buy, taken in the coin you receive.
+                Minimum order sizes are set by Bitget.
               </p>
             </div>
           </div>
