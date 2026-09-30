@@ -124,6 +124,7 @@ export default function Settings() {
                 <li>Add your wallet address to your Bitget address book (withdrawal whitelist) first — Bitget rejects API withdrawals to unknown addresses.</li>
               </ul>
             </li>
+            <li data-testid="fee-note">Fees: Bitget's trading fee applies, taken from the coin you receive. AutoBuy adds no fee of its own.</li>
             <li>Bitget reports permissions as codes. Spot → Trade is required; Margin → Trade, Wallet → Transfer, Taxation → Search and P2P → Search are recognised as not needed (a warning, nothing blocked). Any code we have not confirmed yet is treated as "withdrawal possible": use such a key only where that is intended.</li>
           </ul>
         </div>

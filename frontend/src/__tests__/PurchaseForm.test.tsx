@@ -275,3 +275,13 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     expect(screen.queryByText(/Where is this/)).toBeNull();
   });
 });
+
+describe("PurchaseForm: fee wording", () => {
+  it("states that Bitget's fee is taken from the coin received, and never a fixed percentage", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
+    vi.mocked(marketAPI.coin).mockResolvedValue(MARKET as never);
+    render(<PurchaseForm />);
+    await waitFor(() => expect(screen.getByText(/Bitget's trading fee applies, taken from the coin you receive/)).toBeInTheDocument());
+    expect(document.body.textContent).not.toMatch(/taker fee|0\.20%/);
+  });
+});

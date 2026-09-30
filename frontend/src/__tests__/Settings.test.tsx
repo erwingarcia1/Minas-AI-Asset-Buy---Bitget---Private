@@ -163,6 +163,8 @@ describe("Settings: Bitget guidance", () => {
     await waitFor(() => expect(screen.getByTestId("server-ip")).toHaveTextContent("203.0.113.7"));   // from /api/public/meta, never hardcoded
     expect(screen.getByRole("button", { name: "Copy IP 203.0.113.7" })).toBeInTheDocument();
     expect(g).toHaveTextContent(/Bitget address book/);
+    expect(screen.getByTestId("fee-note")).toHaveTextContent("Fees: Bitget's trading fee applies, taken from the coin you receive. AutoBuy adds no fee of its own.");
+    expect(g.textContent).not.toMatch(/\d+\.\d+%/);
   });
 });
 
