@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-09-30: private-beta withdraw gate (PR #50)
+
+### Changed
+
+* **Withdraw-immediately purchases are off during the private beta.** New
+  settings `WITHDRAWALS_ENABLED` (default 0) and `WITHDRAW_ALLOWED_EMAILS`
+  (comma-separated). The API refuses every path that creates or switches a
+  purchase into withdraw mode, retries a withdrawal, or re-arms a withdraw-mode
+  purchase, unless withdrawals are enabled globally or the purchase OWNER's
+  email is allowlisted (never the acting admin), with one message: "Sending
+  coins to your own wallet isn't available during the private beta. Your
+  coins stay in your Bitget sub-account." The API default `purchase_type` is
+  now `dca` (accumulate). Admin resolve gains `keep_on_exchange`: record the
+  fill, keep the coins on Bitget, switch the purchase to accumulate, so the
+  review queue never becomes unresolvable. The profile exposes
+  `withdrawals_allowed`; the web app hides the withdraw toggle (off by default
+  for everyone), "Switch to withdraw", "Retry withdrawal" and the withdraw key
+  guidance for users who are not allowed, and shows "Sending to your own
+  wallet is coming later. For now, coins stay in your Bitget sub-account."
+  Existing withdraw-mode purchases are not changed. Executor, withdrawal
+  poller and withdrawal code untouched.
+* Landing copy no longer implies wallet sending is available.
+
 ## [Unreleased] — 2026-09-28: public landing page, private-beta gate, ticker (PR #48)
 
 ### Added
