@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-09-30: fee wording (PR #51)
+
+### Changed
+
+* The purchase form no longer shows a fee percentage. It showed Bitget's
+  public tier taker rate for the pair (0.20% for BTCUSDT) while the account's
+  first live buy on 2026-09-16 was charged 0.10%, taken in the coin bought
+  (1.97e-07 BTC on 0.000197 BTC), not in USDT. The form and the Settings key
+  guidance now say: "Bitget's trading fee applies, taken from the coin you
+  receive." The landing page already said so.
+
+### Noted, no code change
+
+* The fill guard (`validate_fill`) compares the gross filled amount
+  (`baseVolume`) against cost ÷ price and does not subtract the trading fee;
+  a fee taken in the base coin is recorded separately and only the holdings
+  maths nets it out. At the current ±10% tolerance a 0.1–0.2% fee cannot
+  trip the guard, so this is acceptable; it is not fee-aware and would need
+  revisiting if the tolerance were ever tightened below about 1%.
+
 ## [Unreleased] — 2026-09-28: public landing page, private-beta gate, ticker (PR #48)
 
 ### Added
