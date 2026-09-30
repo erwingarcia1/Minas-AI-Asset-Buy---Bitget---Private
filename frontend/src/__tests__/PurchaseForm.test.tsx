@@ -296,6 +296,8 @@ describe("PurchaseForm: private beta, withdrawals not allowed", () => {
     await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
     expect(screen.queryByLabelText(/Withdraw immediately/)).toBeNull();
     expect(screen.getByTestId("withdraw-unavailable")).toHaveTextContent("Sending to your own wallet is coming later. For now, coins stay in your Bitget sub-account.");
+    expect(screen.getByText(/Coins stay in your Bitget sub-account\./)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/sent to your wallet right away|add one later to switch/);
     await waitFor(() => expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
     await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());

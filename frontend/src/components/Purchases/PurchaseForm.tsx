@@ -157,7 +157,11 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
     <form onSubmit={submit} className="card space-y-4" aria-label="Create purchase" noValidate>
       <div>
         <h2 className="text-lg font-semibold">Create purchase</h2>
-        <p className="mt-1 text-sm text-slate-500">Buys on your exchange account on a schedule. Choose whether each buy is sent to your wallet right away or held on the exchange.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {withdrawAllowed
+            ? "Buys on your exchange account on a schedule. Choose whether each buy is sent to your wallet right away or held on the exchange."
+            : "Buys on your exchange account on a schedule. Coins stay in your Bitget sub-account."}
+        </p>
       </div>
       {success && <Alert kind="success">{success}</Alert>}
       {error && <Alert kind="error">{error}</Alert>}
@@ -197,7 +201,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
 
         <div className="sm:col-span-2 lg:col-span-3">
           <label className="label" htmlFor="pf-address">
-            Wallet address {withdraw ? <span className="text-red-600">*</span> : <span className="font-normal text-slate-400">(optional — accumulate never withdraws; add one later to switch)</span>}
+            Wallet address {withdraw ? <span className="text-red-600">*</span> : <span className="font-normal text-slate-400">{withdrawAllowed ? "(optional — accumulate never withdraws; add one later to switch)" : "(optional)"}</span>}
           </label>
           <div className="relative">
             <input id="pf-address" className={`input pr-10 font-mono ${verdict ? (verdict.ok ? "border-green-500 focus:ring-green-500" : "border-red-500 focus:ring-red-500") : addressMissing ? "border-red-500" : ""}`}
