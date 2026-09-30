@@ -59,7 +59,7 @@ class PurchaseCreateRequest(BaseModel):
     exchange_account_id: UUID
     # autobuy (default): buy, then withdraw to wallet_address right away
     # dca:               buy and accumulate on the exchange; the wallet is kept for later withdrawals
-    purchase_type: str = "autobuy"
+    purchase_type: str = "dca"   # accumulate by default (private beta); "autobuy" = withdraw immediately, gated
     # Deprecated alias for purchase_type (true = autobuy, false = dca); must agree with it when both are sent.
     withdraw_immediately: Optional[bool] = None
     travel_rule_info: Optional[TravelRuleInfo] = None
