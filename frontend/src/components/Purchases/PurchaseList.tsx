@@ -7,6 +7,7 @@ import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/t
 import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
 import { capitalize, fmtAmount, fmtDate } from "@/utils/format";
 import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
+import { useAuthStore } from "@/store/authStore";
 
 const FREQ: Record<string, string> = { one_time: "One-time", daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 /** Purchases parked after a filled buy whose withdrawal did not go through: the coins sit on the exchange. */
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export default function PurchaseList({ purchases, onChanged, onError }: Props) {
+  const withdrawAllowed = useAuthStore((st) => st.user?.withdrawals_allowed === true);   // private beta: hides the withdraw actions (server-enforced too)
   const [open, setOpen] = useState<AutoBuyPurchase | null>(null);
   const [switching, setSwitching] = useState<AutoBuyPurchase | null>(null);
   const apiLacksModes = purchases.length > 0 && purchases.every((p) => purchaseMode(p) === null);
@@ -71,10 +73,10 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                   {p.status === "active" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "paused" }))}>Pause</button>}
                   {p.status === "paused" && !p.exchange_key_removed && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
                   {p.status === "paused" && p.exchange_key_removed && <button className="btn-secondary !py-1" disabled title="Exchange key removed: add a key and create a new purchase">Resume</button>}
-                  {["withdrawal_failed", "needs_info"].includes(p.status) && !p.exchange_key_removed && (
+                  {withdrawAllowed && ["withdrawal_failed", "needs_info"].includes(p.status) && !p.exchange_key_removed && (
                     <button className="btn-primary !py-1" onClick={() => { if (confirm(`Send the ${p.crypto_symbol} already bought to ${p.wallet_address ?? "the wallet on file"} on ${p.blockchain_network} again? No new buy is placed.`)) void act(() => autoBuyAPI.retryWithdrawal(p.id)); }}>Retry withdrawal</button>
                   )}
-                  {["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
+                  {withdrawAllowed && ["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
                     <button className="btn-secondary !py-1" onClick={() => setSwitching(p)}>Switch to withdraw</button>
                   )}
                   {["active", "paused"].includes(p.status) && purchaseMode(p) === "autobuy" && (

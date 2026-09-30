@@ -129,8 +129,8 @@ export const adminAPI = {
   purchases: (status = "needs_review") => data<{ items: AdminPurchaseRow[]; total: number }>(api.get("/admin/purchases", { params: { status } })),
   /** Live exchange lookup of each parked attempt (read-only). */
   reviewPurchase: (id: string) => data<PurchaseReview>(api.get(`/admin/purchases/${id}/review`)),
-  resolvePurchase: (id: string, action: "record_fill" | "mark_not_sent" | "cancel", note: string, attempt_id?: string) =>
-    data<AdminPurchaseRow>(api.post(`/admin/purchases/${id}/resolve`, { action, note, attempt_id })),
+  resolvePurchase: (id: string, action: "record_fill" | "mark_not_sent" | "cancel", note: string, attempt_id?: string, keepOnExchange?: boolean) =>
+    data<AdminPurchaseRow>(api.post(`/admin/purchases/${id}/resolve`, { action, note, attempt_id, ...(keepOnExchange ? { keep_on_exchange: true } : {}) })),
 };
 
 /** Bitget market data for the purchase form: pair status and withdrawal chains with fee/minimum. */

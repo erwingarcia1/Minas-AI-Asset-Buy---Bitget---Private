@@ -43,6 +43,7 @@ export default function Settings() {
   const [verifying, setVerifying] = useState<string | null>(null);   // must sit above the early return: hooks run in the same order on every render
 
   if (!user) return <Loading />;
+  const withdrawAllowed = user.withdrawals_allowed === true;   // private beta: withdraw guidance only for allowlisted users
 
   async function changePassword(e: FormEvent) {
     e.preventDefault();
@@ -112,6 +113,7 @@ export default function Settings() {
           <p className="font-medium">Which Bitget key permissions do I need?</p>
           <ul className="mt-1 list-disc space-y-1 pl-5">
             <li><span className="font-medium">Accumulate on exchange:</span> a key with <span className="font-medium">Read</span> and <span className="font-medium">Spot trade</span> only. Leave Withdraw off.</li>
+            {withdrawAllowed ? (
             <li><span className="font-medium">Withdraw immediately (send each buy to your wallet):</span> the key also needs <span className="font-medium">Withdraw</span>, and Bitget requires two things before it will send anything:
               <ul className="mt-1 list-disc space-y-1 pl-5">
                 <li>Whitelist our server's IP on the key.{" "}
@@ -124,8 +126,20 @@ export default function Settings() {
                 <li>Add your wallet address to your Bitget address book (withdrawal whitelist) first — Bitget rejects API withdrawals to unknown addresses.</li>
               </ul>
             </li>
+            ) : (
+            <li>Whitelist our server's IP on the key.{" "}
+                  {meta.data?.server_ip ? (
+                    <span className="inline-flex flex-wrap items-center gap-2 align-middle">
+                      <code className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs" data-testid="server-ip">{meta.data.server_ip}</code>
+                      <CopyButton value={meta.data.server_ip} label="Copy IP" />
+                    </span>
+                  ) : <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span>}</li>
+            )}
             <li>Bitget reports permissions as codes. Spot → Trade is required; Margin → Trade, Wallet → Transfer, Taxation → Search and P2P → Search are recognised as not needed (a warning, nothing blocked). Any code we have not confirmed yet is treated as "withdrawal possible": use such a key only where that is intended.</li>
           </ul>
+          {!withdrawAllowed && (
+            <p className="mt-2 text-slate-600" data-testid="withdraw-unavailable">Sending to your own wallet is coming later. For now, coins stay in your Bitget sub-account.</p>
+          )}
         </div>
         {keys.loading ? <Loading /> : keys.error ? <Alert kind="error">{keys.error}</Alert> : (
           <ul className="divide-y divide-slate-100 text-sm">
