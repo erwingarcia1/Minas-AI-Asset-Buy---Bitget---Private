@@ -74,6 +74,10 @@ class Purchase(Base):
     failure_count = Column(Integer, nullable=False, default=0)  # consecutive failed attempts
     last_error = Column(String(500), nullable=True)
     next_execution = Column(DateTime(timezone=True), nullable=True)
+    # pre-buy low-balance alert (migration 026): the run the last warning was for, and when it
+    # was sent; both NULL when nothing is outstanding. The banner shows while alerted_for == next_execution.
+    low_balance_alerted_for = Column(DateTime(timezone=True), nullable=True)
+    low_balance_alerted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
