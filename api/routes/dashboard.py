@@ -67,11 +67,19 @@ class DashboardResponse(BaseModel):
     monthly_average_usdt: float
 
 
+class LowBalanceNotice(UTCModel):
+    purchase_id: UUID
+    crypto_symbol: str
+    amount_usd: float
+    next_execution: datetime
+
+
 class QuickStats(BaseModel):
     total_invested_usdt: float
     transaction_count: int
     active_purchases: int
     kyc_status: str
+    low_balance: List[LowBalanceNotice] = []   # active purchases with an outstanding low-balance warning
 
 
 class TimelinePoint(BaseModel):
@@ -180,11 +188,17 @@ async def quick_stats(
             )
         )
     ).scalar_one()
+    from api.services.low_balance import low_balance_outstanding
+    flagged = (await db.execute(select(Purchase).where(
+        Purchase.user_id == current_user.id, Purchase.status == "active",
+        Purchase.low_balance_alerted_for.is_not(None)).order_by(Purchase.next_execution.asc()))).scalars().all()
     return QuickStats(
         total_invested_usdt=round(float(total_invested), 8),
         transaction_count=tx_count,
         active_purchases=active_count,
         kyc_status=current_user.kyc_status,
+        low_balance=[LowBalanceNotice(purchase_id=p.id, crypto_symbol=p.crypto_symbol, amount_usd=p.amount_usd,
+                                      next_execution=p.next_execution) for p in flagged if low_balance_outstanding(p)],
     )
 
 

@@ -21,7 +21,7 @@ _env = Environment(
 )
 
 TEMPLATES = {"welcome", "first_purchase", "purchase_summary",
-             "kyc_approved", "kyc_rejected", "downtime_alert", "milestone"}
+             "kyc_approved", "kyc_rejected", "downtime_alert", "milestone", "low_balance"}
 
 
 def render(template: str, **context) -> tuple:
