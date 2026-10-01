@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PurchaseList from "@/components/Purchases/PurchaseList";
+import { useAuthStore } from "@/store/authStore";
 import type { AutoBuyPurchase, AutoBuyTransaction } from "@/types";
 
 vi.mock("@/api/endpoints", () => ({
@@ -26,6 +27,7 @@ const wd: AutoBuyTransaction = { id: "t2", purchase_id: "p1", exchange_tx_id: "W
 describe("PurchaseList: parked purchases and withdrawal rows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: true } } as never);
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(autoBuyAPI.transactions).mockResolvedValue([wd, buy] as never);
     vi.mocked(autoBuyAPI.retryWithdrawal).mockResolvedValue({ purchase_id: "p1", status: "active", next_execution: "2026-09-18T10:00:00Z", withdrawal: wd } as never);
@@ -84,5 +86,16 @@ describe("PurchaseList: parked purchases and withdrawal rows", () => {
     expect(screen.getByText(/tx 0xabcdef0123456789/)).toBeInTheDocument();
     expect(screen.getByText("0.00003 BTC")).toBeInTheDocument();      // withdrawal fee
     expect(screen.getByText("0.0000015 BTC")).toBeInTheDocument();    // trading fee on the buy
+  });
+});
+
+describe("PurchaseList: private beta, withdrawals not allowed", () => {
+  it("offers neither 'Switch to withdraw' nor 'Retry withdrawal', but keeps pause/delete", () => {
+    useAuthStore.setState({ user: { id: "u2", email: "tester@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: false } } as never);
+    render(<PurchaseList purchases={[{ ...base, status: "active", purchase_type: "dca" }, { ...base, id: "p2" }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Switch to withdraw" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry withdrawal" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Delete" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
   });
 });

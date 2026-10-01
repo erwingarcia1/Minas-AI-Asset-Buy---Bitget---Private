@@ -161,3 +161,27 @@ describe("Admin overview: signups per day", () => {
     expect(strip).toHaveTextContent("leaked invite code");
   });
 });
+
+describe("Admin: review queue, keep coins on Bitget", () => {
+  it("offers 'Record fill, keep on Bitget' only for withdraw-mode purchases and sends keep_on_exchange", async () => {
+    const parked = { id: "pp1", user_id: "u1", email: "maria@example.com", crypto_symbol: "BTC", amount_usd: 50, frequency: "weekly", purchase_type: "autobuy",
+      status: "needs_review", failure_count: 0, last_error: "order ORD-9: fill reports amount 0", next_execution: null, updated_at: "2026-09-14T10:00:00Z",
+      parked_attempts: [{ id: "t1", client_oid: "ab-1", order_id: "ORD-9", status: "needs_review", error_message: "fill reports amount 0", created_at: "2026-09-14T10:00:00Z", executed_at: null }] };
+    vi.mocked(adminAPI.stats).mockResolvedValue(STATS as never);
+    vi.mocked(adminAPI.purchases).mockResolvedValue({ items: [parked], total: 1 } as never);
+    vi.mocked(adminAPI.reviewPurchase).mockResolvedValue({ purchase: parked, actions: ["record_fill", "mark_not_sent", "cancel"],
+      lookups: [{ attempt_id: "t1", client_oid: "ab-1", state: "filled", fill: { amount_crypto: 0.001, cost_usdt: 50, exchange_rate: 50000, raw_status: "filled" }, verdict: "ok", error: null }] } as never);
+    vi.mocked(adminAPI.resolvePurchase).mockResolvedValue({ ...parked, status: "active", purchase_type: "dca" } as never);
+    render(<MemoryRouter initialEntries={["/admin"]}><Routes><Route path="/admin" element={<Admin />} /></Routes></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("admin-overview")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    await screen.findByTestId("review-row");
+    fireEvent.click(screen.getByRole("button", { name: "Check exchange" }));
+    const keep = await screen.findByRole("button", { name: "Record fill, keep on Bitget" });
+    expect(keep).toHaveAttribute("title", expect.stringMatching(/no withdrawal.*switches to accumulate/));
+    fireEvent.change(screen.getByLabelText(/What did you check/), { target: { value: "Bitget order history shows ORD-9 filled" } });
+    fireEvent.click(keep);
+    await waitFor(() => expect(adminAPI.resolvePurchase).toHaveBeenCalledWith("pp1", "record_fill", "Bitget order history shows ORD-9 filled", undefined, true));
+    expect(await screen.findByText(/resolved: now active/)).toBeInTheDocument();
+  });
+});

@@ -12,7 +12,7 @@ vi.mock("@/api/endpoints", () => ({
   notificationAPI: { preferences: vi.fn(), update: vi.fn() },
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
 }));
-const authUser: Record<string, unknown> = { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z" };
+const authUser: Record<string, unknown> = { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: true };
 let currentUser: Record<string, unknown> | null = authUser;   // null = session still bootstrapping (a direct load of /settings)
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: currentUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
 import { notificationAPI, userAPI } from "@/api/endpoints";
@@ -165,6 +165,22 @@ describe("Settings: Bitget guidance", () => {
     expect(g).toHaveTextContent(/Bitget address book/);
     expect(screen.getByTestId("fee-note")).toHaveTextContent("Fees: Bitget's trading fee applies, taken from the coin you receive. AutoBuy adds no fee of its own.");
     expect(g.textContent).not.toMatch(/\d+\.\d+%/);
+  });
+});
+
+describe("Settings: private beta, withdrawals not allowed", () => {
+  it("drops the withdraw guidance, keeps the IP whitelist step, and shows the beta line", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    authUser.withdrawals_allowed = false;   // the mocked useAuth reads this object
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Exchange API keys");
+    const g = screen.getByTestId("key-guidance");
+    expect(g).toHaveTextContent(/Read.*Spot trade.*Leave Withdraw off/);
+    expect(g).not.toHaveTextContent(/Withdraw immediately/);
+    expect(g).not.toHaveTextContent(/Bitget address book/);
+    expect(g).toHaveTextContent(/Whitelist our server's IP/);
+    expect(screen.getByTestId("withdraw-unavailable")).toHaveTextContent("Sending to your own wallet is coming later. For now, coins stay in your Bitget sub-account.");
+    authUser.withdrawals_allowed = true;
   });
 });
 
