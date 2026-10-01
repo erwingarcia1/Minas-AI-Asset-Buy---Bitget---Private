@@ -56,6 +56,20 @@ describe("PurchaseList: parked purchases and withdrawal rows", () => {
     expect(screen.getByTestId("purchase-venue").textContent).not.toMatch(/BTC|ERC20/);
   });
 
+  it("private beta: a paused withdraw-mode purchase offers Switch to accumulate, not Resume, to users who are not allowed", () => {
+    useAuthStore.setState({ user: { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: false } } as never);
+    render(<PurchaseList purchases={[{ ...base, status: "paused", last_error: null },
+      { ...base, id: "d1", purchase_type: "dca", withdraw_immediately: false, status: "paused", blockchain_network: null, wallet_address: null, last_error: null }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getAllByRole("button", { name: "Resume" })).toHaveLength(1);   // only the accumulate purchase
+    expect(screen.getByRole("button", { name: "Switch to accumulate" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Switch to withdraw" })).toBeNull();
+  });
+
+  it("an allowed user still gets Resume on a paused withdraw-mode purchase", () => {
+    render(<PurchaseList purchases={[{ ...base, status: "paused", last_error: null }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+  });
+
   it("says when the exchange key was removed and does not offer to resume", () => {
     render(<PurchaseList purchases={[{ ...base, status: "paused", exchange: null, exchange_account_id: null, exchange_key_removed: true,
       last_error: "Exchange key removed. Add an exchange key and create a new purchase." }]} onChanged={vi.fn()} onError={vi.fn()} />);

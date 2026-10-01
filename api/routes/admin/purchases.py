@@ -198,6 +198,8 @@ async def resolve_purchase(purchase_id: UUID, payload: ResolvePurchase, admin: U
         if look is None or look.state not in ("not_found", "cancelled"):
             raise HTTPException(status_code=409, detail=f"the exchange reports the order as {look.state if look else 'unknown'}"
                                                         f"{': ' + look.error if look and look.error else ''}; only NOT FOUND or CANCELLED can be marked not sent")
+        if p.purchase_type == "autobuy":
+            withdraw_gate.require_owner_allowed_for_admin(p.user)   # making it due again would buy AND withdraw
         tx.status = "failed"
         tx.raw_status = look.state
         tx.error_message = f"{tx.error_message or ''} [admin: not sent ({look.state}) — {payload.note}]"[:500]

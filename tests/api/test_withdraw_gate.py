@@ -165,3 +165,82 @@ async def test_existing_accumulate_purchases_are_unaffected_by_the_gate(db, user
         assert r.status_code == 200 and r.json()["status"] == "paused"
         r = await c.put(f"/api/v2/purchases/{p.id}", headers=auth(user), json={"status": "active"})
         assert r.status_code == 200 and r.json()["status"] == "active"
+
+
+# --- paths that return a purchase to the scheduler (found after #50 shipped) ----------------
+
+async def test_resume_of_a_paused_withdraw_mode_purchase_is_refused_until_switched_to_accumulate(db, user, bitget_key, gated):
+    p = await make_purchase(db, user, bitget_key, purchase_type="autobuy", status="paused")
+    q = await make_purchase(db, user, bitget_key, purchase_type="dca", status="paused")
+    async with api() as c:
+        r = await c.put(f"/api/v2/purchases/{p.id}", headers=auth(user), json={"status": "active"})
+        assert r.status_code == 403
+        assert r.json()["detail"]["details"]["message"] == f"{MSG} Switch this purchase to accumulate first, then resume it."
+        assert (await reload(db, p.id)).status == "paused", "nothing changed"
+        r = await c.put(f"/api/v2/purchases/{q.id}", headers=auth(user), json={"status": "active"})
+        assert r.status_code == 200 and r.json()["status"] == "active", "an accumulate purchase resumes as before"
+        # switching to accumulate and resuming in one call is allowed: the switch is applied first
+        r = await c.put(f"/api/v2/purchases/{p.id}", headers=auth(user), json={"purchase_type": "dca", "status": "active"})
+        assert r.status_code == 200 and r.json()["status"] == "active" and r.json()["purchase_type"] == "dca"
+
+
+async def test_admin_mark_not_sent_is_judged_by_the_owner(db, user, bitget_key, admin, gated, monkeypatch):
+    from api.routes.admin import purchases as admin_routes
+    p = await park(db, user, bitget_key, "autobuy")
+    monkeypatch.setattr(admin_routes, "_gateway", lambda: FakeGateway(lookup_state="not_found"))
+    H = auth(admin)
+    async with api() as c:
+        r = await c.post(f"/api/admin/purchases/{p.id}/resolve", headers=H, json={"action": "mark_not_sent", "note": "order never reached Bitget"})
+        assert r.status_code == 403 and "owner isn't allowed withdrawals" in r.json()["detail"]["details"]["message"]
+        assert (await reload(db, p.id)).status == "needs_review", "refused = nothing changed"
+        monkeypatch.setattr(settings, "withdraw_allowed_emails_csv", user.email)
+        r = await c.post(f"/api/admin/purchases/{p.id}/resolve", headers=H, json={"action": "mark_not_sent", "note": "order never reached Bitget"})
+        assert r.status_code == 200 and r.json()["status"] == "active", "allowed once the OWNER is allowlisted"
+
+
+async def test_admin_unsuspend_refuses_or_pauses_active_withdraw_mode_purchases(db, user, bitget_key, admin, gated):
+    p = await make_purchase(db, user, bitget_key, purchase_type="autobuy", status="active")
+    q = await make_purchase(db, user, bitget_key, purchase_type="dca", status="active")
+    user.suspended = True; await db.commit()
+    H = auth(admin)
+    async with api() as c:
+        r = await c.post(f"/api/admin/users/{user.id}/unsuspend", headers=H)
+        assert r.status_code == 403 and r.json()["detail"]["details"]["purchase_ids"] == [str(p.id)]
+        assert "reactivating it would let them run" in r.json()["detail"]["details"]["message"]
+        assert (await db.execute(select(User.suspended).where(User.id == user.id))).scalar_one() is True, "still suspended"
+        r = await c.post(f"/api/admin/users/{user.id}/unsuspend", headers=H, json={"pause_withdraw_mode": True})
+        assert r.status_code == 204
+    p2, q2 = await reload(db, p.id), await reload(db, q.id)
+    assert p2.status == "paused" and "Switch this purchase to accumulate first" in p2.last_error
+    assert q2.status == "active", "the accumulate purchase is untouched"
+    assert (await db.execute(select(User.suspended).where(User.id == user.id).execution_options(populate_existing=True))).scalar_one() is False
+
+
+async def test_admin_kyc_override_to_verified_refused_while_active_withdraw_mode_purchases_exist(db, user, bitget_key, admin, gated):
+    p = await make_purchase(db, user, bitget_key, purchase_type="autobuy", status="active")
+    user.kyc_status = "pending"; await db.commit()
+    H = auth(admin)
+    async with api() as c:
+        r = await c.post(f"/api/admin/users/{user.id}/kyc-override", headers=H, json={"status": "verified", "note": "documents checked by hand"})
+        assert r.status_code == 403 and r.json()["detail"]["details"]["purchase_ids"] == [str(p.id)]
+        assert (await db.execute(select(User.kyc_status).where(User.id == user.id))).scalar_one() == "pending"
+        r = await c.post(f"/api/admin/users/{user.id}/kyc-override", headers=H, json={"status": "rejected", "note": "documents checked by hand"})
+        assert r.status_code == 204, "a decision that does not make the owner eligible is not gated"
+        p.status = "paused"; await db.commit()
+        r = await c.post(f"/api/admin/users/{user.id}/kyc-override", headers=H, json={"status": "verified", "note": "documents checked by hand"})
+        assert r.status_code == 204, "no ACTIVE withdraw-mode purchase left: allowed"
+
+
+async def test_key_reverify_refused_while_the_key_has_active_withdraw_mode_purchases(db, user, bitget_key, gated, monkeypatch):
+    from api.services import key_verification
+    called = []
+    async def fake_verify(db_, key):
+        called.append(key.id); raise AssertionError("the exchange must not be called")
+    monkeypatch.setattr(key_verification, "verify_api_key", fake_verify)
+    p = await make_purchase(db, user, bitget_key, purchase_type="autobuy", status="active")
+    bitget_key.verified = False; await db.commit()
+    async with api() as c:
+        r = await c.post(f"/api/exchange/keys/{bitget_key.id}/verify", headers=auth(user))
+    assert r.status_code == 403 and r.json()["detail"]["details"]["purchase_ids"] == [str(p.id)]
+    assert r.json()["detail"]["details"]["message"] == f"{MSG} Switch your withdraw-mode purchases to accumulate first."
+    assert called == [], "refused before any exchange call"

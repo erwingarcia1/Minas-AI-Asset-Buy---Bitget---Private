@@ -71,7 +71,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                 <td className="space-x-2 whitespace-nowrap px-4 py-2 text-right">
                   <button className="btn-secondary !py-1" onClick={() => setOpen(open?.id === p.id ? null : p)}>{open?.id === p.id ? "Hide" : "Transactions"}</button>
                   {p.status === "active" && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "paused" }))}>Pause</button>}
-                  {p.status === "paused" && !p.exchange_key_removed && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
+                  {p.status === "paused" && !p.exchange_key_removed && (withdrawAllowed || purchaseMode(p) !== "autobuy") && <button className="btn-secondary !py-1" onClick={() => void act(() => autoBuyAPI.update(p.id, { status: "active" }))}>Resume</button>}
                   {p.status === "paused" && p.exchange_key_removed && <button className="btn-secondary !py-1" disabled title="Exchange key removed: add a key and create a new purchase">Resume</button>}
                   {withdrawAllowed && ["withdrawal_failed", "needs_info"].includes(p.status) && !p.exchange_key_removed && (
                     <button className="btn-primary !py-1" onClick={() => { if (confirm(`Send the ${p.crypto_symbol} already bought to ${p.wallet_address ?? "the wallet on file"} on ${p.blockchain_network} again? No new buy is placed.`)) void act(() => autoBuyAPI.retryWithdrawal(p.id)); }}>Retry withdrawal</button>

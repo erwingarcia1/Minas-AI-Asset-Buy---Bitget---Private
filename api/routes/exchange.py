@@ -228,6 +228,10 @@ async def verify_key(
     key = result.scalar_one_or_none()
     if key is None:
         raise HTTPException(status_code=404, detail="API key not found")
+    if not key.verified:
+        # private beta: a verified key lets this key's active withdraw-mode purchases run again
+        from api.services import withdraw_gate
+        await withdraw_gate.require_no_active_withdraw_mode(db, current_user, key_id=key.id)
 
     outcome = await verify_api_key(db, key)
     await db.refresh(key)
