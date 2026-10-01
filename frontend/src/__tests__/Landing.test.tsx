@@ -68,6 +68,11 @@ describe("Landing page", () => {
     expect(screen.getByTestId("coin-list").textContent).toContain("XLM");
     expect(screen.getAllByRole("link", { name: "Request access" })[0]).toHaveAttribute("href", "mailto:support@minastech.ca?subject=AutoBuy%20access%20request");
     expect(screen.getAllByRole("link", { name: "Log in" })[0]).toHaveAttribute("href", "/login");
+    const orEmail = screen.getAllByTestId("or-email");
+    expect(orEmail).toHaveLength(3);   // header, hero, final call to action
+    for (const el of orEmail) { expect(el).toHaveTextContent("or email support@minastech.ca"); expect(el.querySelector("a")).toHaveAttribute("href", "mailto:support@minastech.ca"); }
+    expect(screen.getByTestId("flow-wide")).toBeInTheDocument();
+    expect(screen.getByTestId("flow-tall")).toBeInTheDocument();
     expect(screen.getByText(/three missed cycles in a row/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Profit Guard|Equity Guard|CoinTech/);
     expect(screen.getByText(/one-time, daily, weekly or monthly/)).toBeInTheDocument();
