@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PurchaseForm, { validateAmountUsd } from "@/components/Purchases/PurchaseForm";
+import { useAuthStore } from "@/store/authStore";
 
 vi.mock("@/api/endpoints", () => ({
   autoBuyAPI: { create: vi.fn() },
@@ -29,6 +30,7 @@ const CREATED = { purchase_id: "p1", status: "active", next_execution: null };
 
 describe("unified purchase form (Auto-Buy / DCA)", () => {
   beforeEach(() => {
+  useAuthStore.setState({ user: { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: true } } as never);   // the withdraw toggle exists only for allowlisted users; default off
     vi.clearAllMocks();
     vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
     vi.mocked(autoBuyAPI.create).mockResolvedValue(CREATED as never);
@@ -41,12 +43,14 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     vi.mocked(marketAPI.coin).mockResolvedValue(MARKET_XRP as never);
     render(<PurchaseForm />);
     await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));   // these flows were written for withdraw mode; it is opt-in now
     fireEvent.change(screen.getByLabelText("Crypto"), { target: { value: "XRP" } });
     await waitFor(() => expect(screen.getByTestId("chain-summary")).toHaveTextContent(/fee 0.2 XRP/), { timeout: 3000 });
   }
 
   async function ready() {
     await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));   // withdraw mode is opt-in now
     await waitFor(() => expect(screen.getByTestId("chain-summary")).toHaveTextContent(/fee 0.00003 BTC/), { timeout: 3000 });
   }
 
@@ -61,7 +65,7 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
 
   it("accumulate: $5 XRP is accepted, $0.50 is stopped by Bitget's live order minimum, never a $10 floor", async () => {
     await readyXrp();
-    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));   // accumulate
+    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));   // back to accumulate
     fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "5" } });
     expect(screen.queryByText(/Minimum is 10/)).toBeNull();
     expect(screen.getByText(/No minimum beyond Bitget's 1 USDT order minimum/)).toBeInTheDocument();
@@ -104,14 +108,14 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/Purchase created \(autobuy\)/);
   });
 
-  it("unticking 'Withdraw immediately' submits DCA mode without a wallet address", async () => {
+  it("the default (toggle off) submits DCA mode without a wallet address", async () => {
     render(<PurchaseForm />);
-    await ready();
-    fireEvent.click(screen.getByLabelText(/Withdraw immediately/));
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    expect((screen.getByLabelText(/Withdraw immediately/) as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText(/Accumulate on exchange \(DCA\)/)).toBeInTheDocument();
     expect(screen.getByText(/optional/)).toBeInTheDocument();
-    // no address at all: allowed in accumulate mode
-    expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled();
+    // no address at all: allowed in accumulate mode (once the market data has loaded)
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
     await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
     const body = vi.mocked(autoBuyAPI.create).mock.calls[0][0];
@@ -179,6 +183,7 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     vi.mocked(marketAPI.coin).mockRejectedValue({ response: { status: 503, data: { detail: { error: "exchange_data_unavailable",
       details: { message: "Bitget market data unavailable for bitget:market:symbol:BTCUSDT: 40034" } } } } });
     render(<PurchaseForm />);
+    fireEvent.click(await screen.findByLabelText(/Withdraw immediately/));   // in withdraw mode the failure is an error, not a warning
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Bitget market data is temporarily unavailable. Please try again in a minute.");
     expect(alert.textContent).not.toMatch(/bitget:market|40034/);
@@ -198,6 +203,7 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
   it("blocks withdraw purchases when Bitget chain data is unavailable", async () => {
     vi.mocked(marketAPI.coin).mockRejectedValue(new Error("503"));
     render(<PurchaseForm />);
+    fireEvent.click(await screen.findByLabelText(/Withdraw immediately/));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/temporarily unavailable/));
     fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
     expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeDisabled();
@@ -273,5 +279,40 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     await ready();
     fireEvent.change(screen.getByLabelText(/Wallet address/), { target: { value: BTC } });
     expect(screen.queryByText(/Where is this/)).toBeNull();
+  });
+});
+
+describe("PurchaseForm: private beta, withdrawals not allowed", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useAuthStore.setState({ user: { id: "u2", email: "tester@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: false } } as never);
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
+    vi.mocked(autoBuyAPI.create).mockResolvedValue(CREATED as never);
+    vi.mocked(marketAPI.coin).mockResolvedValue(MARKET as never);
+  });
+
+  it("hides the withdraw toggle, shows the beta line, and creates accumulate purchases", async () => {
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    expect(screen.queryByLabelText(/Withdraw immediately/)).toBeNull();
+    expect(screen.getByTestId("withdraw-unavailable")).toHaveTextContent("Sending to your own wallet is coming later. For now, coins stay in your Bitget sub-account.");
+    expect(screen.getByText(/Coins stay in your Bitget sub-account\./)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/sent to your wallet right away|add one later to switch/);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
+    const body = vi.mocked(autoBuyAPI.create).mock.calls[0][0];
+    expect(body.purchase_type).toBe("dca");
+    expect(body.withdraw_immediately).toBe(false);
+  });
+});
+
+describe("PurchaseForm: fee wording", () => {
+  it("states that Bitget's fee is taken from the coin received, and never a fixed percentage", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
+    vi.mocked(marketAPI.coin).mockResolvedValue(MARKET as never);
+    render(<PurchaseForm />);
+    await waitFor(() => expect(screen.getByText(/Bitget's trading fee applies, taken from the coin you receive/)).toBeInTheDocument());
+    expect(document.body.textContent).not.toMatch(/taker fee|0\.20%/);
   });
 });

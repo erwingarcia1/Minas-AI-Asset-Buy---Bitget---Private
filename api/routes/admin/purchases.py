@@ -18,6 +18,7 @@ from api.services.admin_alerts import AlertItem, compute_alerts
 from api.models import Purchase, PurchaseTransaction, User
 from api.routes.user import UTCModel, get_current_user
 
+from api.services import withdraw_gate
 from api.routes.admin._deps import VALID_KYC, audit, logger, require_admin  # noqa: F401
 from api.routes._deps import gateway as _gateway_impl, purchase_or_404
 
@@ -138,6 +139,9 @@ class ResolvePurchase(BaseModel):
     action: str = Field(pattern="^(record_fill|mark_not_sent|cancel)$")
     note: str = Field(min_length=5, max_length=500)    # what was checked on the exchange
     attempt_id: Optional[UUID] = None                   # which parked attempt (default: the latest)
+    # record_fill on a withdraw-mode purchase: keep the coins on the exchange (no withdrawal) and
+    # switch the purchase to accumulate. Required when the owner is not allowed withdrawals.
+    keep_on_exchange: bool = False
 
 
 @router.post("/purchases/{purchase_id}/resolve", response_model=AdminPurchaseRow)
@@ -176,10 +180,16 @@ async def resolve_purchase(purchase_id: UUID, payload: ResolvePurchase, admin: U
                                                         f"{': ' + look.error if look and look.error else ''}; only a FILLED order can be recorded")
         if look.verdict != "ok":
             raise HTTPException(status_code=409, detail=f"the fill does not pass the guard: {look.verdict}")
+        if p.purchase_type == "autobuy" and not payload.keep_on_exchange:
+            withdraw_gate.require_owner_allowed_for_admin(p.user)   # the OWNER must be allowed, never the admin
         ps._record_fill(tx, look.fill, now)
         p.status = "active"
         ps._advance(p, now)
-        tx.error_message = f"{tx.error_message or ''} [admin: fill recorded — {payload.note}]"[:500]
+        kept = p.purchase_type == "autobuy" and payload.keep_on_exchange
+        if kept:
+            p.purchase_type = "dca"   # coins stay on the exchange; the owner may switch back where allowed
+        tx.error_message = (f"{tx.error_message or ''} [admin: fill recorded"
+                            f"{'; coins kept on the exchange, purchase switched to accumulate' if kept else ''} — {payload.note}]")[:500]
         await db.commit()
         if p.purchase_type == "autobuy" and p.exchange_account is not None:
             events: list = []
@@ -197,7 +207,7 @@ async def resolve_purchase(purchase_id: UUID, payload: ResolvePurchase, admin: U
         p.next_execution = now
     await db.commit()
     audit(admin, "purchase_review_resolved", purchase_id=str(p.id), attempt_id=str(tx.id), resolution=payload.action,
-          exchange_state=look.state if look else None, note=payload.note)
+          kept_on_exchange=bool(payload.keep_on_exchange), exchange_state=look.state if look else None, note=payload.note)
     return _purchase_row(await _load_purchase(db, purchase_id))
 
 
@@ -224,6 +234,9 @@ async def force_retry(
     if p.status == "needs_review":
         raise HTTPException(status_code=409, detail="purchase is needs_review: its buy outcome is unknown, re-arming it could buy "
                                                     "twice; inspect GET /api/admin/purchases/{id}/review and POST /resolve instead")
+    if p.purchase_type == "autobuy":
+        owner = (await db.execute(select(User).where(User.id == p.user_id))).scalar_one()
+        withdraw_gate.require_owner_allowed_for_admin(owner)   # re-arming would withdraw on the next run
     p.status = "active"
     p.failure_count = 0
     p.next_execution = datetime.now(timezone.utc)

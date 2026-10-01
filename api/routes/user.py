@@ -104,6 +104,8 @@ class UserProfile(UTCModel):
     # active 24h hold on new withdrawal addresses (after a password reset/change), else null
     wallet_hold_until: Optional[datetime] = None
     wallet_hold_reason: Optional[str] = None
+    # private beta: may this user create/switch withdraw-immediately purchases? (server-enforced; the UI hides the controls)
+    withdrawals_allowed: bool = False
 
 
 class UserPublicProfile(UTCModel):
@@ -129,6 +131,8 @@ def _profile(user: User) -> UserProfile:
     until = active_hold(user)
     out.wallet_hold_until = until
     out.wallet_hold_reason = user.wallet_hold_reason if until else None
+    from api.services.withdraw_gate import withdrawals_allowed
+    out.withdrawals_allowed = withdrawals_allowed(user)
     return out
 
 

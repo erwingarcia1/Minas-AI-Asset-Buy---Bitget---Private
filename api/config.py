@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     email_failure_alert_threshold: int = int(os.getenv("EMAIL_FAILURE_ALERT_THRESHOLD", "5") or 5)
 
     @property
+    def withdraw_allowed_emails(self) -> List[str]:
+        return [e.strip().lower() for e in (self.withdraw_allowed_emails_csv or "").split(",") if e.strip()]
+
+    @property
     def supported_exchanges(self) -> List[str]:
         raw = [x.strip().lower() for x in self.supported_exchanges_csv.split(",")]
         return [x for x in raw if x] or ["bitget"]
@@ -119,6 +123,11 @@ class Settings(BaseSettings):
 
     # Slack ops alerts (incoming webhook URL; unset = disabled)
     slack_webhook_url: str = os.getenv("SLACK_WEBHOOK_URL", "")
+    # Private beta: withdraw-immediately purchases are off unless WITHDRAWALS_ENABLED=1 or the
+    # purchase OWNER's email is in WITHDRAW_ALLOWED_EMAILS (comma-separated). Gate at the API
+    # edges only (api/services/withdraw_gate.py); the executor is untouched.
+    withdrawals_enabled: str = os.getenv("WITHDRAWALS_ENABLED", "0")
+    withdraw_allowed_emails_csv: str = os.getenv("WITHDRAW_ALLOWED_EMAILS", "")
     # Public facts for the landing page (GET /api/public/meta): the server's egress IP customers
     # allowlist on their Bitget key. Set once per host; never hardcode it in the frontend.
     public_server_ip: str = os.getenv("PUBLIC_SERVER_IP", "")

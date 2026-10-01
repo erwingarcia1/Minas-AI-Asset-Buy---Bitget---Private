@@ -9,8 +9,9 @@ import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES } from "@/utils/exchangeNetworks";
 import { DestinationFields, destinationBody, destinationOk, type DestinationState } from "./DestinationFields";
 import { capitalize } from "@/utils/format";
 import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
+import { useAuthStore } from "@/store/authStore";
 
-const DEFAULTS = { crypto: "BTC", amount: "50", frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: true };
+const DEFAULTS = { crypto: "BTC", amount: "50", frequency: "weekly" as AutoBuyFrequency, address: "", withdraw: false };   // accumulate by default (private beta)
 
 /** Sanity only: the platform invents no minimum. The floor is Bitget's live figure for the
  *  mode (order minimum when accumulating; chain minimum + fee when withdrawing). */
@@ -44,6 +45,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const [accountId, setAccountId] = useState("");
   const [frequency, setFrequency] = useState<AutoBuyFrequency>(DEFAULTS.frequency);
   const [withdraw, setWithdraw] = useState(DEFAULTS.withdraw);
+  const withdrawAllowed = useAuthStore((st) => st.user?.withdrawals_allowed === true);   // server-enforced too
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -155,7 +157,11 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
     <form onSubmit={submit} className="card space-y-4" aria-label="Create purchase" noValidate>
       <div>
         <h2 className="text-lg font-semibold">Create purchase</h2>
-        <p className="mt-1 text-sm text-slate-500">Buys on your exchange account on a schedule. Choose whether each buy is sent to your wallet right away or held on the exchange.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {withdrawAllowed
+            ? "Buys on your exchange account on a schedule. Choose whether each buy is sent to your wallet right away or held on the exchange."
+            : "Buys on your exchange account on a schedule. Coins stay in your Bitget sub-account."}
+        </p>
       </div>
       {success && <Alert kind="success">{success}</Alert>}
       {error && <Alert kind="error">{error}</Alert>}
@@ -169,7 +175,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           <select id="pf-crypto" className="input" value={crypto} onChange={(e) => { setCryptoE(e.target.value); setChain(DEFAULT_CHAIN_FOR_COIN[e.target.value] ?? ""); }}>
             {AUTOBUY_CRYPTOS.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          {market && <p className="mt-1 text-xs text-slate-400">{market.pair} · min order {market.min_trade_usdt} USDT{market.taker_fee_rate != null ? ` · taker fee ${(market.taker_fee_rate * 100).toFixed(2)}%` : ""}</p>}
+          {market && <p className="mt-1 text-xs text-slate-400">{market.pair} · min order {market.min_trade_usdt} USDT · Bitget's trading fee applies, taken from the coin you receive</p>}
         </div>
         <div>
           <label className="label" htmlFor="pf-amount">Amount (USD)</label>
@@ -195,7 +201,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
 
         <div className="sm:col-span-2 lg:col-span-3">
           <label className="label" htmlFor="pf-address">
-            Wallet address {withdraw ? <span className="text-red-600">*</span> : <span className="font-normal text-slate-400">(optional — accumulate never withdraws; add one later to switch)</span>}
+            Wallet address {withdraw ? <span className="text-red-600">*</span> : <span className="font-normal text-slate-400">{withdrawAllowed ? "(optional — accumulate never withdraws; add one later to switch)" : "(optional)"}</span>}
           </label>
           <div className="relative">
             <input id="pf-address" className={`input pr-10 font-mono ${verdict ? (verdict.ok ? "border-green-500 focus:ring-green-500" : "border-red-500 focus:ring-red-500") : addressMissing ? "border-red-500" : ""}`}
@@ -232,18 +238,24 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
         </div>
       </div>
 
-      <label className="flex cursor-pointer items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <input id="pf-withdraw" type="checkbox" className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-               checked={withdraw} onChange={(e) => setWithdrawE(e.target.checked)} />
-        <span className="text-sm">
-          <span className="font-medium text-slate-900">Withdraw immediately</span>
-          <span className="block text-slate-600">
-            {withdraw
-              ? "Auto-Buy: each purchase is bought on the exchange and sent to your wallet right away."
-              : "Accumulate on exchange (DCA): purchases are bought and held on the exchange. No wallet is needed; you can switch to withdrawing later."}
+      {withdrawAllowed ? (
+        <label className="flex cursor-pointer items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <input id="pf-withdraw" type="checkbox" className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                 checked={withdraw} onChange={(e) => setWithdrawE(e.target.checked)} />
+          <span className="text-sm">
+            <span className="font-medium text-slate-900">Withdraw immediately</span>
+            <span className="block text-slate-600">
+              {withdraw
+                ? "Auto-Buy: each purchase is bought on the exchange and sent to your wallet right away."
+                : "Accumulate on exchange (DCA): purchases are bought and held on the exchange. No wallet is needed; you can switch to withdrawing later."}
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      ) : (
+        <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600" data-testid="withdraw-unavailable">
+          Sending to your own wallet is coming later. For now, coins stay in your Bitget sub-account.
+        </p>
+      )}
 
       {chainWarning && <Alert kind="warning">⚠ {chainWarning}</Alert>}
       <button className="btn-primary" type="submit" disabled={!canSubmit}>{busy ? "Creating…" : "Create Purchase"}</button>

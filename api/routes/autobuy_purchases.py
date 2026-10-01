@@ -26,7 +26,7 @@ from api.routes.user import get_current_user
 from api.schemas.purchases import (MAX_AMOUNT_USD, MIN_AMOUNT_USD,  # noqa: F401
                                    PurchaseCreatedOut, PurchaseCreateRequest, PurchaseDetailOut, PurchaseOut,
                                    PurchaseUpdateRequest, RetryWithdrawalOut, TransactionOut, TravelRuleInfo)
-from api.services import bitget_market, wallet_hold
+from api.services import bitget_market, wallet_hold, withdraw_gate
 from api.utils.address_denylist import DENYLIST_REASON, is_denylisted
 from api.utils.chains import DEFAULT_CHAIN_FOR_COIN, check_destination, family_for_chain, normalize_chain, validate_address_for_chain
 from api.utils.exchange_networks import SUPPORTED_CRYPTOS
@@ -142,6 +142,8 @@ async def create_purchase(
     Bitget's minimum, when the chain is not withdrawable, when the amount after
     fees is below Bitget's minimum withdrawal (autobuy), or when the exchange
     account is not the caller's."""
+    if payload.purchase_type == "autobuy":
+        withdraw_gate.require_allowed(current_user)   # private beta: withdraw mode only for allowlisted owners
     destination = None
     if payload.wallet_address is not None:
         destination = _check_wallet(payload.wallet_address, payload.blockchain_network, payload.crypto_symbol,
@@ -223,6 +225,7 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
                           payload.memo if payload.memo is not None else p.wallet_memo)
         p.wallet_destination_type, p.wallet_memo = d["destination_type"], d["memo"]
     if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
+        withdraw_gate.require_allowed(current_user)   # private beta gate, before anything else
         # switching ON withdraw-immediately: blocked outright during the wallet-change hold,
         # otherwise real address + network + typed confirmation, every time
         wallet_hold.check_action(current_user, "switch_to_autobuy")
@@ -292,6 +295,7 @@ async def retry_withdrawal(purchase_id: UUID, current_user: User = Depends(get_c
     failed retry leaves it parked with the new error. Runs in dry-run mode
     when AUTOBUY_DRY_RUN is set (nothing is sent)."""
     from api.tasks import purchase_scheduler as ps
+    withdraw_gate.require_allowed(current_user)   # private beta gate
     p = await _owned_purchase(db, purchase_id, current_user)
     if p.status not in ("withdrawal_failed", "needs_info"):
         raise HTTPException(status_code=409, detail={

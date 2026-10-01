@@ -20,6 +20,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the anonymous 403).
 * Header logo keeps its 28px box on narrow screens.
 
+## [Unreleased] — 2026-09-30: private-beta withdraw gate (PR #50)
+
+### Changed
+
+* **Withdraw-immediately purchases are off during the private beta.** New
+  settings `WITHDRAWALS_ENABLED` (default 0) and `WITHDRAW_ALLOWED_EMAILS`
+  (comma-separated). The API refuses every path that creates or switches a
+  purchase into withdraw mode, retries a withdrawal, or re-arms a withdraw-mode
+  purchase, unless withdrawals are enabled globally or the purchase OWNER's
+  email is allowlisted (never the acting admin), with one message: "Sending
+  coins to your own wallet isn't available during the private beta. Your
+  coins stay in your Bitget sub-account." The API default `purchase_type` is
+  now `dca` (accumulate). Admin resolve gains `keep_on_exchange`: record the
+  fill, keep the coins on Bitget, switch the purchase to accumulate, so the
+  review queue never becomes unresolvable. The profile exposes
+  `withdrawals_allowed`; the web app hides the withdraw toggle (off by default
+  for everyone), "Switch to withdraw", "Retry withdrawal" and the withdraw key
+  guidance for users who are not allowed, and shows "Sending to your own
+  wallet is coming later. For now, coins stay in your Bitget sub-account."
+  Existing withdraw-mode purchases are not changed. Executor, withdrawal
+  poller and withdrawal code untouched.
+* Landing copy no longer implies wallet sending is available.
+
+## [Unreleased] — 2026-09-30: fee wording (PR #51)
+
+### Changed
+
+* The purchase form no longer shows a fee percentage. It showed Bitget's
+  public tier taker rate for the pair (0.20% for BTCUSDT) while the account's
+  first live buy on 2026-09-16 was charged 0.10%, taken in the coin bought
+  (1.97e-07 BTC on 0.000197 BTC), not in USDT. The form and the Settings key
+  guidance now say: "Bitget's trading fee applies, taken from the coin you
+  receive." The landing page already said so.
+
+### Noted, no code change
+
+* The fill guard (`validate_fill`) compares the gross filled amount
+  (`baseVolume`) against cost ÷ price and does not subtract the trading fee;
+  a fee taken in the base coin is recorded separately and only the holdings
+  maths nets it out. At the current ±10% tolerance a 0.1–0.2% fee cannot
+  trip the guard, so this is acceptable; it is not fee-aware and would need
+  revisiting if the tolerance were ever tightened below about 1%.
+
 ## [Unreleased] — 2026-09-28: public landing page, private-beta gate, ticker (PR #48)
 
 ### Added

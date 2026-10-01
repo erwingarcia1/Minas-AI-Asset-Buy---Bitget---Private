@@ -18,6 +18,8 @@ export interface UserProfile {
   /** Active 24h hold on new withdrawal addresses after a password reset/change, else null. */
   wallet_hold_until?: string | null;
   wallet_hold_reason?: "password_reset" | "password_change" | string | null;
+  /** Private beta: may this user create or switch withdraw-immediately purchases? Server-enforced; the UI hides the controls. */
+  withdrawals_allowed?: boolean;
 }
 
 export type KycStatus = "pending" | "verified" | "rejected";

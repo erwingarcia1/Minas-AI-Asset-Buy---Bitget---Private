@@ -75,6 +75,8 @@ describe("Landing page", () => {
     expect(screen.getByTestId("flow-tall")).toBeInTheDocument();
     expect(screen.getByText(/three missed cycles in a row/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Profit Guard|Equity Guard|CoinTech/);
+    expect(document.body.textContent).not.toMatch(/own wallet if you (choose|chose)|withdraw to your own wallet|needs Withdraw permission/);
+    expect(screen.getByText(/Your coins stay in your Bitget sub-account\. AutoBuy places the orders; it never holds your funds\./)).toBeInTheDocument();
     expect(screen.getByText(/one-time, daily, weekly or monthly/)).toBeInTheDocument();
     expect(screen.getByText(/won't reflect coins you move or add yourself/)).toBeInTheDocument();
     expect(screen.getByText(/not financial advice\. Private beta\./)).toBeInTheDocument();

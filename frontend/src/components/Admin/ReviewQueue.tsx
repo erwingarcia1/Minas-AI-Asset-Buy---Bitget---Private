@@ -6,8 +6,11 @@ import { useAsync } from "@/hooks/useAsync";
 import type { AdminPurchaseRow, PurchaseReview } from "@/types";
 import { fmtDate, fmtUsdt } from "@/utils/format";
 
-const ACTIONS: { key: "record_fill" | "mark_not_sent" | "cancel"; label: string; help: string; danger?: boolean }[] = [
+type ActionKey = "record_fill" | "record_fill_keep" | "mark_not_sent" | "cancel";
+const ACTIONS: { key: ActionKey; label: string; help: string; danger?: boolean; withdrawOnly?: boolean }[] = [
   { key: "record_fill", label: "Record fill", help: "The exchange shows the order FILLED and the fill passes the guard: record it as the buy, never re-buy." },
+  { key: "record_fill_keep", label: "Record fill, keep on Bitget", withdrawOnly: true,
+    help: "Record the buy and keep the coins in the customer's Bitget account: no withdrawal. The purchase switches to accumulate; the customer can switch it back later where withdrawals are allowed." },
   { key: "mark_not_sent", label: "Mark not sent", help: "The exchange shows NOT FOUND or CANCELLED: the attempt failed, the purchase becomes due again." },
   { key: "cancel", label: "Cancel purchase", help: "Stop the purchase; the attempt stays on record.", danger: true },
 ];
@@ -28,12 +31,14 @@ export default function ReviewQueue() {
     finally { setChecking(null); }
   }
 
-  async function resolve(action: "record_fill" | "mark_not_sent" | "cancel") {
+  async function resolve(action: ActionKey) {
     if (!review) return;
     if (note.trim().length < 5) { setMsg({ kind: "error", text: "Write what you checked on the exchange (at least 5 characters) before resolving." }); return; }
     setBusy(true); setMsg(null);
     try {
-      const p = await adminAPI.resolvePurchase(review.purchase.id, action, note.trim());
+      const p = action === "record_fill_keep"
+        ? await adminAPI.resolvePurchase(review.purchase.id, "record_fill", note.trim(), undefined, true)
+        : await adminAPI.resolvePurchase(review.purchase.id, action, note.trim());
       setMsg({ kind: "success", text: `Purchase ${p.id.slice(0, 8)} resolved: now ${p.status}.` });
       setReview(null); setNote(""); await reload();
     } catch (e) { setMsg({ kind: "error", text: errorMessage(e, "The resolution was rejected — nothing changed.") }); }
@@ -83,7 +88,7 @@ export default function ReviewQueue() {
             <input id="review-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. order 123 shows filled 0.00019 BTC in Bitget order history" />
           </div>
           <div className="flex flex-wrap gap-2">
-            {ACTIONS.map((a) => (
+            {ACTIONS.filter((a) => !a.withdrawOnly || review.purchase.purchase_type === "autobuy").map((a) => (
               <button key={a.key} className={`${a.danger ? "btn-danger" : "btn-primary"} !py-1`} title={a.help} disabled={busy} onClick={() => void resolve(a.key)}>{a.label}</button>
             ))}
             <button className="btn-secondary !py-1" disabled={busy} onClick={() => setReview(null)}>Close</button>
