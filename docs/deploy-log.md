@@ -67,6 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
+| 2026-10-01 18:11 | `c93f23c` | #50 #51 #52 #53 #54 | **v0.7.2**: private-beta withdraw gate (all paths), fee wording, landing follow-ups, rule files. New `.env`: `WITHDRAWALS_ENABLED=0`, `WITHDRAW_ALLOWED_EMAILS`. Verified: health and BUILD_INFO (nginx + public) at c93f23c, alembic 025, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 18:21 UTC, log scan clean, token absent; live gate check with a throwaway account (403 on create and resume, no Resume in the list, Settings beta line) torn down with all counts zero. | `pre-v0.7.2-20261001T181138Z.sql.gz` (9359 B) | `~/web-v0.7.2` |
 
 Earlier reference points, before this log starts: `v0.6.0` (`f639ae8`,
 2026-09-17, migrations 023 + 024, dump
@@ -84,6 +85,7 @@ before/after files next to it), public HTTPS on 2026-09-21 (dump
 | `v0.6.5-pre-audit` | `d4d69af` | Known-good point before the codebase audit batches |
 | `v0.7.0` | `97759aa` | Dashboard charts |
 | `v0.7.1` | `7717f25` | Release covering #44, #45, #46 |
+| `v0.7.2` | `c93f23c` | Withdraw gate, fee wording, landing follow-ups, rule files (#50–#54) |
 
 To roll the code back: on the server, create a branch at the tag
 (`git branch rollback-v0.7.1 v0.7.1`) and deploy it with
@@ -145,18 +147,19 @@ update users set role = 'admin' where email = 'person@example.com';
 The owner account `support@minastech.ca` was promoted this way on 2026-09-22.
 Every admin action is written to the audit table.
 
-## Current known state (2026-10-01)
+## Current known state (2026-10-01, after the v0.7.2 deploy)
 
-- Server at `ff3058a` (PR #49), alembic `025`, dry run off, schedulers not
-  paused. Three customer accounts; `support@minastech.ca` is the admin.
+- Server at `c93f23c` = `v0.7.2`, alembic `025`, dry run off, schedulers not
+  paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
+  the allowlisted owner can use withdraw mode.
 - One active purchase: XRP, weekly, accumulate, 10 USD, next run
-  **2026-10-05 00:12 UTC**. Nothing else is scheduled.
-- Open, not merged, not deployed: #50 withdraw gate, #51 fee wording, #52
-  landing follow-ups. They need `WITHDRAWALS_ENABLED=0` and
-  `WITHDRAW_ALLOWED_EMAILS=support@minastech.ca` in the server `.env` before
-  the deploy. Next release tag after they ship: `v0.7.2`.
-- Owner-side: results of the withdraw-mode purchase SQL, Resend quota retest,
-  KYC and compliance decisions, legal text review.
+  **2026-10-05 00:12 UTC**. The only withdraw-mode purchase in the table is
+  the owner's own one-time BTC purchase from 2026-09-15, status failed.
+- Open, not merged, not deployed: PR #55 (pre-buy low-balance warning,
+  migration 026), planned as `v0.7.3`. Its deploy moves alembic to 026 and
+  registers a sixth scheduler job.
+- Owner-side: Resend quota retest, KYC and compliance decisions, legal text
+  review.
 - Backlog: issue #35 (order-dependent admin alert digest test), #39 (remove
   the purchase_scheduler shim), #40 (caddy access log); audit PR 5 (C3) waits
   for an explicit go.
