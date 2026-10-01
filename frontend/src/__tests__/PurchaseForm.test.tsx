@@ -306,3 +306,13 @@ describe("PurchaseForm: private beta, withdrawals not allowed", () => {
     expect(body.withdraw_immediately).toBe(false);
   });
 });
+
+describe("PurchaseForm: fee wording", () => {
+  it("states that Bitget's fee is taken from the coin received, and never a fixed percentage", async () => {
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
+    vi.mocked(marketAPI.coin).mockResolvedValue(MARKET as never);
+    render(<PurchaseForm />);
+    await waitFor(() => expect(screen.getByText(/Bitget's trading fee applies, taken from the coin you receive/)).toBeInTheDocument());
+    expect(document.body.textContent).not.toMatch(/taker fee|0\.20%/);
+  });
+});

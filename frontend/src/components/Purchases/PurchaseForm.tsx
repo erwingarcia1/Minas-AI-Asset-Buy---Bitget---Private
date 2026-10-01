@@ -175,7 +175,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           <select id="pf-crypto" className="input" value={crypto} onChange={(e) => { setCryptoE(e.target.value); setChain(DEFAULT_CHAIN_FOR_COIN[e.target.value] ?? ""); }}>
             {AUTOBUY_CRYPTOS.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          {market && <p className="mt-1 text-xs text-slate-400">{market.pair} · min order {market.min_trade_usdt} USDT{market.taker_fee_rate != null ? ` · taker fee ${(market.taker_fee_rate * 100).toFixed(2)}%` : ""}</p>}
+          {market && <p className="mt-1 text-xs text-slate-400">{market.pair} · min order {market.min_trade_usdt} USDT · Bitget's trading fee applies, taken from the coin you receive</p>}
         </div>
         <div>
           <label className="label" htmlFor="pf-amount">Amount (USD)</label>
