@@ -36,9 +36,9 @@ with scp, and pass it with `--web`. The deploy refuses a bundle whose
 6. Deploy on the server only, with the command above. The script keeps the
    previous image tagged for rollback and fast-forwards git only.
 7. After: health commit, `BUILD_INFO` via nginx (:8080) and via the public
-   host, alembic head, holdings and digest identical to the baseline, the five
-   scheduler jobs registered (`execute_purchases`, `poll_withdrawals_job`,
-   `drain_email_outbox`, `admin_alert_digest`, `send_weekly_digest`), the
+   host, alembic head, holdings and digest identical to the baseline, the scheduler jobs registered (`execute_purchases`, `poll_withdrawals`,
+   `drain_email_outbox`, `admin_alert_digest`, `weekly_digest`, and from
+   v0.7.3 `low_balance_check`), the
    purchase job (every 5 min) and the withdrawal poll (every 10 min) each run
    once with status ok, an unfiltered WARNING/ERROR/Traceback scan of the API
    log since the restart.
