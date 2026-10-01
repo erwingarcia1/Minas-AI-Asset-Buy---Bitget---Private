@@ -1626,6 +1626,36 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "LowBalanceNotice": {
+        "properties": {
+          "amount_usd": {
+            "title": "Amount Usd",
+            "type": "number"
+          },
+          "crypto_symbol": {
+            "title": "Crypto Symbol",
+            "type": "string"
+          },
+          "next_execution": {
+            "format": "date-time",
+            "title": "Next Execution",
+            "type": "string"
+          },
+          "purchase_id": {
+            "format": "uuid",
+            "title": "Purchase Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purchase_id",
+          "crypto_symbol",
+          "amount_usd",
+          "next_execution"
+        ],
+        "title": "LowBalanceNotice",
+        "type": "object"
+      },
       "NotificationRow": {
         "properties": {
           "channel": {
@@ -1810,6 +1840,14 @@
             "title": "Signups 7D",
             "type": "integer"
           },
+          "signups_by_day": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SignupDay"
+            },
+            "title": "Signups By Day",
+            "type": "array"
+          },
           "suspended_users": {
             "title": "Suspended Users",
             "type": "integer"
@@ -1849,6 +1887,102 @@
         "title": "PlatformStats",
         "type": "object"
       },
+      "PortfolioSeriesResponse": {
+        "description": "Portfolio value over a range: history from Bitget candle closes, the last\npoint at the same current price the performance card uses. A bucket with\nno candle carries the previous close forward (carried_forward counts them).",
+        "properties": {
+          "bucket_seconds": {
+            "title": "Bucket Seconds",
+            "type": "integer"
+          },
+          "buys": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesBuy"
+            },
+            "title": "Buys",
+            "type": "array"
+          },
+          "carried_forward": {
+            "default": 0,
+            "title": "Carried Forward",
+            "type": "integer"
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "change_usdt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Usdt"
+          },
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value"
+          },
+          "granularity": {
+            "title": "Granularity",
+            "type": "string"
+          },
+          "invested": {
+            "title": "Invested",
+            "type": "number"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "range": {
+            "title": "Range",
+            "type": "string"
+          },
+          "unpriced": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unpriced",
+            "type": "array"
+          }
+        },
+        "required": [
+          "range",
+          "granularity",
+          "bucket_seconds",
+          "points",
+          "buys",
+          "invested",
+          "note"
+        ],
+        "title": "PortfolioSeriesResponse",
+        "type": "object"
+      },
       "PreferencesPayload": {
         "properties": {
           "device_token": {
@@ -1873,6 +2007,17 @@
               }
             ],
             "title": "Email Enabled"
+          },
+          "email_low_balance": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Low Balance"
           },
           "email_milestones": {
             "anyOf": [
@@ -1991,6 +2136,10 @@
             "title": "Email Enabled",
             "type": "boolean"
           },
+          "email_low_balance": {
+            "title": "Email Low Balance",
+            "type": "boolean"
+          },
           "email_milestones": {
             "title": "Email Milestones",
             "type": "boolean"
@@ -2040,6 +2189,7 @@
           "email_purchase_confirmations",
           "email_weekly_summary",
           "email_milestones",
+          "email_low_balance",
           "sms_enabled",
           "push_enabled",
           "quiet_hours_start",
@@ -2065,6 +2215,40 @@
           }
         },
         "title": "ProfileUpdateRequest",
+        "type": "object"
+      },
+      "PublicMeta": {
+        "properties": {
+          "coins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Coins",
+            "type": "array"
+          },
+          "exchanges": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Exchanges",
+            "type": "array"
+          },
+          "server_ip": {
+            "title": "Server Ip",
+            "type": "string"
+          },
+          "support_email": {
+            "title": "Support Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coins",
+          "exchanges",
+          "support_email",
+          "server_ip"
+        ],
+        "title": "PublicMeta",
         "type": "object"
       },
       "PurchaseCreateRequest": {
@@ -2126,7 +2310,7 @@
             "title": "Memo"
           },
           "purchase_type": {
-            "default": "autobuy",
+            "default": "dca",
             "title": "Purchase Type",
             "type": "string"
           },
@@ -2291,6 +2475,23 @@
                 "type": "null"
               }
             ]
+          },
+          "low_balance_alerted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Balance Alerted At"
+          },
+          "low_balance_for_next_run": {
+            "default": false,
+            "title": "Low Balance For Next Run",
+            "type": "boolean"
           },
           "next_execution": {
             "anyOf": [
@@ -2475,6 +2676,23 @@
                 "type": "null"
               }
             ]
+          },
+          "low_balance_alerted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Balance Alerted At"
+          },
+          "low_balance_for_next_run": {
+            "default": false,
+            "title": "Low Balance For Next Run",
+            "type": "boolean"
           },
           "next_execution": {
             "anyOf": [
@@ -2722,6 +2940,14 @@
             "title": "Kyc Status",
             "type": "string"
           },
+          "low_balance": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LowBalanceNotice"
+            },
+            "title": "Low Balance",
+            "type": "array"
+          },
           "total_invested_usdt": {
             "title": "Total Invested Usdt",
             "type": "number"
@@ -2811,6 +3037,18 @@
             "title": "Email",
             "type": "string"
           },
+          "invite_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invite Code"
+          },
           "password": {
             "maxLength": 128,
             "minLength": 8,
@@ -2893,6 +3131,11 @@
               }
             ],
             "title": "Attempt Id"
+          },
+          "keep_on_exchange": {
+            "default": false,
+            "title": "Keep On Exchange",
+            "type": "boolean"
           },
           "note": {
             "maxLength": 500,
@@ -2985,6 +3228,75 @@
         "title": "SendVerificationRequest",
         "type": "object"
       },
+      "SeriesBuy": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "crypto": {
+            "title": "Crypto",
+            "type": "string"
+          },
+          "t": {
+            "title": "T",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t",
+          "crypto",
+          "amount",
+          "cost_usd"
+        ],
+        "title": "SeriesBuy",
+        "type": "object"
+      },
+      "SeriesPoint": {
+        "properties": {
+          "invested": {
+            "title": "Invested",
+            "type": "number"
+          },
+          "t": {
+            "title": "T",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "t",
+          "value",
+          "invested"
+        ],
+        "title": "SeriesPoint",
+        "type": "object"
+      },
+      "SignupDay": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          }
+        },
+        "required": [
+          "day",
+          "count"
+        ],
+        "title": "SignupDay",
+        "type": "object"
+      },
       "StatusResponse": {
         "properties": {
           "applicant_id": {
@@ -3047,6 +3359,35 @@
           "kyc_status"
         ],
         "title": "StatusResponse",
+        "type": "object"
+      },
+      "TelegramTestResult": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured",
+          "sent"
+        ],
+        "title": "TelegramTestResult",
         "type": "object"
       },
       "TimelinePoint": {
@@ -3834,6 +4175,17 @@
         "title": "UndeliveredEmail",
         "type": "object"
       },
+      "UnsuspendPayload": {
+        "properties": {
+          "pause_withdraw_mode": {
+            "default": false,
+            "title": "Pause Withdraw Mode",
+            "type": "boolean"
+          }
+        },
+        "title": "UnsuspendPayload",
+        "type": "object"
+      },
       "UpcomingPurchase": {
         "properties": {
           "amount_usdt": {
@@ -3975,6 +4327,11 @@
               }
             ],
             "title": "Wallet Hold Until"
+          },
+          "withdrawals_allowed": {
+            "default": false,
+            "title": "Withdrawals Allowed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4868,6 +5225,33 @@
         ]
       }
     },
+    "/api/admin/telegram/test": {
+      "post": {
+        "description": "Send one test message to the configured Telegram chat and report the\noutcome, so the alert channel can be checked without a real buy.",
+        "operationId": "telegram_test_api_admin_telegram_test_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Telegram Test",
+        "tags": [
+          "user"
+        ]
+      }
+    },
     "/api/admin/transactions": {
       "get": {
         "description": "Every user's Auto-Buy execution attempts (purchase_transactions), newest\nfirst; filter by status (pending | completed | failed) and/or user.",
@@ -5243,7 +5627,7 @@
     },
     "/api/admin/users/{user_id}/unsuspend": {
       "post": {
-        "description": "Reactivate a suspended account.",
+        "description": "Reactivate a suspended account. During the private beta an account that\nowns ACTIVE withdraw-mode purchases and isn't allowed withdrawals is refused\n(403, the purchase ids listed), because the executor would run them again;\nsend `{\"pause_withdraw_mode\": true}` to pause those purchases and reactivate\nthe account (the owner can switch them to accumulate and resume).",
         "operationId": "unsuspend_user_api_admin_users__user_id__unsuspend_post",
         "parameters": [
           {
@@ -5257,6 +5641,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/UnsuspendPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -5554,7 +5955,7 @@
     },
     "/api/auth/register": {
       "post": {
-        "description": "Register a new user with email and password.",
+        "description": "Register a new user with email and password. During the private beta\nthe request must carry the invite code; the refusal is the same whatever\nwas wrong (missing, mismatched, or no code configured in production), so\nit never reveals whether the code or the email was the problem.",
         "operationId": "register_api_auth_register_post",
         "requestBody": {
           "content": {
@@ -5796,6 +6197,59 @@
           }
         ],
         "summary": "Analytics Timeline",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/api/dashboard/portfolio/series": {
+      "get": {
+        "description": "Read-only. Portfolio value and amount invested over the range, built from\nthis customer's successful buys and Bitget candles (see\napi/services/portfolio_series.py). 503 when Bitget is unreachable and no\ncandle page is cached; the rest of the dashboard is unaffected.",
+        "operationId": "portfolio_series_api_dashboard_portfolio_series_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "default": "30D",
+              "pattern": "^(1D|7D|30D|90D|All)$",
+              "title": "Range",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Bitget candles unavailable and nothing cached"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Portfolio Series",
         "tags": [
           "dashboard"
         ]
@@ -6595,7 +7049,7 @@
         ]
       },
       "put": {
-        "description": "Update channel toggles, optional email categories (purchase confirmations,\nweekly summary, milestones), quiet hours (UTC), phone number, device token.\nSecurity and failure emails cannot be switched off.",
+        "description": "Update channel toggles, optional email categories (purchase confirmations,\nweekly summary, milestones, low-balance warnings), quiet hours (UTC), phone number, device token.\nSecurity and failure emails cannot be switched off.",
         "operationId": "update_preferences_api_notifications_preferences_put",
         "requestBody": {
           "content": {
@@ -6662,6 +7116,28 @@
         "summary": "Send Test",
         "tags": [
           "user"
+        ]
+      }
+    },
+    "/api/public/meta": {
+      "get": {
+        "description": "Supported coins and exchanges, the support address and the server IP to\nallowlist on an exchange API key. Anonymous, cacheable for 5 minutes.",
+        "operationId": "public_meta_api_public_meta_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicMeta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Public Meta",
+        "tags": [
+          "public"
         ]
       }
     },
@@ -7876,26 +8352,6 @@
         "summary": "Delete Wallet",
         "tags": [
           "auto-buy"
-        ]
-      }
-    },
-    "/api/webhooks/resend": {
-      "post": {
-        "description": "Accept Resend delivery events (bounce/complaint). Stub: log only.",
-        "operationId": "resend_events_api_webhooks_resend_post",
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Resend Events",
-        "tags": [
-          "webhooks"
         ]
       }
     },
