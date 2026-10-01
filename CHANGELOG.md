@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-10-01: refresh rotation grace window (PR #57, ships as v0.7.3)
+
+### Fixed
+
+* **Two tabs refreshing at the same moment no longer sign the user out.** The
+  refresh token is single use (rotation); a second tab presenting the same
+  cookie a moment later got 401 and the cleared cookies signed both tabs out.
+  Now exactly one request rotates the token (an atomic SET NX claim in Redis)
+  and the other gets the very same new session back: same access token, same
+  refresh cookie, same CSRF value, cached encrypted (Fernet, the app's own
+  helper) for 30 seconds under the id of the token it replaced. The grace
+  covers only the immediately previous token: the next rotation drops it, a
+  token two rotations old is refused as before, logout and a password change
+  drop it, and a password change made elsewhere is caught by the cached
+  session's issue time. A real refusal still clears the cookies; a grace
+  response is an ordinary 200 with Set-Cookie, so the web client needed no
+  change. Refresh tokens now carry `prv`, the id of the token they replaced.
+
 ## [Unreleased] — 2026-10-01: withdraw gate, remaining paths (PR #54)
 
 ### Fixed
