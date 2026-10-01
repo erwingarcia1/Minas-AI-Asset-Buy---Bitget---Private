@@ -106,10 +106,18 @@ export interface TransactionStats {
   needs_review_count: number;
 }
 
+export interface LowBalanceNotice {
+  purchase_id: string;
+  crypto_symbol: string;
+  amount_usd: number;
+  next_execution: string;
+}
+
 export interface QuickStats {
   total_invested_usdt: number;
   transaction_count: number;
   active_purchases: number;
+  low_balance?: LowBalanceNotice[];   // active purchases with an outstanding low-balance warning
   kyc_status: KycStatus;
 }
 
@@ -285,6 +293,8 @@ export interface AutoBuyPurchase {
   failure_count: number;
   last_error: string | null;
   next_execution: string | null;
+  low_balance_for_next_run?: boolean;   // a low-balance warning is outstanding for next_execution
+  low_balance_alerted_at?: string | null;
   created_at: string;
   updated_at: string;
   latest_transaction: AutoBuyTransaction | null;
@@ -395,6 +405,7 @@ export interface NotificationPreferences {
   email_purchase_confirmations: boolean;
   email_weekly_summary: boolean;
   email_milestones: boolean;
+  email_low_balance: boolean;
   always_on_emails: string[];
   sms_enabled: boolean;
   push_enabled: boolean;

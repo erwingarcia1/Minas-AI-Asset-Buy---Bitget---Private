@@ -9,10 +9,11 @@ interface Api {
   update: (body: Partial<NotificationPreferences>) => Promise<NotificationPreferences>;
 }
 
-const OPTIONAL: { key: "email_purchase_confirmations" | "email_weekly_summary" | "email_milestones"; label: string; help: string }[] = [
+const OPTIONAL: { key: "email_purchase_confirmations" | "email_weekly_summary" | "email_milestones" | "email_low_balance"; label: string; help: string }[] = [
   { key: "email_purchase_confirmations", label: "Purchase confirmations", help: "One email per completed buy (and its withdrawal)." },
   { key: "email_weekly_summary", label: "Weekly summary", help: "Monday digest of what your automation did." },
   { key: "email_milestones", label: "Milestones", help: "First purchase and invested-amount milestones." },
+  { key: "email_low_balance", label: "Low-balance warnings", help: "About a day and about two hours before a scheduled buy, if the USDT in your exchange sub-account looks too low." },
 ];
 
 /** Which emails the user gets. Security and failure emails are always sent. */
