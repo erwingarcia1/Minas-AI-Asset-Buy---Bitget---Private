@@ -30,10 +30,20 @@ const SAFETY = [
   "You can pause or delete any purchase at any time.",
 ];
 
-function Buttons({ mailto, size = "" }: { mailto: string; size?: string }) {
+/** "or email …" shown beside every Request access button: the address is visible text, not only a mailto. */
+function OrEmail({ supportEmail, className = "" }: { supportEmail: string; className?: string }) {
   return (
-    <div className="flex flex-wrap gap-3">
+    <span className={`text-sm text-slate-600 ${className}`} data-testid="or-email">
+      or email <a className="text-brand-600 underline" href={`mailto:${supportEmail}`}>{supportEmail}</a>
+    </span>
+  );
+}
+
+function Buttons({ mailto, supportEmail, size = "" }: { mailto: string; supportEmail: string; size?: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <a className={`btn-primary ${size}`} href={mailto}>Request access</a>
+      <OrEmail supportEmail={supportEmail} />
       <Link className={`btn-secondary ${size}`} to="/login">Log in</Link>
     </div>
   );
@@ -52,17 +62,18 @@ export default function Landing() {
       <BetaTicker />
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-          <Link to="/" className="flex items-center gap-2 font-semibold text-brand-ink" aria-label="AutoBuy home">
-            <img src="/icon-64.png" alt="" width={28} height={28} className="h-7 w-7" data-testid="brand-mark" /><span className="hidden sm:inline">AutoBuy</span>
+          <Link to="/" className="flex shrink-0 items-center gap-2 font-semibold text-brand-ink" aria-label="AutoBuy home">
+            <img src="/icon-64.png" alt="" width={28} height={28} className="h-7 w-7 shrink-0" data-testid="brand-mark" /><span className="hidden sm:inline">AutoBuy</span>
           </Link>
           <nav className="hidden items-center gap-5 text-sm text-slate-700 md:flex" aria-label="Page sections">
             <a className="hover:text-brand-600" href="#how-it-works">How it works</a>
             <a className="hover:text-brand-600" href="#safety">Safety</a>
             <a className="hover:text-brand-600" href="#faq">FAQ</a>
           </nav>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
             <Link className="btn-secondary whitespace-nowrap !px-3 !py-1.5" to="/login">Log in</Link>
             <a className="btn-primary whitespace-nowrap !px-3 !py-1.5" href={mailto}>Request access</a>
+            <OrEmail supportEmail={supportEmail} className="w-full text-right text-xs sm:w-auto sm:text-sm" />
           </div>
         </div>
       </header>
@@ -78,13 +89,13 @@ export default function Landing() {
           <p className="mt-4 max-w-2xl text-lg text-slate-600">
             Your coins stay in your Bitget sub-account. AutoBuy places the orders; it never holds your funds.
           </p>
-          <div className="mt-8"><Buttons mailto={mailto} size="!px-5 !py-2.5 text-base" /></div>
+          <div className="mt-8"><Buttons mailto={mailto} supportEmail={supportEmail} size="!px-5 !py-2.5 text-base" /></div>
         </section>
 
         <section id="how-it-works" className="border-t border-slate-100 bg-slate-50 py-14" aria-labelledby="how-title">
           <div className="mx-auto max-w-6xl px-4">
             <h2 id="how-title" className="text-2xl font-semibold text-brand-ink">How it works</h2>
-            <div className="mt-8 overflow-x-auto rounded-xl border border-slate-200 bg-white p-4 md:p-6">
+            <div className="mt-8 rounded-xl border border-slate-200 bg-white p-4 md:p-6">
               <FlowAnimation />
             </div>
             <ol className="mt-8 grid gap-6 md:grid-cols-3">
@@ -178,7 +189,7 @@ export default function Landing() {
         <section className="py-14" aria-labelledby="cta-title">
           <div className="mx-auto max-w-6xl px-4">
             <h2 id="cta-title" className="text-2xl font-semibold text-brand-ink">Ready to automate your buying?</h2>
-            <div className="mt-6"><Buttons mailto={mailto} /></div>
+            <div className="mt-6"><Buttons mailto={mailto} supportEmail={supportEmail} /></div>
           </div>
         </section>
       </main>
