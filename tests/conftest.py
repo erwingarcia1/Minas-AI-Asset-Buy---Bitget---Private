@@ -212,6 +212,18 @@ def stub_bitget_market(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _withdrawals_enabled_by_default(monkeypatch):
+    """The private-beta withdraw gate (api/services/withdraw_gate.py) is OFF in
+    production by default. Existing suites exercise withdraw-mode purchases end
+    to end, so tests run with withdrawals enabled; the gate's own tests switch
+    it off explicitly."""
+    from api.config import settings
+    monkeypatch.setattr(settings, "withdrawals_enabled", "1")
+    monkeypatch.setattr(settings, "withdraw_allowed_emails_csv", "")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_fake_gateway_ids():
     """Exchange ids from the fake gateway restart at ORD-1 / WD-1 for every test."""
     from tests.fake_gateway import FakeGateway

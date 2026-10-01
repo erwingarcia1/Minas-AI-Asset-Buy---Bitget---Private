@@ -12,8 +12,9 @@ P = "/api/v2/purchases"
 
 
 def body(key, **over):
+    # withdraw mode explicitly: since the private-beta gate the API default is accumulate ("dca")
     b = {"crypto_symbol": "BTC", "amount_usd": 50, "wallet_address": BTC_MAIN, "blockchain_network": "BTC",
-         "frequency": "daily", "exchange_account_id": str(key.id)}
+         "frequency": "daily", "exchange_account_id": str(key.id), "purchase_type": "autobuy"}
     b.update(over)
     return b
 
@@ -253,7 +254,12 @@ async def test_wallet_crud_and_validation(client, db, user, other_user):
 
 # --------------------------------------------------------------------------- modes: autobuy vs dca
 
-async def test_default_purchase_type_is_autobuy(client, db, user, binance_key):
+async def test_default_purchase_type_is_accumulate(client, db, user, binance_key):
+    omitted = body(binance_key); omitted.pop("purchase_type")
+    r = await client.post(P, json=omitted, headers=auth(user))
+    assert r.status_code == 201
+    row = (await db.execute(select(Purchase).where(Purchase.id == r.json()["purchase_id"]))).scalar_one()
+    assert row.purchase_type == "dca", "omitted purchase_type = accumulate (private beta default)"
     r = await client.post(P, json=body(binance_key), headers=auth(user))
     assert r.status_code == 201
     row = (await db.execute(select(Purchase).where(Purchase.id == uuid.UUID(r.json()["purchase_id"])))).scalar_one()
@@ -275,7 +281,8 @@ async def test_purchase_type_validation_and_alias(client, user, binance_key):
     H = auth(user)
     assert (await client.post(P, json=body(binance_key, purchase_type="hodl"), headers=H)).status_code == 422
     # deprecated boolean alias still maps onto purchase_type
-    r = await client.post(P, json=body(binance_key, withdraw_immediately=False), headers=H)
+    alias = body(binance_key); alias.pop("purchase_type"); alias["withdraw_immediately"] = False
+    r = await client.post(P, json=alias, headers=H)
     assert r.status_code == 201
     assert (await client.get(f"{P}/{r.json()['purchase_id']}", headers=H)).json()["purchase_type"] == "dca"
     r = await client.post(P, json=body(binance_key, purchase_type="AutoBuy"), headers=H)
