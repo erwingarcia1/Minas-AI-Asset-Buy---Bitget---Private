@@ -260,6 +260,8 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
                 "message": "Type the wallet address again in confirm_wallet_address to change where coins are sent"})
         p.wallet_address, p.blockchain_network = d["address"], network
         p.wallet_destination_type, p.wallet_memo = d["destination_type"], d["memo"]
+    if payload.status == "active" and p.status != "active" and p.purchase_type == "autobuy":
+        withdraw_gate.require_allowed(current_user, hint=withdraw_gate.RESUME_HINT)   # resuming would withdraw on the next run
     if payload.status == "active" and p.status != "active" and p.exchange_account is None:
         raise HTTPException(status_code=409, detail={
             "error": "exchange_key_removed",

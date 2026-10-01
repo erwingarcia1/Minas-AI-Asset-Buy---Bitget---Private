@@ -20,6 +20,7 @@ from api.routes.user import UTCModel, get_current_user
 
 from api.routes._deps import user_or_404
 from api.routes.admin._deps import VALID_KYC, audit, logger, require_admin  # noqa: F401
+from api.services import withdraw_gate
 
 router = APIRouter()
 
@@ -85,17 +86,37 @@ async def suspend_user(
     audit(admin, "user_suspended", user_id=str(user_id))
 
 
+class UnsuspendPayload(BaseModel):
+    pause_withdraw_mode: bool = False   # private beta: pause the owner's active withdraw-mode purchases instead of refusing
+
+
 @router.post("/users/{user_id}/unsuspend", status_code=204)
 async def unsuspend_user(
     user_id: UUID,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
+    payload: Optional[UnsuspendPayload] = None,
 ):
-    """Reactivate a suspended account."""
+    """Reactivate a suspended account. During the private beta an account that
+    owns ACTIVE withdraw-mode purchases and isn't allowed withdrawals is refused
+    (403, the purchase ids listed), because the executor would run them again;
+    send `{"pause_withdraw_mode": true}` to pause those purchases and reactivate
+    the account (the owner can switch them to accumulate and resume)."""
     user = await user_or_404(db, user_id)
+    paused: list = []
+    if payload is not None and payload.pause_withdraw_mode:
+        ids = await withdraw_gate.active_withdraw_mode_purchase_ids(db, user)
+        if ids:
+            rows = (await db.execute(select(Purchase).where(Purchase.id.in_(ids)))).scalars().all()
+            for p in rows:
+                p.status = "paused"
+                p.last_error = f"{withdraw_gate.MESSAGE} {withdraw_gate.RESUME_HINT}"[:500]
+                paused.append(str(p.id))
+    else:
+        await withdraw_gate.require_no_active_withdraw_mode(db, user, admin=True)
     user.suspended = False
     await db.commit()
-    audit(admin, "user_unsuspended", user_id=str(user_id))
+    audit(admin, "user_unsuspended", user_id=str(user_id), paused_withdraw_mode_purchases=paused)
 
 
 @router.delete("/users/{user_id}", status_code=204)
@@ -168,6 +189,8 @@ async def kyc_override(
         raise HTTPException(status_code=422,
                             detail=f"status must be one of {sorted(VALID_KYC)}")
     user = await user_or_404(db, user_id)
+    if payload.status == "verified" and user.kyc_status != "verified":
+        await withdraw_gate.require_no_active_withdraw_mode(db, user, admin=True)   # verified = eligible to run again
     user.kyc_status = payload.status
     await db.commit()
     audit(admin, "kyc_override", user_id=str(user_id),
