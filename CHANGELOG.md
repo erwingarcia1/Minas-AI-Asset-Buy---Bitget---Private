@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-10-01: landing follow-ups (PR #52)
+
+### Changed
+
+* Every "Request access" button carries "or email support@minastech.ca" as
+  visible text (from `/api/public/meta`, with the existing fallback).
+* Below 640px the how-it-works diagram renders top to bottom (a second SVG
+  layout; the wide one is hidden), so phones no longer get a scrolling box;
+  reduced-motion and offscreen-pause behaviour unchanged.
+* Anonymous visitors no longer call the refresh endpoint at startup: with no
+  session cookie the app goes straight to anonymous. A returning session still
+  refreshes. Lighthouse best practices 96 → 100 (the console-error audit was
+  the anonymous 403).
+* Header logo keeps its 28px box on narrow screens.
+
 ## [Unreleased] — 2026-09-28: public landing page, private-beta gate, ticker (PR #48)
 
 ### Added
