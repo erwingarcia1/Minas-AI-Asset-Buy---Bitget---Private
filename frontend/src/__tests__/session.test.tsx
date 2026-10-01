@@ -53,9 +53,10 @@ describe("session: tokens stay out of localStorage", () => {
     expect(localStorage.length).toBe(0);
   });
 
-  it("bootstrap without any session marks the visitor anonymous, silently", async () => {
+  it("bootstrap without any session cookie marks the visitor anonymous without calling the refresh endpoint", async () => {
     post.mockRejectedValue(new Error("401"));
     expect(await bootstrapSession()).toBe(false);
+    expect(post).not.toHaveBeenCalled();
     expect(useAuthStore.getState().status).toBe("anonymous");
     expect(useAuthStore.getState().accessToken).toBeNull();
     expect(useAuthStore.getState().notice).toBeNull();

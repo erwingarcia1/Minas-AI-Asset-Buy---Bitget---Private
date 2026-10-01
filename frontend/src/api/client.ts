@@ -94,6 +94,12 @@ function forgetCsrfCookie(): void {
  */
 export async function bootstrapSession(): Promise<boolean> {
   const hadSession = csrfToken() !== null;
+  if (!hadSession) {
+    // No session cookie: nothing to refresh. Skip the call (it would only be a 403)
+    // so anonymous visitors cost nothing and never count against the refresh limit.
+    useAuthStore.getState().setAnonymous();
+    return false;
+  }
   try {
     refreshing = refreshing ?? refreshAccessToken();
     await refreshing;
