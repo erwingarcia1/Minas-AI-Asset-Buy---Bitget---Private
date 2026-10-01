@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-10-01: withdraw gate, remaining paths (PR #54)
+
+### Fixed
+
+* Five more paths returned a withdraw-mode purchase to the scheduler without
+  the private-beta gate: resuming a paused one (`PUT … status: active`), the
+  admin "mark not sent" resolution, unsuspending an account, a KYC override
+  back to verified, and re-verifying an exchange key. All five are now judged
+  by the purchase owner. Resume answers 403 with the beta message plus "Switch
+  this purchase to accumulate first, then resume it." (switching and resuming
+  in one call works). Unsuspend and KYC-to-verified are refused while the
+  account owns ACTIVE withdraw-mode purchases, with the purchase ids listed;
+  unsuspend accepts `{"pause_withdraw_mode": true}` to pause those purchases
+  and reactivate the account instead. Key re-verify is refused, before any
+  exchange call, while that key has active withdraw-mode purchases. The web
+  purchase list no longer offers Resume on such a purchase to users who are
+  not allowed; "Switch to accumulate" stays. Executor and withdrawal code
+  untouched; existing purchases are not modified by any refusal.
+
 ## [Unreleased] — 2026-10-01: landing follow-ups (PR #52)
 
 ### Changed
