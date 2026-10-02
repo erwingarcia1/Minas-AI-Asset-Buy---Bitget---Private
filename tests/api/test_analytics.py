@@ -150,9 +150,11 @@ async def test_market_data_cache_and_degradation(monkeypatch):
 
 
 def test_price_precision_follows_the_pair():
-    """Bitget quotes BTCUSDT to 2 decimals, XLMUSDT to 5 (live 2026-09-21); unknown pairs fall back to 8."""
+    """Bitget quotes BTCUSDT to 2 decimals, XLMUSDT to 5 (live 2026-09-21); unknown pairs fall back to 8.
+    Since v0.7.5 the displayed price no longer follows the pair: at least 4 significant digits, separators."""
     from api.services import bitget_market as bm
-    assert bm.price_precision("BTC") == 2
-    assert bm.fmt_price(76132.62, "BTC") == "76132.62"
-    assert bm.price_precision("DOGE") == 8 and bm.fmt_price(0.2, "DOGE") == "0.20000000"
+    assert bm.price_precision("BTC") == 2 and bm.price_precision("DOGE") == 5
+    assert bm.price_precision("ZZZ") == 8, "unknown pairs fall back to 8"
+    assert bm.fmt_price(76132.62, "BTC") == "76,132.62"
+    assert bm.fmt_price(0.2, "DOGE") == "0.20" and bm.fmt_price(0.000004181, "PEPE") == "0.000004181"
     assert bm.fmt_price(None, "BTC") == "market"
