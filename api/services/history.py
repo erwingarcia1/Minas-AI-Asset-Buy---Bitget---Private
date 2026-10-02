@@ -47,13 +47,61 @@ def presented_status(tx: PurchaseTransaction) -> str:
     return API_SIMULATED if is_simulated(tx) else to_api_status(tx.status)
 
 
-def fmt_amount(value, digits: int = 8) -> str:
-    """Crypto amounts for humans: at most `digits` decimals, trailing zeros trimmed
-    ("0.00076179", "0.5", "0"). Storage keeps full precision."""
+def _trim(text: str, keep: int = 0) -> str:
+    """Trim trailing zeros past `keep` decimals ("1.50000000" -> "1.5"; keep=2: "1.500" -> "1.50")."""
+    if "." not in text:
+        return text
+    whole, frac = text.split(".")
+    frac = frac.rstrip("0")
+    if len(frac) < keep:
+        frac = frac + "0" * (keep - len(frac))
+    return f"{whole}.{frac}" if frac else whole
+
+
+def fmt_amount_plain(value, digits: int = 8) -> str:
+    """Machine-readable coin amount (CSV): at most `digits` decimals, trailing zeros
+    trimmed, no grouping, dot decimal point ("0.00076179", "2389380.228", "0")."""
     if value is None:
         return ""
-    text = f"{float(value):.{digits}f}"
-    return text.rstrip("0").rstrip(".") if "." in text else text
+    return _trim(f"{float(value):.{digits}f}")
+
+
+def fmt_amount(value, digits: int = 8) -> str:
+    """Coin amounts for humans (web, email, Telegram, PDF): thousands separators;
+    at or above 1,000 coins at most 2 decimals ("2,389,380.23 PEPE"), below that
+    at most `digits` decimals, trailing zeros trimmed ("0.00076179", "0.5", "0").
+    Storage keeps full precision."""
+    if value is None:
+        return ""
+    v = float(value)
+    if abs(v) >= 1000:
+        return _trim(f"{v:,.2f}")
+    return _trim(f"{v:,.{digits}f}")
+
+
+def _price_decimals(value: float, min_significant: int = 4) -> int:
+    """Decimals that show at least `min_significant` significant digits, never fewer than 2, at most 10."""
+    import math
+    if value == 0:
+        return 2
+    return max(2, min(10, min_significant - 1 - math.floor(math.log10(abs(value)))))
+
+
+def fmt_price_plain(value) -> str:
+    """Machine-readable price (CSV): at least 4 significant digits, no grouping ("84487.36", "0.000004181")."""
+    if value is None:
+        return ""
+    v = float(value)
+    return _trim(f"{v:.{_price_decimals(v)}f}", keep=2)
+
+
+def fmt_price(value) -> str:
+    """Price for humans: at least 4 significant digits, never fewer than 2 decimals,
+    thousands separators ("84,487.36", "0.09179", "0.000004181")."""
+    if value is None:
+        return ""
+    v = float(value)
+    return _trim(f"{v:,.{_price_decimals(v)}f}", keep=2)
 
 
 @dataclass

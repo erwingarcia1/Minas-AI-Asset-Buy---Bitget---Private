@@ -10,7 +10,7 @@ def test_all_templates_render_both_formats():
     contexts = {
         "welcome": {"name": "sam"},
         "first_purchase": {"name": "sam", "crypto": "BTC", "amount_crypto": "0.001",
-                           "cost_usdt": "100.00", "exchange_rate": "50000.00",
+                           "cost_usdt": "100.00", "exchange_rate": "50,000.00",
                            "order_id": "123"},
         "purchase_summary": {"name": "sam", "rows": [{"crypto": "BTC", "amount": "0.001",
                              "cost": "100.00"}], "total_usdt": "100.00", "count": 1,
@@ -44,7 +44,7 @@ async def test_first_purchase_email(db, user, binance_key, monkeypatch):
     await camp.on_buy_executed(db, user, tx, p)
     assert len(capture.sent) == 1
     assert "first automated purchase" in capture.sent[0]["subject"]
-    assert "ORD-1" in capture.sent[0]["text"] and "50000.00" in capture.sent[0]["text"]
+    assert "ORD-1" in capture.sent[0]["text"] and "50,000.00" in capture.sent[0]["text"]
 
 
 async def test_milestone_crossing(db, user, binance_key, monkeypatch):

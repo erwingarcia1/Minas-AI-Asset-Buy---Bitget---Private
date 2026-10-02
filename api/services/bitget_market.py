@@ -179,10 +179,12 @@ async def price_precision_async(coin: str) -> int:
 
 
 def fmt_price(value: Optional[float], coin: str) -> str:
-    """A price with the pair's precision, for emails and text."""
+    """A price for emails and text: at least 4 significant digits with thousands
+    separators (api.services.history.fmt_price); `coin` is kept for callers."""
     if value is None:
         return "market"
-    return f"{value:.{price_precision(coin)}f}"
+    from api.services.history import fmt_price as _fmt_price
+    return _fmt_price(value)
 
 
 async def get_chains(coin: str) -> list:
