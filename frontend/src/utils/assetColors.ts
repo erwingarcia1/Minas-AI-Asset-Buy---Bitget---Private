@@ -9,7 +9,7 @@ export const ASSET_COLORS: Record<string, string> = {
   XRP: "#0e7490",
   XLM: "#0f9d75",
   DOGE: "#7c4a1e",   // chocolate brown: away from the amber "paused" badge
-  SHIB: "#c026d3",   // fuchsia (provisional: judged next to SOL's pink)
+  SHIB: "#1e3a8a",   // navy: away from SOL's pink; judged against ETH indigo and USDC blue in the real donut
   PEPE: "#65a30d",   // lime: away from the green "active" badge
   Other: "#94a3b8",
 };
