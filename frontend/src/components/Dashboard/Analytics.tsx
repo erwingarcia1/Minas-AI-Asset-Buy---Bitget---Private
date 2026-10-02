@@ -66,8 +66,8 @@ export default function Analytics() {
                 {perf.holdings.map((h) => (
                   <tr key={h.crypto} className="border-t border-slate-100">
                     <td className="py-2 font-medium"><span aria-hidden className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: assetColor(h.crypto) }} />{h.crypto}</td>
-                    <td>{fmtPrice(h.average_buy_price, h.price_precision)}</td>
-                    <td>{h.current_price != null ? fmtPrice(h.current_price, h.price_precision) : "—"}</td>
+                    <td>{fmtPrice(h.average_buy_price)}</td>
+                    <td>{h.current_price != null ? fmtPrice(h.current_price) : "—"}</td>
                     <td className={pnlTone(h.unrealized_pnl_pct)}>{h.unrealized_pnl_pct != null ? `${h.unrealized_pnl_pct}%` : "—"}</td>
                   </tr>
                 ))}

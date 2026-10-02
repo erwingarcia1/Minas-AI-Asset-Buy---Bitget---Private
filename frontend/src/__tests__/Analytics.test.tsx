@@ -34,10 +34,10 @@ describe("Analytics", () => {
     expect(screen.getByRole("button", { name: /^BTC: 99\.5%, 600\.00 USDT, 0\.01 BTC$/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^XLM: 0\.5%, 3\.00 USDT, 14\.30568 XLM$/ })).toBeInTheDocument();
     expect(screen.queryByText(/Best:|Worst:|Diversification score|cadence|guidance/)).toBeNull();
-    // prices follow the pair's precision: BTC 2 decimals, XLM 5
+    // prices: at least 4 significant digits, never fewer than 2 decimals
     expect(screen.getByText("50,000.00 USDT")).toBeInTheDocument();
-    expect(screen.getByText("0.20945 USDT")).toBeInTheDocument();
-    expect(screen.getByText("0.21000 USDT")).toBeInTheDocument();
+    expect(screen.getByText("0.2095 USDT")).toBeInTheDocument();
+    expect(screen.getByText("0.21 USDT")).toBeInTheDocument();
     const notes = screen.getAllByTestId("estimates-note");
     expect(notes.length).toBeGreaterThanOrEqual(3);
     for (const n of notes) expect(n).toHaveTextContent("Estimates only, not financial advice; past performance doesn't guarantee future results.");

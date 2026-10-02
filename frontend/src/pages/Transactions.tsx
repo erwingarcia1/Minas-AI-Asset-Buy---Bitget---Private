@@ -46,7 +46,7 @@ export default function Transactions() {
                     <td className="px-4 py-2 font-medium">{t.crypto}</td>
                     <td className="px-4 py-2">{t.status === "failed" || t.status === "pending" ? "—" : <>{fmtCrypto(t.amount_crypto)}{t.net_amount != null && t.net_amount !== t.amount_crypto && <div className="text-xs text-slate-400" title="After the trading fee charged in the coin">{fmtCrypto(t.net_amount)} received</div>}</>}</td>
                     <td className="px-4 py-2">{t.status === "failed" ? <span className="text-slate-400" title="A failed attempt spends nothing">— <span className="text-xs">nothing spent</span></span> : t.status === "pending" ? "—" : fmtUsdt(t.cost_usdt)}</td>
-                    <td className="px-4 py-2">{t.exchange_rate && t.status !== "failed" ? fmtPrice(t.exchange_rate, t.price_precision) : "—"}</td>
+                    <td className="px-4 py-2">{t.exchange_rate && t.status !== "failed" ? fmtPrice(t.exchange_rate) : "—"}</td>
                     <td className="px-4 py-2 text-xs">
                       {t.status === "failed" ? <span className="font-medium text-red-700">Attempt failed — not bought</span> : t.tx_type === "withdrawal" ? <>{t.status === "simulated" ? "Simulated send to" : "Sent to"} <span className="font-mono" title={t.wallet_address ?? ""}>{(t.wallet_address ?? "").slice(0, 10)}…</span> ({t.blockchain_network})</> : t.tx_type === "buy" ? "Bought on exchange" : "Held on exchange"}
                       <div className="text-slate-400">{t.exchange ?? "—"}{t.order_id ? ` · order ${t.order_id}` : ""}{t.tx_hash ? ` · tx ${t.tx_hash.slice(0, 10)}…` : ""}</div>
