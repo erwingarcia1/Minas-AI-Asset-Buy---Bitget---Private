@@ -8,6 +8,9 @@ export const ASSET_COLORS: Record<string, string> = {
   SOL: "#db2777",   // pink; the previous violet #7c3aed clashed with the brand purple (#543477)
   XRP: "#0e7490",
   XLM: "#0f9d75",
+  DOGE: "#7c4a1e",   // chocolate brown: away from the amber "paused" badge
+  SHIB: "#c026d3",   // fuchsia (provisional: judged next to SOL's pink)
+  PEPE: "#65a30d",   // lime: away from the green "active" badge
   Other: "#94a3b8",
 };
 const FALLBACKS = ["#d97706", "#db2777", "#4f46e5", "#0891b2", "#65a30d", "#ca8a04"];   // no purples: they would read as the brand colour
