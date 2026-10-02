@@ -14,7 +14,7 @@ async def test_meta_is_anonymous_and_carries_only_the_four_facts(client, monkeyp
     assert r.headers["cache-control"] == "public, max-age=300"
     body = r.json()
     assert set(body) == {"coins", "coin_categories", "accumulate_only", "exchanges", "support_email", "server_ip"}
-    assert [g["category"] for g in body["coin_categories"]] == ["main", "stable", "meme"] and body["accumulate_only"] == ["DOGE", "PEPE", "SHIB"]
+    assert [g["category"] for g in body["coin_categories"]] == ["main", "stable", "meme"] and body["accumulate_only"] == ["BONK", "DOGE", "PEPE", "SHIB"]
     assert body["coins"] == list(SUPPORTED_CRYPTOS) and "BTC" in body["coins"]
     assert body["exchanges"] == ["bitget"]
     assert body == {**body, "support_email": "support@example.com", "server_ip": "203.0.113.7"}

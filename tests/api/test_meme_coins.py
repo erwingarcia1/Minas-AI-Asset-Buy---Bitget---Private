@@ -25,11 +25,13 @@ from tests.test_withdrawal_ops import reload
 
 BTC_ADDR = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
 PEPE_PRICE = 0.000004181
+BONK_PRICE = 0.000003563
 # Bitget public symbol data as read on 2026-10-02 (normalised fields the app keeps)
 RECORDED = {
     "DOGE": {"symbol": "DOGEUSDT", "status": "online", "minTradeUSDT": "1", "quantityPrecision": "4", "pricePrecision": "5", "quotePrecision": "9", "takerFeeRate": "0.001"},
     "SHIB": {"symbol": "SHIBUSDT", "status": "online", "minTradeUSDT": "1", "quantityPrecision": "4", "pricePrecision": "9", "quotePrecision": "13", "takerFeeRate": "0.001"},
     "PEPE": {"symbol": "PEPEUSDT", "status": "online", "minTradeUSDT": "1", "quantityPrecision": "0", "pricePrecision": "9", "quotePrecision": "9", "takerFeeRate": "0.001"},
+    "BONK": {"symbol": "BONKUSDT", "status": "online", "minTradeUSDT": "1", "quantityPrecision": "0", "pricePrecision": "9", "quotePrecision": "9", "takerFeeRate": "0.001"},
     "BTC": {"symbol": "BTCUSDT", "status": "online", "minTradeUSDT": "1", "quantityPrecision": "6", "pricePrecision": "2", "quotePrecision": "8", "takerFeeRate": "0.001"},
 }
 
@@ -71,14 +73,14 @@ def test_registry_categories_and_policy():
     by = {c["category"]: c for c in en.categories_with_coins()}
     assert [x["symbol"] for x in by["main"]["coins"]] == ["BTC", "ETH", "SOL", "XRP", "XLM"]
     assert [x["symbol"] for x in by["stable"]["coins"]] == ["USDC"]
-    assert [(x["symbol"], x["name"]) for x in by["meme"]["coins"]] == [("DOGE", "Dogecoin"), ("SHIB", "Shiba Inu"), ("PEPE", "Pepe")]
+    assert [(x["symbol"], x["name"]) for x in by["meme"]["coins"]] == [("DOGE", "Dogecoin"), ("SHIB", "Shiba Inu"), ("PEPE", "Pepe"), ("BONK", "Bonk")]
     assert by["meme"]["accumulate_only"] is True and by["main"]["accumulate_only"] is False and by["stable"]["risk_note"] is None
     assert by["meme"]["risk_note"] == "Meme coins can move very sharply in price. Only buy what you can afford to lose."
     for label in (c["label"] for c in en.categories_with_coins()):
         assert not re.search(r"best|top|recommend|safe|popular", label, re.I), "labels describe, never rank"
     assert en.is_withdrawable("BTC") and not en.is_withdrawable("PEPE") and not en.is_withdrawable("nope")
-    assert en.ACCUMULATE_ONLY == {"DOGE", "SHIB", "PEPE"}
-    assert "PEPE" not in en.CRYPTO_CHAINS, "no address family: nothing to validate, nothing to withdraw to"
+    assert en.ACCUMULATE_ONLY == {"DOGE", "SHIB", "PEPE", "BONK"}
+    assert "PEPE" not in en.CRYPTO_CHAINS and "BONK" not in en.CRYPTO_CHAINS, "no address family: nothing to validate, nothing to withdraw to"
 
 
 async def test_every_withdraw_path_is_refused_for_a_meme_coin_even_when_everyone_is_allowed(db, user, bitget_key, admin, everyone_allowed, monkeypatch):
@@ -134,37 +136,47 @@ async def test_every_withdraw_path_is_refused_for_a_meme_coin_even_when_everyone
         assert r.status_code == 200 and r.json()["purchase_type"] == "dca" and r.json()["status"] == "active"
 
 
-class PepeGateway(FakeGateway):
+class WholeCoinGateway(FakeGateway):
+    """Bitget fills PEPE and BONK in whole coins (quantityPrecision 0)."""
     PRICE = PEPE_PRICE
+
+    def __init__(self, price, **kw):
+        super().__init__(**kw)
+        self.PRICE = price
 
     def _fill_for(self, purchase, order_id):
         fill = super()._fill_for(purchase, order_id)
-        whole = float(int(purchase.amount_usd / self.PRICE))        # Bitget fills PEPE in whole coins
+        whole = float(int(purchase.amount_usd / self.PRICE))
         fill.update(amount_crypto=whole, fee=whole * self.FEE_RATE, cost_usdt=round(whole * self.PRICE, 6))
         return fill
 
 
-async def test_ten_usdt_pepe_buy_end_to_end(db, user, bitget_key, monkeypatch):
-    p = await make_purchase(db, user, bitget_key, crypto_symbol="PEPE", purchase_type="dca", amount_usd=10.0, wallet_address=None, blockchain_network=None, next_execution=NOW)
-    gw = PepeGateway()
+@pytest.mark.parametrize("coin, price, whole, shown_amount, shown_price", [
+    ("PEPE", PEPE_PRICE, 2391772.0, "2,391,772", "0.000004181"),
+    ("BONK", BONK_PRICE, 2806623.0, "2,806,623", "0.000003563"),
+])
+async def test_ten_usdt_whole_coin_buy_end_to_end(db, user, bitget_key, coin, price, whole, shown_amount, shown_price):
+    p = await make_purchase(db, user, bitget_key, crypto_symbol=coin, purchase_type="dca", amount_usd=10.0, wallet_address=None, blockchain_network=None, next_execution=NOW)
+    gw = WholeCoinGateway(price)
     await ps.execute_due_purchases(db, now=NOW, gateway=gw, dry_run=False)
     p = await reload(db, p.id)
     tx = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id))).scalar_one()
-    assert tx.status == "success" and tx.amount_executed == 2391772.0 and tx.fill_price == PEPE_PRICE and tx.fee == pytest.approx(2391.772)
+    assert tx.status == "success" and tx.amount_executed == whole and tx.fill_price == price and tx.fee == pytest.approx(whole * 0.001)
+    assert abs(tx.cost_usd - 10.0) < 0.001, "a whole-coin fill spends within one coin of the amount; the fill guard passed"
     assert p.status == "active" and gw.withdrawals == [], "accumulate: held on the exchange, nothing withdrawn"
-    pos = {x.crypto: x for x in await history.positions(db, user.id)}["PEPE"]
-    assert pos.acquired == pytest.approx(2391772.0 - 2391.772) and pos.cost_usd == pytest.approx(tx.cost_usd)
+    pos = {x.crypto: x for x in await history.positions(db, user.id)}[coin]
+    assert pos.acquired == pytest.approx(whole - whole * 0.001) and pos.cost_usd == pytest.approx(tx.cost_usd)
     # human text: amount with separators and 2 decimals, price with 4 significant digits
     event = purchase_events.PurchaseEvent(type="buy_executed", user=user, purchase=p, tx=tx, dry_run=False, exchange="bitget")
     mail = CapturingEmail()
     await mail.send_purchase_event_email(user.email, event)
-    assert "2,391,772 PEPE" in mail.sent[0]["subject"] and "at 0.000004181" in mail.sent[0]["text"]
+    assert f"{shown_amount} {coin}" in mail.sent[0]["subject"] and f"at {shown_price}" in mail.sent[0]["text"]
     text, _ = telegram.format_purchase_event(event)
-    assert "→ 2,391,772 PEPE @ 0.000004181 USDT" in text and "held on the exchange" in text
+    assert f"→ {shown_amount} {coin} @ {shown_price} USDT" in text and "held on the exchange" in text
     async with api() as c:
         row = (await c.get(f"/api/v2/purchases/{p.id}", headers=auth(user))).json()
-        assert row["latest_transaction"]["amount_executed"] == 2391772.0, "the API keeps raw numbers"
-        assert row["latest_transaction"]["fill_price"] == PEPE_PRICE
+        assert row["latest_transaction"]["amount_executed"] == whole, "the API keeps raw numbers"
+        assert row["latest_transaction"]["fill_price"] == price
 
 
 async def test_csv_is_plain_and_round_trips_while_pdf_formats_for_humans(db, user):
@@ -172,11 +184,14 @@ async def test_csv_is_plain_and_round_trips_while_pdf_formats_for_humans(db, use
     year = datetime.now(timezone.utc).year
     await make_history(db, user, crypto="PEPE", amount_crypto=2391772.0, cost_usd=10.0, purchase_type="dca", fill_price=PEPE_PRICE, fee=2391.772, fee_currency="PEPE")
     await make_history(db, user, crypto="SHIB", amount_crypto=1778330.9, cost_usd=10.0, purchase_type="dca", fill_price=0.000005621)
+    await make_history(db, user, crypto="BONK", amount_crypto=2806623.0, cost_usd=10.0, purchase_type="dca", fill_price=BONK_PRICE, fee=2806.623, fee_currency="BONK")
     await make_history(db, user, crypto="BTC", amount_crypto=0.001, cost_usd=84.48736, purchase_type="dca", fill_price=84487.36)
     summary = await report_generator.tax_summary(db, user.id, year)
     rows = {r["crypto"]: r for r in csv.DictReader(io.StringIO(report_generator.tax_summary_csv(summary)))}
     assert rows["PEPE"]["quantity"] == "2391772" and rows["PEPE"]["fill_price_usd"] == "0.000004181" and rows["PEPE"]["net_quantity"] == "2389380.228"
     assert rows["SHIB"]["fill_price_usd"] == "0.000005621" and rows["BTC"]["fill_price_usd"] == "84487.36" and rows["BTC"]["quantity"] == "0.001"
+    assert rows["BONK"]["quantity"] == "2806623" and rows["BONK"]["net_quantity"] == "2803816.377" and rows["BONK"]["fill_price_usd"] == "0.000003563"
+    assert float(rows["BONK"]["quantity"]) == 2806623.0 and float(rows["BONK"]["fill_price_usd"]) == BONK_PRICE
     for r in rows.values():
         for col in ("quantity", "net_quantity", "fill_price_usd", "usd_amount", "fee"):
             assert "," not in r[col], (col, r[col])
@@ -186,7 +201,9 @@ async def test_csv_is_plain_and_round_trips_while_pdf_formats_for_humans(db, use
     text = pdf + b"".join(_inflate(m) for m in re.findall(rb"stream\r?\n(.*?)endstream", pdf, re.S))
     # the PDF table: gross amount with separators, average price at 4 significant digits
     assert b"(2,391,772)" in text and b"(0.000004181)" in text and b"(84,487.36)" in text and b"(1,778,330.9)" in text, "PDF is for humans"
-    assert summary["acquisitions"][1]["average_price_usdt"] == pytest.approx(10 / 2391772, rel=1e-9), "API keeps the raw average"
+    assert b"(2,806,623)" in text and b"(0.000003563)" in text, "BONK row in the PDF"
+    avg = {h["crypto"]: h["average_price_usdt"] for h in summary["acquisitions"]}
+    assert avg["PEPE"] == pytest.approx(10 / 2391772, rel=1e-9) and avg["BONK"] == pytest.approx(10 / 2806623, rel=1e-9), "API keeps the raw average"
 
 
 async def test_market_and_meta_carry_the_category(db, user, monkeypatch):
@@ -203,17 +220,17 @@ async def test_market_and_meta_carry_the_category(db, user, monkeypatch):
         btc = (await c.get("/api/v2/market/coins/BTC", headers=auth(user))).json()
         assert btc["category"] == "main" and btc["accumulate_only"] is False and btc["risk_note"] is None
         meta = (await c.get("/api/public/meta")).json()
-        assert meta["coins"] == list(en.SUPPORTED_CRYPTOS) and meta["accumulate_only"] == ["DOGE", "PEPE", "SHIB"]
+        assert meta["coins"] == list(en.SUPPORTED_CRYPTOS) and meta["accumulate_only"] == ["BONK", "DOGE", "PEPE", "SHIB"]
         assert [g["category"] for g in meta["coin_categories"]] == ["main", "stable", "meme"]
         assert meta["coin_categories"][2]["coins"][2] == {"symbol": "PEPE", "name": "Pepe"}
 
 
 def test_bitget_symbol_check_passes_for_the_three_coins_on_recorded_data():
-    for coin in ("DOGE", "SHIB", "PEPE"):
+    for coin in ("DOGE", "SHIB", "PEPE", "BONK"):
         sym = bitget_market.normalize_symbol(RECORDED[coin])
         assert sym["online"] and sym["min_trade_usdt"] == 1.0
         bitget_market.check_symbol(coin, 10.0, sym)   # no exception: 10 USDT clears the minimum
-    assert bitget_market.normalize_symbol(RECORDED["PEPE"])["quantity_precision"] == 0
+    assert bitget_market.normalize_symbol(RECORDED["PEPE"])["quantity_precision"] == 0 == bitget_market.normalize_symbol(RECORDED["BONK"])["quantity_precision"]
 
 
 def test_formatters():

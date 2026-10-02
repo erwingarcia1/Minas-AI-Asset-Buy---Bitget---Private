@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **Coin registry with categories.** `api/utils/exchange_networks.py` now
   holds every purchase coin with a display name, a category and the address
   family its withdrawals use. Categories: Main coins (BTC, ETH, SOL, XRP,
-  XLM), Stablecoins (USDC), Meme coins (DOGE, SHIB, PEPE; Bitget USDT pairs
-  checked online on 2026-10-02, 1 USDT minimum; PEPE trades in whole coins).
+  XLM), Stablecoins (USDC), Meme coins (DOGE, SHIB, PEPE, BONK; Bitget USDT pairs
+  checked online on 2026-10-02, 1 USDT minimum; PEPE and BONK trade in whole coins).
   Labels describe, never rank.
 * **Meme coins are accumulate-only, as a category property.** They are bought
   and held on the exchange; withdraw mode is never offered for them, whatever

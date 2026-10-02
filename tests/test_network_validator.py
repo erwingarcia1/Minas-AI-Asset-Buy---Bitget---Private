@@ -101,6 +101,6 @@ class TestNetworkInference:
 def test_supported_purchase_coins_map_to_an_address_family():
     """USDT is the quote coin, not a purchase coin (kept from tests/test_exchange_networks.py)."""
     from api.utils import exchange_networks as en
-    assert set(en.SUPPORTED_CRYPTOS) == {"BTC", "ETH", "USDC", "SOL", "XRP", "XLM", "DOGE", "SHIB", "PEPE"}
-    assert en.ACCUMULATE_ONLY == {"DOGE", "SHIB", "PEPE"} and set(en.CRYPTO_CHAINS) == {"BTC", "ETH", "USDC", "SOL", "XRP", "XLM"}
+    assert set(en.SUPPORTED_CRYPTOS) == {"BTC", "ETH", "USDC", "SOL", "XRP", "XLM", "DOGE", "SHIB", "PEPE", "BONK"}
+    assert en.ACCUMULATE_ONLY == {"DOGE", "SHIB", "PEPE", "BONK"} and set(en.CRYPTO_CHAINS) == {"BTC", "ETH", "USDC", "SOL", "XRP", "XLM"}
     assert en.CRYPTO_CHAINS["XRP"] == "xrpl" and en.CRYPTO_CHAINS["XLM"] == "stellar"

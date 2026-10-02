@@ -56,6 +56,7 @@ COINS: Dict[str, Coin] = {c.symbol: c for c in (
     Coin("DOGE", "Dogecoin", "meme"),                 # Bitget DOGEUSDT checked online 2026-10-02; accumulate-only
     Coin("SHIB", "Shiba Inu", "meme"),                # Bitget SHIBUSDT checked online 2026-10-02; accumulate-only
     Coin("PEPE", "Pepe", "meme"),                     # Bitget PEPEUSDT checked online 2026-10-02; whole-coin pair; accumulate-only
+    Coin("BONK", "Bonk", "meme"),                     # Bitget BONKUSDT rechecked online 2026-10-02; whole-coin pair; accumulate-only
 )}
 
 SUPPORTED_CRYPTOS = tuple(COINS)

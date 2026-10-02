@@ -160,7 +160,7 @@ SAMPLE_CHAINS = {
              "extraWithdrawFee": "0", "withdrawConfirm": "1", "minWithdrawAmount": "57.7433883", "browserUrl": "https://stellar.expert/explorer/public/tx/", "withdrawMinScale": "7"}],
 }
 SAMPLE_ASK = {"BTC": 77042.84, "ETH": 4000.0, "SOL": 200.0, "USDT": 1.0, "USDC": 1.0, "XRP": 2.5, "XLM": 0.35,
-              "DOGE": 0.09179, "SHIB": 0.000005621, "PEPE": 0.000004181}
+              "DOGE": 0.09179, "SHIB": 0.000005621, "PEPE": 0.000004181, "BONK": 0.000003563}
 
 
 @pytest.fixture(autouse=True)
@@ -173,7 +173,8 @@ def stub_bitget_market(monkeypatch):
     # accumulate-only meme coins as Bitget quoted them on 2026-10-02 (no chains: never withdrawn)
     MEME_SYMBOLS = {"DOGE": {"pricePrecision": "5", "quantityPrecision": "4"},
                     "SHIB": {"pricePrecision": "9", "quantityPrecision": "4"},
-                    "PEPE": {"pricePrecision": "9", "quantityPrecision": "0"}}
+                    "PEPE": {"pricePrecision": "9", "quantityPrecision": "0"},
+                    "BONK": {"pricePrecision": "9", "quantityPrecision": "0"}}
 
     def fetch_symbol(symbol):
         coin = symbol[:-4] if symbol.endswith("USDT") else symbol
