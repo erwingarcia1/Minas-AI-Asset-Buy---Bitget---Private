@@ -18,7 +18,7 @@ export const COIN_CATEGORIES: CoinCategory[] = [
     coins: [{ symbol: "USDC", name: "USD Coin" }] },
   { category: "meme", label: "Meme coins", accumulate_only: true,
     risk_note: "Meme coins can move very sharply in price. Only buy what you can afford to lose.",
-    coins: [{ symbol: "DOGE", name: "Dogecoin" }, { symbol: "SHIB", name: "Shiba Inu" }, { symbol: "PEPE", name: "Pepe" }] },
+    coins: [{ symbol: "DOGE", name: "Dogecoin" }, { symbol: "SHIB", name: "Shiba Inu" }, { symbol: "PEPE", name: "Pepe" }, { symbol: "BONK", name: "Bonk" }] },
 ];
 
 export const AUTOBUY_CRYPTOS = COIN_CATEGORIES.flatMap((g) => g.coins.map((c) => c.symbol)) as readonly string[];

@@ -31,7 +31,7 @@ const CREATED = { purchase_id: "p1", status: "active", next_execution: null };
 /** Click the category tab that holds `symbol`, then its coin button. */
 function pickCoin(symbol: string) {
   const tabs = screen.getAllByRole("tab");
-  const tabFor: Record<string, string> = { DOGE: "Meme coins", SHIB: "Meme coins", PEPE: "Meme coins", USDC: "Stablecoins" };
+  const tabFor: Record<string, string> = { DOGE: "Meme coins", SHIB: "Meme coins", PEPE: "Meme coins", BONK: "Meme coins", USDC: "Stablecoins" };
   fireEvent.click(tabs.find((t) => t.textContent === (tabFor[symbol] ?? "Main coins"))!);
   fireEvent.click(within(screen.getByTestId("coin-picker")).getByRole("button", { name: new RegExp(`^${symbol}\\b`) }));
 }
@@ -176,7 +176,7 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
       coins.push(...within(screen.getByTestId("coin-picker")).getAllByRole("button").map((b) => b.querySelector("span")!.textContent!));
     }
     expect(coins).not.toContain("USDT");
-    expect(coins).toEqual(expect.arrayContaining(["BTC", "ETH", "USDC", "SOL", "DOGE", "SHIB", "PEPE"]));
+    expect(coins).toEqual(expect.arrayContaining(["BTC", "ETH", "USDC", "SOL", "DOGE", "SHIB", "PEPE", "BONK"]));
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Main coins", "Stablecoins", "Meme coins"]);
   });
 

@@ -69,7 +69,7 @@ describe("Landing page", () => {
     // grouped by category from the built-in registry when meta carries no categories
     expect(screen.getByTestId("coin-group-main").textContent).toMatch(/Main coins.*BTC.*ETH.*SOL.*XRP.*XLM/s);
     expect(screen.getByTestId("coin-group-stable").textContent).toMatch(/Stablecoins.*USDC/s);
-    expect(screen.getByTestId("coin-group-meme").textContent).toMatch(/Meme coins.*DOGE.*SHIB.*PEPE.*Bought and held in your Bitget sub-account/s);
+    expect(screen.getByTestId("coin-group-meme").textContent).toMatch(/Meme coins.*DOGE.*SHIB.*PEPE.*BONK.*Bought and held in your Bitget sub-account/s);
     expect(screen.getByTestId("coin-list").textContent).not.toMatch(/best|top|recommend|safe|popular/i);
     expect(screen.getAllByRole("link", { name: "Request access" })[0]).toHaveAttribute("href", "mailto:support@minastech.ca?subject=AutoBuy%20access%20request");
     expect(screen.getAllByRole("link", { name: "Log in" })[0]).toHaveAttribute("href", "/login");
