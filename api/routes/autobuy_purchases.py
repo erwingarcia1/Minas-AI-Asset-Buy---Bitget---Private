@@ -143,9 +143,11 @@ async def create_purchase(
     fees is below Bitget's minimum withdrawal (autobuy), or when the exchange
     account is not the caller's."""
     if payload.purchase_type == "autobuy":
+        withdraw_gate.require_coin_withdrawable(payload.crypto_symbol)   # accumulate-only coins: never, for anyone
         withdraw_gate.require_allowed(current_user)   # private beta: withdraw mode only for allowlisted owners
     destination = None
     if payload.wallet_address is not None:
+        withdraw_gate.require_coin_withdrawable(payload.crypto_symbol)   # a wallet on file only exists for a later switch
         destination = _check_wallet(payload.wallet_address, payload.blockchain_network, payload.crypto_symbol,
                                     payload.destination_type, payload.memo)
         # after a password reset/change: only addresses this user already uses, for 24h
@@ -225,6 +227,7 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
                           payload.memo if payload.memo is not None else p.wallet_memo)
         p.wallet_destination_type, p.wallet_memo = d["destination_type"], d["memo"]
     if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
+        withdraw_gate.require_coin_withdrawable(p.crypto_symbol)   # accumulate-only coins: never
         withdraw_gate.require_allowed(current_user)   # private beta gate, before anything else
         # switching ON withdraw-immediately: blocked outright during the wallet-change hold,
         # otherwise real address + network + typed confirmation, every time
@@ -252,6 +255,7 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
         logger.info("purchase switched to dca", extra={"purchase_id": str(p.id), "user_id": str(current_user.id)})
     elif payload.wallet_address is not None:
         # changing the wallet on an existing purchase: same checks as creation
+        withdraw_gate.require_coin_withdrawable(p.crypto_symbol)
         network = payload.blockchain_network or p.blockchain_network or DEFAULT_CHAIN_FOR_COIN.get(p.crypto_symbol)
         d = _check_wallet(payload.wallet_address, network, p.crypto_symbol, payload.destination_type, payload.memo)
         await wallet_hold.check_new_address(db, current_user, d["address"], "change_wallet")
@@ -299,6 +303,7 @@ async def retry_withdrawal(purchase_id: UUID, current_user: User = Depends(get_c
     from api.tasks import purchase_scheduler as ps
     withdraw_gate.require_allowed(current_user)   # private beta gate
     p = await _owned_purchase(db, purchase_id, current_user)
+    withdraw_gate.require_coin_withdrawable(p.crypto_symbol)   # accumulate-only coins have nothing to retry
     if p.status not in ("withdrawal_failed", "needs_info"):
         raise HTTPException(status_code=409, detail={
             "error": "not_retryable",

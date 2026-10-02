@@ -16,6 +16,20 @@ MESSAGE = ("Sending coins to your own wallet isn't available during the private 
 ADMIN_MESSAGE = ("This purchase is in withdraw mode and its owner isn't allowed withdrawals during the private beta. "
                  "Ask the owner to switch it to accumulate, or resolve it keeping the coins on the exchange.")
 RESUME_HINT = "Switch this purchase to accumulate first, then resume it."
+
+
+def coin_message(coin: str) -> str:
+    return f"{coin} is bought and held on Bitget only; it can't be sent to a wallet."
+
+
+def require_coin_withdrawable(coin: str) -> None:
+    """403 for accumulate-only coins (a category property), whatever the owner's
+    allowlist status or the global switch say. Checked before the owner gate."""
+    from api.utils.exchange_networks import is_withdrawable
+    coin = (coin or "").upper()
+    if not is_withdrawable(coin):
+        raise HTTPException(status_code=403, detail={"error": "withdrawals_disabled",
+                                                     "details": {"message": coin_message(coin), "coin": coin, "accumulate_only": True}})
 REACTIVATE_HINT = "Switch your withdraw-mode purchases to accumulate first."
 ADMIN_REACTIVATE_MESSAGE = ("This account owns active withdraw-mode purchases and isn't allowed withdrawals during the "
                             "private beta; reactivating it would let them run. Ask the owner to switch them to accumulate first.")
