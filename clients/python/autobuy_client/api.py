@@ -34,9 +34,11 @@ from .types import (
     LoginRequest,
     PerformanceResponse,
     PlatformStats,
+    PortfolioSeriesResponse,
     PreferencesPayload,
     PreferencesResponse,
     ProfileUpdateRequest,
+    PublicMeta,
     PurchaseCreateRequest,
     PurchaseCreatedOut,
     PurchaseDetailOut,
@@ -54,12 +56,14 @@ from .types import (
     SendNotificationRequest,
     SendVerificationRequest,
     StatusResponse,
+    TelegramTestResult,
     TimelineResponse,
     TokenResponse,
     TransactionListResponse,
     TransactionOut,
     TransactionResponse,
     TransactionStats,
+    UnsuspendPayload,
     UserOut,
     UserProfile,
     UserPublicProfile,
@@ -150,6 +154,10 @@ class AdminApi:
         """Platform Stats — ``GET /api/admin/stats``."""
         return self._http.request("GET", "/api/admin/stats", auth=True)
 
+    def telegram_test(self) -> TelegramTestResult:
+        """Telegram Test — ``POST /api/admin/telegram/test``."""
+        return self._http.request("POST", "/api/admin/telegram/test", auth=True)
+
     def all_transactions(self, *, status_filter: Optional[str] = None, user_id: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminTransactionList:
         """All Transactions — ``GET /api/admin/transactions``."""
         return self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
@@ -174,9 +182,9 @@ class AdminApi:
         """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""
         return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/suspend", auth=True)
 
-    def unsuspend_user(self, user_id: str) -> Any:
+    def unsuspend_user(self, user_id: str, body: Optional[UnsuspendPayload] = None) -> Any:
         """Unsuspend User — ``POST /api/admin/users/{user_id}/unsuspend``."""
-        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True)
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True, body=body)
 
 
 class AsyncAdminApi:
@@ -225,6 +233,10 @@ class AsyncAdminApi:
         """Platform Stats — ``GET /api/admin/stats``."""
         return await self._http.request("GET", "/api/admin/stats", auth=True)
 
+    async def telegram_test(self) -> TelegramTestResult:
+        """Telegram Test — ``POST /api/admin/telegram/test``."""
+        return await self._http.request("POST", "/api/admin/telegram/test", auth=True)
+
     async def all_transactions(self, *, status_filter: Optional[str] = None, user_id: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminTransactionList:
         """All Transactions — ``GET /api/admin/transactions``."""
         return await self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
@@ -249,9 +261,9 @@ class AsyncAdminApi:
         """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""
         return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/suspend", auth=True)
 
-    async def unsuspend_user(self, user_id: str) -> Any:
+    async def unsuspend_user(self, user_id: str, body: Optional[UnsuspendPayload] = None) -> Any:
         """Unsuspend User — ``POST /api/admin/users/{user_id}/unsuspend``."""
-        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True)
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True, body=body)
 
 
 class AnalyticsApi:
@@ -400,6 +412,10 @@ class DashboardApi:
         """Analytics Timeline — ``GET /api/dashboard/analytics/timeline``."""
         return self._http.request("GET", "/api/dashboard/analytics/timeline", auth=True, query={"days": days})
 
+    def portfolio_series(self, *, range: Optional[str] = None) -> PortfolioSeriesResponse:
+        """Portfolio Series — ``GET /api/dashboard/portfolio/series``."""
+        return self._http.request("GET", "/api/dashboard/portfolio/series", auth=True, query={"range": range})
+
     def quick_stats(self) -> QuickStats:
         """Quick Stats — ``GET /api/dashboard/stats``."""
         return self._http.request("GET", "/api/dashboard/stats", auth=True)
@@ -418,6 +434,10 @@ class AsyncDashboardApi:
     async def analytics_timeline(self, *, days: Optional[int] = None) -> TimelineResponse:
         """Analytics Timeline — ``GET /api/dashboard/analytics/timeline``."""
         return await self._http.request("GET", "/api/dashboard/analytics/timeline", auth=True, query={"days": days})
+
+    async def portfolio_series(self, *, range: Optional[str] = None) -> PortfolioSeriesResponse:
+        """Portfolio Series — ``GET /api/dashboard/portfolio/series``."""
+        return await self._http.request("GET", "/api/dashboard/portfolio/series", auth=True, query={"range": range})
 
     async def quick_stats(self) -> QuickStats:
         """Quick Stats — ``GET /api/dashboard/stats``."""
@@ -660,6 +680,28 @@ class AsyncNotificationsApi:
     async def send_test(self) -> Any:
         """Send Test — ``POST /api/notifications/test``."""
         return await self._http.request("POST", "/api/notifications/test", auth=True)
+
+
+class PublicApi:
+    """`public` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def public_meta(self) -> PublicMeta:
+        """Public Meta — ``GET /api/public/meta``."""
+        return self._http.request("GET", "/api/public/meta", auth=False)
+
+
+class AsyncPublicApi:
+    """`public` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def public_meta(self) -> PublicMeta:
+        """Public Meta — ``GET /api/public/meta``."""
+        return await self._http.request("GET", "/api/public/meta", auth=False)
 
 
 class ReportsApi:
@@ -922,10 +964,6 @@ class WebhooksApi:
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
 
-    def resend_events(self) -> Any:
-        """Resend Events — ``POST /api/webhooks/resend``."""
-        return self._http.request("POST", "/api/webhooks/resend", auth=False)
-
     def sumsub_events(self) -> Any:
         """Sumsub Events — ``POST /api/webhooks/sumsub``."""
         return self._http.request("POST", "/api/webhooks/sumsub", auth=False)
@@ -936,10 +974,6 @@ class AsyncWebhooksApi:
 
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
-
-    async def resend_events(self) -> Any:
-        """Resend Events — ``POST /api/webhooks/resend``."""
-        return await self._http.request("POST", "/api/webhooks/resend", auth=False)
 
     async def sumsub_events(self) -> Any:
         """Sumsub Events — ``POST /api/webhooks/sumsub``."""
@@ -960,6 +994,7 @@ class Api:
         self.integrations = IntegrationsApi(http)
         self.kyc = KycApi(http)
         self.notifications = NotificationsApi(http)
+        self.public = PublicApi(http)
         self.reports = ReportsApi(http)
         self.transactions = TransactionsApi(http)
         self.user = UserApi(http)
@@ -982,6 +1017,7 @@ class AsyncApi:
         self.integrations = AsyncIntegrationsApi(http)
         self.kyc = AsyncKycApi(http)
         self.notifications = AsyncNotificationsApi(http)
+        self.public = AsyncPublicApi(http)
         self.reports = AsyncReportsApi(http)
         self.transactions = AsyncTransactionsApi(http)
         self.user = AsyncUserApi(http)
