@@ -160,3 +160,64 @@ async def test_nothing_secret_is_logged_on_the_grace_path(account, caplog):
     for secret in (t0, refresh_cookie(r1), r1.json()["access_token"], r1.json()["csrf_token"]):
         assert secret not in everything
     assert "refresh served from the rotation grace window" in everything
+
+
+# --- tokens issued before this change (no "prv" claim) ------------------------------------
+
+def mint_old_style(user_id: str) -> str:
+    """Exactly what _create_refresh_token produced before the grace window: no prv claim."""
+    from datetime import datetime, timedelta, timezone
+    from uuid import uuid4
+    now = datetime.now(timezone.utc)
+    return jwt.encode({"sub": user_id, "type": "refresh", "jti": uuid4().hex, "iat": now,
+                       "exp": now + timedelta(days=settings.refresh_token_expire_days)},
+                      settings.secret_key, algorithm=settings.algorithm)
+
+
+async def test_pre_deploy_token_without_prv_refreshes_gets_grace_and_is_dropped_by_logout(account):
+    old = mint_old_style(str(account.id))
+    assert "prv" not in jwt.get_unverified_claims(old)
+    async with client() as c:
+        # (a) refreshes normally on the new code
+        first = await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))
+        assert first.status_code == 200, first.text
+        new_token = refresh_cookie(first)
+        assert jwt.get_unverified_claims(new_token)["prv"] == jti_of(old), "the new token names the old one"
+        # (b) the grace window applies like any other token
+        second = await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))
+        assert second.status_code == 200 and second.json()["access_token"] == first.json()["access_token"]
+        assert refresh_cookie(second) == new_token
+        # (c) logout with the NEW token drops the grace entry of the old one
+        out = await c.post("/api/auth/logout", **with_cookie(c, new_token, first.json()["csrf_token"]))
+        assert out.status_code == 204
+        assert await (await redis()).exists(GRACE_PREFIX + jti_of(old)) == 0
+        assert (await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))).status_code == 401
+        assert (await c.post("/api/auth/refresh", **with_cookie(c, new_token, first.json()["csrf_token"]))).status_code == 401
+
+
+async def test_pre_deploy_token_logout_with_the_old_token_itself_leaves_no_grace(account):
+    old = mint_old_style(str(account.id))
+    async with client() as c:
+        first = await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))
+        assert first.status_code == 200
+        # a tab that still holds the OLD cookie signs out: its marker becomes "logout", no grace survives
+        out = await c.post("/api/auth/logout", **with_cookie(c, old, "csrf-old"))
+        assert out.status_code == 204
+        assert await (await redis()).exists(GRACE_PREFIX + jti_of(old)) == 0
+        marker = await (await redis()).get(REVOKED_PREFIX + jti_of(old))
+        assert (marker.decode() if isinstance(marker, bytes) else marker) == "logout"
+        assert (await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))).status_code == 401
+
+
+async def test_pre_deploy_token_is_dropped_by_a_password_change(account):
+    old = mint_old_style(str(account.id))
+    async with client() as c:
+        first = await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))
+        assert first.status_code == 200
+        new_token = refresh_cookie(first)
+        ok = await c.post("/api/auth/change-password", headers={"Authorization": f"Bearer {first.json()['access_token']}"},
+                          cookies={REFRESH_COOKIE: new_token}, json={"current_password": PW, "new_password": "Changed-Passw0rd!2"})
+        assert ok.status_code == 204
+        assert await (await redis()).exists(GRACE_PREFIX + jti_of(old)) == 0
+        assert (await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))).status_code == 401
+        assert (await c.post("/api/auth/refresh", **with_cookie(c, new_token, first.json()["csrf_token"]))).status_code == 401
