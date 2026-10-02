@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-10-02: meme coins, accumulate-only by category (PR A, ships as v0.7.5)
+
+### Added
+
+* **Coin registry with categories.** `api/utils/exchange_networks.py` now
+  holds every purchase coin with a display name, a category and the address
+  family its withdrawals use. Categories: Main coins (BTC, ETH, SOL, XRP,
+  XLM), Stablecoins (USDC), Meme coins (DOGE, SHIB, PEPE; Bitget USDT pairs
+  checked online on 2026-10-02, 1 USDT minimum; PEPE trades in whole coins).
+  Labels describe, never rank.
+* **Meme coins are accumulate-only, as a category property.** They are bought
+  and held on the exchange; withdraw mode is never offered for them, whatever
+  `WITHDRAWALS_ENABLED` or `WITHDRAW_ALLOWED_EMAILS` say. Enforced next to the
+  existing withdraw gate at every path: create in withdraw mode or with a
+  wallet on file, switch to withdraw, set a wallet, retry withdrawal, admin
+  force-retry and both admin resolutions (keeping the coins on the exchange
+  stays possible). 403 `withdrawals_disabled` with "DOGE is bought and held on
+  Bitget only; it can't be sent to a wallet." plus `coin` and `accumulate_only`.
+* `GET /api/v2/market/coins/{coin}` carries `name`, `category`,
+  `category_label`, `accumulate_only` and `risk_note` (the neutral category
+  note: "Meme coins can move very sharply in price. Only buy what you can
+  afford to lose."). `GET /api/public/meta` carries `coin_categories` and
+  `accumulate_only`.
+
+### Changed
+
+* **Number display.** Prices now show at least 4 significant digits, never
+  fewer than 2 decimals, with thousands separators (84,487.36; 0.000004181)
+  instead of the pair's precision; coin amounts keep at most 8 decimals below
+  1,000 coins and show at most 2 decimals with thousands separators from
+  1,000 (2,389,380.23 PEPE). Applied to emails, Telegram and the PDF report.
+  The CSV stays machine-readable: no grouping, dot decimal point, prices at
+  full useful precision (this also fixes the "0.00" price column for sub-cent
+  coins), amounts at up to 8 decimals; a test parses it back. The API's JSON
+  keeps raw numbers. Full precision stays in the database.
+
 ## [Unreleased] — 2026-10-01: withdraw gate, remaining paths (PR #54)
 
 ### Fixed
