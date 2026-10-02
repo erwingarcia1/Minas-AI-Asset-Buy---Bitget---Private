@@ -186,7 +186,7 @@ def test_message_formats_are_short_masked_and_marked():
                     "su…@minastech.ca · → withdrawing to the wallet next")
     text, _ = telegram.format_purchase_event(_event(purchase=_event().purchase.__class__(crypto_symbol="BTC", amount_usd=50, purchase_type="dca", wallet_address=None, blockchain_network=None),
                                                     tx=_event().tx.__class__(id=1, amount_executed=0.000594, cost_usd=49.98360312, fill_price=84147.14, withdrawal_id=None, withdrawal_chain=None, raw_status="filled", status="success", tx_type="buy")))
-    assert text == "✅ Purchase completed\nBTC · 49.98 USDT → 0.000594 BTC @ 84147.14 USDT\nsu…@minastech.ca · held on the exchange"
+    assert text == "✅ Purchase completed\nBTC · 49.98 USDT → 0.000594 BTC @ 84,147.14 USDT\nsu…@minastech.ca · held on the exchange"
     text, key = telegram.format_purchase_event(_event(type="buy_failed", error="43012: Insufficient balance", attempt=2))
     assert text == "❌ Purchase failed\nXLM · 2.00 USDT · attempt 2/3\nsu…@minastech.ca\nReason: 43012: Insufficient balance"
     assert key == "buy_failed:43012: Insufficient balance"
