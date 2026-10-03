@@ -31,9 +31,11 @@ import type {
   LoginRequest,
   PerformanceResponse,
   PlatformStats,
+  PortfolioSeriesResponse,
   PreferencesPayload,
   PreferencesResponse,
   ProfileUpdateRequest,
+  PublicMeta,
   PurchaseCreateRequest,
   PurchaseCreatedOut,
   PurchaseDetailOut,
@@ -51,12 +53,14 @@ import type {
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
+  TelegramTestResult,
   TimelineResponse,
   TokenResponse,
   TransactionListResponse,
   TransactionOut,
   TransactionResponse,
   TransactionStats,
+  UnsuspendPayload,
   UserOut,
   UserProfile,
   UserPublicProfile,
@@ -140,6 +144,11 @@ export class AdminApi {
     return this.http.request<PlatformStats>("GET", "/api/admin/stats", { auth: true });
   }
 
+  /** Telegram Test — `POST /api/admin/telegram/test` */
+  telegramTest(): Promise<TelegramTestResult> {
+    return this.http.request<TelegramTestResult>("POST", "/api/admin/telegram/test", { auth: true });
+  }
+
   /** All Transactions — `GET /api/admin/transactions` */
   allTransactions(query?: { status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }): Promise<AdminTransactionList> {
     return this.http.request<AdminTransactionList>("GET", "/api/admin/transactions", { query, auth: true });
@@ -171,8 +180,8 @@ export class AdminApi {
   }
 
   /** Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend` */
-  unsuspendUser(userId: string): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { auth: true });
+  unsuspendUser(userId: string, body?: UnsuspendPayload | null): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { body, auth: true });
   }
 
 }
@@ -266,6 +275,11 @@ export class DashboardApi {
   /** Analytics Timeline — `GET /api/dashboard/analytics/timeline` */
   analyticsTimeline(query?: { days?: number }): Promise<TimelineResponse> {
     return this.http.request<TimelineResponse>("GET", "/api/dashboard/analytics/timeline", { query, auth: true });
+  }
+
+  /** Portfolio Series — `GET /api/dashboard/portfolio/series` */
+  portfolioSeries(query?: { range?: string }): Promise<PortfolioSeriesResponse> {
+    return this.http.request<PortfolioSeriesResponse>("GET", "/api/dashboard/portfolio/series", { query, auth: true });
   }
 
   /** Quick Stats — `GET /api/dashboard/stats` */
@@ -406,6 +420,17 @@ export class NotificationsApi {
   /** Send Test — `POST /api/notifications/test` */
   sendTest(): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/notifications/test", { auth: true });
+  }
+
+}
+
+/** `public` endpoints. */
+export class PublicApi {
+  constructor(private readonly http: HttpTransport) {}
+
+  /** Public Meta — `GET /api/public/meta` */
+  publicMeta(): Promise<PublicMeta> {
+    return this.http.request<PublicMeta>("GET", "/api/public/meta", { auth: false });
   }
 
 }
@@ -559,11 +584,6 @@ export class WalletsApi {
 export class WebhooksApi {
   constructor(private readonly http: HttpTransport) {}
 
-  /** Resend Events — `POST /api/webhooks/resend` */
-  resendEvents(): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/webhooks/resend", { auth: false });
-  }
-
   /** Sumsub Events — `POST /api/webhooks/sumsub` */
   sumsubEvents(): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/webhooks/sumsub", { auth: false });
@@ -584,6 +604,7 @@ export function buildApi(http: HttpTransport) {
     integrations: new IntegrationsApi(http),
     kyc: new KycApi(http),
     notifications: new NotificationsApi(http),
+    public: new PublicApi(http),
     reports: new ReportsApi(http),
     transactions: new TransactionsApi(http),
     user: new UserApi(http),

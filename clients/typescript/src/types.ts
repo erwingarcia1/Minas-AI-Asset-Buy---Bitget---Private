@@ -341,12 +341,29 @@ export interface PlatformStats {
   active_purchases: number;
   failed_transactions_24h: number;
   signups_7d: number;
+  signups_by_day?: SignupDay[];
   suspended_users: number;
   total_invested_usdt: number;
   total_transactions: number;
   total_users: number;
   verified_users: number;
   volume_7d_usdt: number;
+}
+
+/** Portfolio value over a range: history from Bitget candle closes, the last point at the same current price the performance card uses. A bucket with no candle carries the previous close forward (carried_forward counts them). */
+export interface PortfolioSeriesResponse {
+  bucket_seconds: number;
+  buys: SeriesBuy[];
+  carried_forward?: number;
+  change_pct?: number | null;
+  change_usdt?: number | null;
+  current_value?: number | null;
+  granularity: string;
+  invested: number;
+  note: string;
+  points: SeriesPoint[];
+  range: string;
+  unpriced?: string[];
 }
 
 export interface PreferencesPayload {
@@ -378,6 +395,13 @@ export interface PreferencesResponse {
 
 export interface ProfileUpdateRequest {
   email?: string | null;
+}
+
+export interface PublicMeta {
+  coins: string[];
+  exchanges: string[];
+  server_ip: string;
+  support_email: string;
 }
 
 export interface PurchaseCreateRequest {
@@ -492,6 +516,7 @@ export interface RecurringResponse {
 
 export interface RegisterRequest {
   email: string;
+  invite_code?: string | null;
   password: string;
 }
 
@@ -511,6 +536,7 @@ export interface ResetTokenValidity {
 export interface ResolvePurchase {
   action: string;
   attempt_id?: string | null;
+  keep_on_exchange?: boolean;
   note: string;
 }
 
@@ -531,6 +557,24 @@ export interface SendVerificationRequest {
   email: string;
 }
 
+export interface SeriesBuy {
+  amount: number;
+  cost_usd: number;
+  crypto: string;
+  t: number;
+}
+
+export interface SeriesPoint {
+  invested: number;
+  t: number;
+  value: number;
+}
+
+export interface SignupDay {
+  count: number;
+  day: string;
+}
+
 export interface StatusResponse {
   applicant_id?: string | null;
   kyc_status: string;
@@ -539,6 +583,12 @@ export interface StatusResponse {
   retryable?: boolean;
   review_status?: string | null;
   synced?: boolean;
+}
+
+export interface TelegramTestResult {
+  configured: boolean;
+  error?: string | null;
+  sent: boolean;
 }
 
 export interface TimelinePoint {
@@ -655,6 +705,10 @@ export interface UndeliveredEmail {
   user_id?: string | null;
 }
 
+export interface UnsuspendPayload {
+  pause_withdraw_mode?: boolean;
+}
+
 export interface UpcomingPurchase {
   amount_usdt: number;
   crypto: string;
@@ -681,6 +735,7 @@ export interface UserProfile {
   updated_at: string;
   wallet_hold_reason?: string | null;
   wallet_hold_until?: string | null;
+  withdrawals_allowed?: boolean;
 }
 
 export interface UserPublicProfile {
