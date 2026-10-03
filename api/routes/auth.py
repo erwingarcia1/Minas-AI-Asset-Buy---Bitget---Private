@@ -294,17 +294,29 @@ def clear_session_cookies(response: Response) -> None:
     response.delete_cookie(CSRF_COOKIE, path=COOKIE_PATH, httponly=False, secure=_cookie_secure(), samesite="lax")
 
 
-def _require_csrf(request: Request) -> None:
+CSRF_MISMATCH = "header does not match the CSRF cookie"
+
+
+def _csrf_problem(request: Request) -> Optional[str]:
+    """None when the double-submit check passes, else the reason."""
     cookie = request.cookies.get(CSRF_COOKIE)
     header = request.headers.get(CSRF_HEADER)
     if cookie and header and secrets.compare_digest(cookie, header):
-        return
-    reason = ("no CSRF cookie" if not cookie else "no X-CSRF-Token header" if not header
-              else "header does not match the CSRF cookie")
+        return None
+    return "no CSRF cookie" if not cookie else "no X-CSRF-Token header" if not header else CSRF_MISMATCH
+
+
+def _csrf_failed(request: Request, reason: str) -> HTTPException:
     logger.warning("csrf_failed", extra={"path": request.url.path, "reason": reason,
                                          "has_refresh_cookie": bool(request.cookies.get(REFRESH_COOKIE))})
-    raise HTTPException(status_code=403, detail={"error": "csrf_failed",
-                                                "details": {"message": f"{reason}: send {CSRF_HEADER} equal to the {CSRF_COOKIE} cookie"}})
+    return HTTPException(status_code=403, detail={"error": "csrf_failed",
+                                                 "details": {"message": f"{reason}: send {CSRF_HEADER} equal to the {CSRF_COOKIE} cookie"}})
+
+
+def _require_csrf(request: Request) -> None:
+    reason = _csrf_problem(request)
+    if reason:
+        raise _csrf_failed(request, reason)
 
 
 def _start_session(response: Response, user_id: str) -> TokenResponse:
@@ -315,7 +327,7 @@ def _start_session(response: Response, user_id: str) -> TokenResponse:
     return TokenResponse(access_token=access.access_token, expires_in=access.expires_in, csrf_token=csrf)
 
 
-async def _rotate_session(response: Response, user_id: str, prev_jti: Optional[str]) -> TokenResponse:
+async def _rotate_session(response: Response, user_id: str, prev_jti: Optional[str], prev_csrf: Optional[str] = None) -> TokenResponse:
     """Refresh: a new session whose refresh token names the one it replaced; the
     same session is cached for the grace window under the replaced token's id."""
     import time as _time
@@ -327,7 +339,7 @@ async def _rotate_session(response: Response, user_id: str, prev_jti: Optional[s
         new_jti = jwt.get_unverified_claims(refresh_token).get("jti")
         await _store_grace(prev_jti, {"access_token": access.access_token, "access_expires_at": _time.time() + access.expires_in,
                                       "refresh_token": refresh_token, "refresh_jti": new_jti, "csrf_token": csrf,
-                                      "issued_at": _time.time()})
+                                      "prev_csrf": prev_csrf or "", "issued_at": _time.time()})
     return TokenResponse(access_token=access.access_token, expires_in=access.expires_in, csrf_token=csrf)
 
 
@@ -447,9 +459,13 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         clear_session_cookies(out)
         return out
 
-    _require_csrf(request)
+    csrf_reason = _csrf_problem(request)
+    if csrf_reason and csrf_reason != CSRF_MISMATCH:
+        raise _csrf_failed(request, csrf_reason)
     raw = request.cookies.get(REFRESH_COOKIE)
     if not raw:
+        if csrf_reason:
+            raise _csrf_failed(request, csrf_reason)
         logger.info("refresh rejected", extra={"reason": "no refresh cookie"})
         raise invalid
     try:
@@ -476,6 +492,20 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
             await _drop_grace(jti)   # nothing minted for this token may survive the change either
             return dead("refresh token issued before the password was changed")
 
+    if csrf_reason:
+        # Two tabs reloaded together: this one built its request with the CSRF value from BEFORE the
+        # other tab's rotation, but the browser attached the rotated cookies when it was sent. Inside
+        # the grace window the rotation's cached entry (keyed by the token this cookie replaced) knows
+        # that older CSRF value; serve the same session the first tab got. Anything else is a real mismatch.
+        header = request.headers.get(CSRF_HEADER) or ""
+        cached = await _load_grace(decoded.get("prv")) if decoded.get("prv") else None
+        if (cached and cached.get("prev_csrf") and secrets.compare_digest(cached["prev_csrf"], header)
+                and cached.get("refresh_jti") == jti
+                and not (user.password_changed_at is not None and cached["issued_at"] < user.password_changed_at.timestamp())):
+            logger.info("refresh served from the rotation grace window (previous CSRF value)")
+            return _resume_session(response, cached)
+        raise _csrf_failed(request, csrf_reason)
+
     if jti:
         claimed = await _claim_rotation(jti, int(decoded.get("exp", 0)))   # atomic: exactly one request rotates
         if claimed is False:
@@ -491,7 +521,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
             logger.info("refresh served from the rotation grace window")
             return _resume_session(response, cached)
     await _drop_grace(decoded.get("prv"))   # the token before this one is now two rotations old: no grace for it
-    return await _rotate_session(response, str(user_id), jti)
+    return await _rotate_session(response, str(user_id), jti, request.cookies.get(CSRF_COOKIE))
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)

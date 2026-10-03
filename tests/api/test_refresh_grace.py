@@ -221,3 +221,40 @@ async def test_pre_deploy_token_is_dropped_by_a_password_change(account):
         assert await (await redis()).exists(GRACE_PREFIX + jti_of(old)) == 0
         assert (await c.post("/api/auth/refresh", **with_cookie(c, old, "csrf-old"))).status_code == 401
         assert (await c.post("/api/auth/refresh", **with_cookie(c, new_token, first.json()["csrf_token"]))).status_code == 401
+
+
+# --- the CSRF cookie rotates with the refresh cookie ----------------------------------------
+
+async def test_second_tab_with_rotated_cookies_but_the_previous_csrf_header_gets_the_same_session(account):
+    """Tab B built its request with the old CSRF value; the browser attached the cookies tab A's
+    rotation had just set. Inside the window that is the same session; outside, or with any other
+    header, it is the ordinary 403."""
+    async with client() as c:
+        login_body, t0 = await login(c, account)
+        csrf0 = login_body["csrf_token"]
+        first = await c.post("/api/auth/refresh", **with_cookie(c, t0, csrf0))
+        assert first.status_code == 200
+        t1, csrf1 = refresh_cookie(first), first.json()["csrf_token"]
+        mixed = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: t1, CSRF_COOKIE: csrf1}, headers={CSRF_HEADER: csrf0})
+        assert mixed.status_code == 200, mixed.text
+        assert mixed.json()["access_token"] == first.json()["access_token"] and mixed.json()["csrf_token"] == csrf1
+        assert refresh_cookie(mixed) == t1, "no second rotation: both tabs hold one identical cookie set"
+        # the new cookie set still rotates normally afterwards
+        nxt = await c.post("/api/auth/refresh", **with_cookie(c, t1, csrf1))
+        assert nxt.status_code == 200
+        # any other header stays a real CSRF failure, and so does the old header once the window is gone
+        bad = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: refresh_cookie(nxt), CSRF_COOKIE: nxt.json()["csrf_token"]}, headers={CSRF_HEADER: "not-a-csrf-value"})
+        assert bad.status_code == 403 and bad.json()["detail"]["error"] == "csrf_failed"
+        await (await redis()).delete(GRACE_PREFIX + jti_of(t1))
+        late = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: refresh_cookie(nxt), CSRF_COOKIE: nxt.json()["csrf_token"]}, headers={CSRF_HEADER: csrf1})
+        assert late.status_code == 403 and late.json()["detail"]["error"] == "csrf_failed"
+
+
+async def test_csrf_failures_without_a_cookie_or_header_are_unchanged(account):
+    async with client() as c:
+        login_body, t0 = await login(c, account)
+    async with client() as fresh:   # no cookie jar: only what each request carries
+        r = await fresh.post("/api/auth/refresh", cookies={REFRESH_COOKIE: t0, CSRF_COOKIE: login_body["csrf_token"]})
+        assert r.status_code == 403 and "no X-CSRF-Token header" in r.text
+        r = await fresh.post("/api/auth/refresh", cookies={REFRESH_COOKIE: t0}, headers={CSRF_HEADER: login_body["csrf_token"]})
+        assert r.status_code == 403 and "no CSRF cookie" in r.text
