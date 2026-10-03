@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 2026-10-01: refresh rotation grace window (PR #57, ships as v0.7.3)
+## [0.7.3] — pending deploy: refresh rotation grace window (PR #57)
 
 ### Fixed
 
@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session's issue time. A real refusal still clears the cookies; a grace
   response is an ordinary 200 with Set-Cookie, so the web client needed no
   change. Refresh tokens now carry `prv`, the id of the token they replaced.
+* **The CSRF cookie rotates with the refresh cookie, and the window covers it
+  too.** Found while preparing the release: a second tab that built its
+  request with the previous CSRF value, but whose browser attached the
+  rotated cookies when it was sent, got a 403 and was signed out. The
+  rotation's cached entry now remembers the CSRF value it validated; inside
+  the window such a request gets the same cached session. Any other mismatch,
+  and the same header once the window is gone, stay a 403.
+* Tokens issued before this release (no `prv` claim) refresh, get the window,
+  and die on logout and password change exactly like new ones (tested).
+* The committed OpenAPI spec and SDKs were regenerated from the merged code.
 
 ## [Unreleased] — 2026-10-01: withdraw gate, remaining paths (PR #54)
 
