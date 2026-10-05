@@ -67,6 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
+| **pending** | PR #57 head | #57 | **v0.7.3**: refresh rotation grace window (refresh and CSRF cookies). No migration, alembic stays 025, no new `.env` lines. Deploys only after the 2026-10-05 00:12 UTC XRP buy is confirmed. Checks planned: no purchase mid-execution, Redis persistence and revocation keys, session survives the deploy, two-tab reload stays signed in, logout revokes with no grace. | `pre-v0.7.3-<UTC>.sql.gz` | `~/web-v0.7.3` |
 | 2026-10-01 18:11 | `c93f23c` | #50 #51 #52 #53 #54 | **v0.7.2**: private-beta withdraw gate (all paths), fee wording, landing follow-ups, rule files. New `.env`: `WITHDRAWALS_ENABLED=0`, `WITHDRAW_ALLOWED_EMAILS`. Verified: health and BUILD_INFO (nginx + public) at c93f23c, alembic 025, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 18:21 UTC, log scan clean, token absent; live gate check with a throwaway account (403 on create and resume, no Resume in the list, Settings beta line) torn down with all counts zero. | `pre-v0.7.2-20261001T181138Z.sql.gz` (9359 B) | `~/web-v0.7.2` |
 
 Earlier reference points, before this log starts: `v0.6.0` (`f639ae8`,
@@ -155,9 +156,9 @@ Every admin action is written to the audit table.
 - One active purchase: XRP, weekly, accumulate, 10 USD, next run
   **2026-10-05 00:12 UTC**. The only withdraw-mode purchase in the table is
   the owner's own one-time BTC purchase from 2026-09-15, status failed.
-- Open, not merged, not deployed: PR #55 (pre-buy low-balance warning,
-  migration 026), planned as `v0.7.3`. Its deploy moves alembic to 026 and
-  registers a sixth scheduler job.
+- Next: `v0.7.3` = PR #57 (refresh rotation grace, no migration), after the
+  5 Oct XRP buy; then `v0.7.4` = PR #55 (low-balance warning, migration 026,
+  sixth scheduler job); then `v0.7.5` = PR #60 + #61 (meme coins).
 - Owner-side: Resend quota retest, KYC and compliance decisions, legal text
   review.
 - Backlog: issue #35 (order-dependent admin alert digest test), #39 (remove

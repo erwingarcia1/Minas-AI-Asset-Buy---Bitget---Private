@@ -120,6 +120,14 @@ export class AdminApi {
   }
 
   /**
+   * Telegram Test — `POST /api/admin/telegram/test`
+   * @returns {Promise<import('./types.js').TelegramTestResult>}
+   */
+  telegramTest() {
+    return this.http.request("POST", "/api/admin/telegram/test", { auth: true });
+  }
+
+  /**
    * All Transactions — `GET /api/admin/transactions`
    * @param {{ status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }} [query]
    * @returns {Promise<import('./types.js').AdminTransactionList>}
@@ -179,10 +187,11 @@ export class AdminApi {
   /**
    * Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend`
    * @param {string} userId
+   * @param {import('./types.js').UnsuspendPayload | null} body
    * @returns {Promise<unknown>}
    */
-  unsuspendUser(userId) {
-    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { auth: true });
+  unsuspendUser(userId, body) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { body, auth: true });
   }
 
 }
@@ -338,6 +347,15 @@ export class DashboardApi {
    */
   analyticsTimeline(query) {
     return this.http.request("GET", "/api/dashboard/analytics/timeline", { query, auth: true });
+  }
+
+  /**
+   * Portfolio Series — `GET /api/dashboard/portfolio/series`
+   * @param {{ range?: string }} [query]
+   * @returns {Promise<import('./types.js').PortfolioSeriesResponse>}
+   */
+  portfolioSeries(query) {
+    return this.http.request("GET", "/api/dashboard/portfolio/series", { query, auth: true });
   }
 
   /**
@@ -572,6 +590,23 @@ export class NotificationsApi {
    */
   sendTest() {
     return this.http.request("POST", "/api/notifications/test", { auth: true });
+  }
+
+}
+
+/** `public` endpoints. */
+export class PublicApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Public Meta — `GET /api/public/meta`
+   * @returns {Promise<import('./types.js').PublicMeta>}
+   */
+  publicMeta() {
+    return this.http.request("GET", "/api/public/meta", { auth: false });
   }
 
 }
@@ -837,14 +872,6 @@ export class WebhooksApi {
   }
 
   /**
-   * Resend Events — `POST /api/webhooks/resend`
-   * @returns {Promise<unknown>}
-   */
-  resendEvents() {
-    return this.http.request("POST", "/api/webhooks/resend", { auth: false });
-  }
-
-  /**
    * Sumsub Events — `POST /api/webhooks/sumsub`
    * @returns {Promise<unknown>}
    */
@@ -867,6 +894,7 @@ export function buildApi(http) {
     integrations: new IntegrationsApi(http),
     kyc: new KycApi(http),
     notifications: new NotificationsApi(http),
+    public: new PublicApi(http),
     reports: new ReportsApi(http),
     transactions: new TransactionsApi(http),
     user: new UserApi(http),

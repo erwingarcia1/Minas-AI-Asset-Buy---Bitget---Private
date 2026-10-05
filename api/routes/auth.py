@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from api.services.rate_limit import limiter, is_locked_out, register_failed_login, clear_failed_logins
 
 import hashlib
+import json
 import hmac
 import logging
 import secrets
@@ -130,8 +131,10 @@ class VerifyResponse(BaseModel):
 # Helpers
 # --------------------------------------------------------------------------
 
-def _create_refresh_token(user_id: str) -> str:
-    """Create a long-lived refresh token (type=refresh, revocable via jti)."""
+def _create_refresh_token(user_id: str, prev_jti: Optional[str] = None) -> str:
+    """Create a long-lived refresh token (type=refresh, revocable via jti).
+    `prev_jti` names the token this one replaced, so logout and a password
+    change can also drop the short grace entry that still hands this token out."""
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
@@ -140,6 +143,8 @@ def _create_refresh_token(user_id: str) -> str:
         "iat": now,
         "exp": now + timedelta(days=settings.refresh_token_expire_days),
     }
+    if prev_jti:
+        payload["prv"] = prev_jti
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
@@ -156,10 +161,96 @@ async def _is_revoked(jti: str) -> bool:
 
 
 async def _revoke(jti: str, exp_ts: int) -> None:
+    """Hard revocation (logout): no grace follows."""
     from api.services.redis_client import get_redis
     import time as _time
     ttl = max(int(exp_ts - _time.time()), 1)
-    await get_redis().setex(REVOKED_PREFIX + jti, ttl, "1")
+    await get_redis().setex(REVOKED_PREFIX + jti, ttl, "logout")
+
+
+# --- rotation grace -----------------------------------------------------------
+# Browser tabs share the refresh cookie. When two tabs refresh at the same moment
+# exactly ONE request may rotate the token (an atomic SET NX claim on the revoked
+# key); the other gets the very same new session back from a short-lived,
+# encrypted cache keyed by the token it presented, so both tabs end up holding
+# one identical cookie set and no second token chain is ever minted. The cache
+# lives REFRESH_GRACE_SECONDS, covers only the immediately previous token, and
+# is dropped by logout, by the next rotation and by a password change.
+REFRESH_GRACE_SECONDS = 30
+GRACE_PREFIX = "refresh-grace:"
+CLAIM_WAIT_SECONDS = 2.0     # how long a losing request waits for the winner's cached session
+
+
+async def _claim_rotation(jti: str, exp_ts: int) -> Optional[bool]:
+    """True = this request rotates the token; False = someone already did
+    (the value holds when); None = Redis unavailable (rotate without a claim)."""
+    from api.services.redis_client import get_redis
+    import time as _time
+    ttl = max(int(exp_ts - _time.time()), 1)
+    try:
+        return bool(await get_redis().set(REVOKED_PREFIX + jti, repr(_time.time()), nx=True, ex=ttl))
+    except Exception:
+        logger.warning("rotation claim unavailable (Redis down); rotating without grace")
+        return None
+
+
+async def _store_grace(prev_jti: str, session: dict) -> None:
+    """Cache the session minted for `prev_jti`, encrypted at rest, for the grace window. Never logged."""
+    from api.routes.exchange import encrypt_value
+    from api.services.redis_client import get_redis
+    try:
+        await get_redis().setex(GRACE_PREFIX + prev_jti, REFRESH_GRACE_SECONDS, encrypt_value(json.dumps(session)))
+    except Exception:
+        logger.warning("refresh grace entry not stored (Redis down)")
+
+
+async def _drop_grace(prev_jti: Optional[str]) -> None:
+    if not prev_jti:
+        return
+    from api.services.redis_client import get_redis
+    try:
+        await get_redis().delete(GRACE_PREFIX + prev_jti)
+    except Exception:
+        logger.warning("refresh grace entry not dropped (Redis down)")
+
+
+async def _load_grace(prev_jti: str) -> Optional[dict]:
+    from api.routes.exchange import decrypt_value
+    from api.services.redis_client import get_redis
+    try:
+        raw = await get_redis().get(GRACE_PREFIX + prev_jti)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return json.loads(decrypt_value(raw.decode() if isinstance(raw, bytes) else raw))
+    except Exception:
+        logger.warning("refresh grace entry unreadable; treated as absent")
+        return None
+
+
+async def _wait_for_grace(jti: str) -> Optional[dict]:
+    """A request that lost the claim: if the winner claimed moments ago, wait for
+    its cached session; a token revoked by logout or long ago gets nothing."""
+    import asyncio
+    import time as _time
+    from api.services.redis_client import get_redis
+    try:
+        marker = await get_redis().get(REVOKED_PREFIX + jti)
+    except Exception:
+        return None
+    marker = marker.decode() if isinstance(marker, bytes) else marker
+    try:
+        claimed_at = float(marker)
+    except (TypeError, ValueError):
+        return None          # "logout" (or a legacy "1"): no grace
+    deadline = claimed_at + CLAIM_WAIT_SECONDS
+    while True:
+        cached = await _load_grace(jti)
+        if cached is not None or _time.time() > deadline:
+            return cached
+        await asyncio.sleep(0.05)
 
 
 # --------------------------------------------------------------------------
@@ -203,17 +294,29 @@ def clear_session_cookies(response: Response) -> None:
     response.delete_cookie(CSRF_COOKIE, path=COOKIE_PATH, httponly=False, secure=_cookie_secure(), samesite="lax")
 
 
-def _require_csrf(request: Request) -> None:
+CSRF_MISMATCH = "header does not match the CSRF cookie"
+
+
+def _csrf_problem(request: Request) -> Optional[str]:
+    """None when the double-submit check passes, else the reason."""
     cookie = request.cookies.get(CSRF_COOKIE)
     header = request.headers.get(CSRF_HEADER)
     if cookie and header and secrets.compare_digest(cookie, header):
-        return
-    reason = ("no CSRF cookie" if not cookie else "no X-CSRF-Token header" if not header
-              else "header does not match the CSRF cookie")
+        return None
+    return "no CSRF cookie" if not cookie else "no X-CSRF-Token header" if not header else CSRF_MISMATCH
+
+
+def _csrf_failed(request: Request, reason: str) -> HTTPException:
     logger.warning("csrf_failed", extra={"path": request.url.path, "reason": reason,
                                          "has_refresh_cookie": bool(request.cookies.get(REFRESH_COOKIE))})
-    raise HTTPException(status_code=403, detail={"error": "csrf_failed",
-                                                "details": {"message": f"{reason}: send {CSRF_HEADER} equal to the {CSRF_COOKIE} cookie"}})
+    return HTTPException(status_code=403, detail={"error": "csrf_failed",
+                                                 "details": {"message": f"{reason}: send {CSRF_HEADER} equal to the {CSRF_COOKIE} cookie"}})
+
+
+def _require_csrf(request: Request) -> None:
+    reason = _csrf_problem(request)
+    if reason:
+        raise _csrf_failed(request, reason)
 
 
 def _start_session(response: Response, user_id: str) -> TokenResponse:
@@ -222,6 +325,30 @@ def _start_session(response: Response, user_id: str) -> TokenResponse:
     csrf = secrets.token_urlsafe(32)
     set_session_cookies(response, _create_refresh_token(user_id), csrf)
     return TokenResponse(access_token=access.access_token, expires_in=access.expires_in, csrf_token=csrf)
+
+
+async def _rotate_session(response: Response, user_id: str, prev_jti: Optional[str], prev_csrf: Optional[str] = None) -> TokenResponse:
+    """Refresh: a new session whose refresh token names the one it replaced; the
+    same session is cached for the grace window under the replaced token's id."""
+    import time as _time
+    access: Token = create_access_token(user_id)
+    csrf = secrets.token_urlsafe(32)
+    refresh_token = _create_refresh_token(user_id, prev_jti)
+    set_session_cookies(response, refresh_token, csrf)
+    if prev_jti:
+        new_jti = jwt.get_unverified_claims(refresh_token).get("jti")
+        await _store_grace(prev_jti, {"access_token": access.access_token, "access_expires_at": _time.time() + access.expires_in,
+                                      "refresh_token": refresh_token, "refresh_jti": new_jti, "csrf_token": csrf,
+                                      "prev_csrf": prev_csrf or "", "issued_at": _time.time()})
+    return TokenResponse(access_token=access.access_token, expires_in=access.expires_in, csrf_token=csrf)
+
+
+def _resume_session(response: Response, cached: dict) -> TokenResponse:
+    """Grace: hand the second tab the very same session the first one got."""
+    import time as _time
+    set_session_cookies(response, cached["refresh_token"], cached["csrf_token"])
+    return TokenResponse(access_token=cached["access_token"], csrf_token=cached["csrf_token"],
+                         expires_in=max(int(cached["access_expires_at"] - _time.time()), 1))
 
 
 def _token_pair(user_id: str) -> TokenResponse:   # kept for callers/tests that only need an access token
@@ -332,9 +459,13 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         clear_session_cookies(out)
         return out
 
-    _require_csrf(request)
+    csrf_reason = _csrf_problem(request)
+    if csrf_reason and csrf_reason != CSRF_MISMATCH:
+        raise _csrf_failed(request, csrf_reason)
     raw = request.cookies.get(REFRESH_COOKIE)
     if not raw:
+        if csrf_reason:
+            raise _csrf_failed(request, csrf_reason)
         logger.info("refresh rejected", extra={"reason": "no refresh cookie"})
         raise invalid
     try:
@@ -349,8 +480,6 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         raise invalid
 
     jti = decoded.get("jti")
-    if jti and await _is_revoked(jti):
-        return dead("refresh token revoked (logout or rotation)")
 
     # Make sure the user still exists before minting new tokens.
     result = await db.execute(select(User).where(User.id == user_id))
@@ -360,13 +489,39 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
     if user.password_changed_at is not None and decoded.get("iat") is not None:
         issued = datetime.fromtimestamp(decoded["iat"], tz=timezone.utc)
         if issued < user.password_changed_at:
+            await _drop_grace(jti)   # nothing minted for this token may survive the change either
             return dead("refresh token issued before the password was changed")
-    if jti:   # rotation: the cookie just used cannot be replayed
-        try:
-            await _revoke(jti, int(decoded.get("exp", 0)))
-        except Exception:
-            logger.warning("could not revoke the rotated refresh token (Redis down)")
-    return _start_session(response, str(user_id))
+
+    if csrf_reason:
+        # Two tabs reloaded together: this one built its request with the CSRF value from BEFORE the
+        # other tab's rotation, but the browser attached the rotated cookies when it was sent. Inside
+        # the grace window the rotation's cached entry (keyed by the token this cookie replaced) knows
+        # that older CSRF value; serve the same session the first tab got. Anything else is a real mismatch.
+        header = request.headers.get(CSRF_HEADER) or ""
+        cached = await _load_grace(decoded.get("prv")) if decoded.get("prv") else None
+        if (cached and cached.get("prev_csrf") and secrets.compare_digest(cached["prev_csrf"], header)
+                and cached.get("refresh_jti") == jti
+                and not (user.password_changed_at is not None and cached["issued_at"] < user.password_changed_at.timestamp())):
+            logger.info("refresh served from the rotation grace window (previous CSRF value)")
+            return _resume_session(response, cached)
+        raise _csrf_failed(request, csrf_reason)
+
+    if jti:
+        claimed = await _claim_rotation(jti, int(decoded.get("exp", 0)))   # atomic: exactly one request rotates
+        if claimed is False:
+            cached = await _wait_for_grace(jti)
+            if cached is None:
+                return dead("refresh token revoked (logout or rotation)")
+            if user.password_changed_at is not None and cached["issued_at"] < user.password_changed_at.timestamp():
+                await _drop_grace(jti)
+                return dead("refresh token issued before the password was changed")
+            if cached.get("refresh_jti") and await _is_revoked(cached["refresh_jti"]):
+                await _drop_grace(jti)
+                return dead("refresh token revoked (logout or rotation)")
+            logger.info("refresh served from the rotation grace window")
+            return _resume_session(response, cached)
+    await _drop_grace(decoded.get("prv"))   # the token before this one is now two rotations old: no grace for it
+    return await _rotate_session(response, str(user_id), jti, request.cookies.get(CSRF_COOKIE))
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
@@ -382,6 +537,8 @@ async def logout(request: Request, response: Response):
             decoded = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
             if decoded.get("type") == "refresh" and decoded.get("jti"):
                 await _revoke(decoded["jti"], int(decoded.get("exp", 0)))
+                await _drop_grace(decoded.get("prv"))   # a tab inside the grace window must not get this session back
+                await _drop_grace(decoded["jti"])
         except JWTError:
             pass   # nothing valid to revoke; the cookie is cleared anyway
     out = Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -412,6 +569,14 @@ async def change_password(
     current_user.password_changed_at = datetime.now(timezone.utc)
     hold_until = wallet_hold.start_hold(current_user, "password_change", current_user.password_changed_at)
     await db.commit()
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if raw:   # the grace entry that would still hand out the pre-change session
+        try:
+            claims = jwt.get_unverified_claims(raw)
+            await _drop_grace(claims.get("prv"))
+            await _drop_grace(claims.get("jti"))
+        except JWTError:
+            pass
     logger.info("password changed", extra={"user_id": str(current_user.id), "wallet_hold_until": hold_until.isoformat()})
     background.add_task(_send_password_changed_email, current_user.email,
                         current_user.password_changed_at, _client_ip(request), hold_until)

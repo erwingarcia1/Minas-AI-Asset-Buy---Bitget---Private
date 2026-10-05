@@ -73,7 +73,14 @@ async def test_refresh_works_from_the_cookie_with_the_csrf_header_and_rotates(ac
         assert c.cookies[REFRESH_COOKIE] != first_cookie and c.cookies[CSRF_COOKIE] == body["csrf_token"], "both cookies rotated"
         # the new access token works
         assert (await c.get("/api/user/profile", headers={"Authorization": f"Bearer {body['access_token']}"})).status_code == 200
-        # the previous refresh cookie is revoked (replay after rotation fails)
+        # the previous refresh cookie is revoked: inside the 30 s rotation grace a replay
+        # gets the SAME session back (a second tab), after it the replay fails
+        replay = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: first_cookie, CSRF_COOKIE: body["csrf_token"]},
+                              headers={CSRF_HEADER: body["csrf_token"]})
+        assert replay.status_code == 200 and replay.json()["access_token"] == body["access_token"]
+        from api.routes.auth import GRACE_PREFIX
+        from api.services.redis_client import get_redis
+        await get_redis().delete(GRACE_PREFIX + jwt.get_unverified_claims(first_cookie)["jti"])   # window over
         replay = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: first_cookie, CSRF_COOKIE: body["csrf_token"]},
                               headers={CSRF_HEADER: body["csrf_token"]})
         assert replay.status_code == 401
