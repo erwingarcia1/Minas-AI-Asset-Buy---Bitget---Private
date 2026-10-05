@@ -93,7 +93,9 @@ async def test_csrf_header_is_required_and_must_match_the_cookie(account):
         assert missing.status_code == 403 and missing.json()["detail"]["error"] == "csrf_failed"
         wrong = await c.post("/api/auth/refresh", headers={CSRF_HEADER: "not-the-cookie"})
         assert wrong.status_code == 403
-        assert (await c.post("/api/auth/logout")).status_code == 403, "logout needs it too"
+        # logout with a valid refresh cookie succeeds without the header (SameSite=Lax cookies cannot be
+        # sent cross-site, and a stale tab must still be able to sign out for real); see test_logout_stale_csrf
+        assert (await c.post("/api/auth/logout", cookies={REFRESH_COOKIE: "not-a-token", CSRF_COOKIE: "x"})).status_code == 403, "no valid cookie: the CSRF check still applies"
         assert c.cookies.get(REFRESH_COOKIE), "a failed CSRF check does not touch the session"
         ok = await c.post("/api/auth/refresh", headers={CSRF_HEADER: login["csrf_token"]})
         assert ok.status_code == 200
