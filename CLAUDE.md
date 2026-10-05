@@ -64,7 +64,7 @@ history and the current state of the server.
   next 30 minutes (check `next_execution` of every active purchase), the
   pre-deploy dump, the baseline (health commit, alembic head, dry-run flag,
   holdings, row digest). After: health commit, served bundle, alembic,
-  holdings and digest unchanged, every scheduler job registered (six from v0.7.3), both the
+  holdings and digest unchanged, every scheduler job registered (six from v0.7.4), both the
   purchase and withdrawal jobs run once with status ok, an unfiltered
   WARNING/ERROR scan of the log since the restart.
 - `docker compose config` output is always produced with `--no-interpolate`.

@@ -38,7 +38,7 @@ with scp, and pass it with `--web`. The deploy refuses a bundle whose
 7. After: health commit, `BUILD_INFO` via nginx (:8080) and via the public
    host, alembic head, holdings and digest identical to the baseline, the scheduler jobs registered (`execute_purchases`, `poll_withdrawals`,
    `drain_email_outbox`, `admin_alert_digest`, `weekly_digest`, and from
-   v0.7.3 `low_balance_check`), the
+   v0.7.4 `low_balance_check`), the
    purchase job (every 5 min) and the withdrawal poll (every 10 min) each run
    once with status ok, an unfiltered WARNING/ERROR/Traceback scan of the API
    log since the restart.
@@ -67,6 +67,8 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
+| 2026-10-05 13:45 | `c1190ea` | #57 | **v0.7.3**: refresh rotation grace window (refresh and CSRF cookies). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at c1190ea, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 13:56 UTC, log scan clean apart from the smoke tests' own lines, token absent; Redis untouched (54 → 57 revocation keys, container not restarted); smoke: a session signed in on v0.7.2 survived the deploy, two-tab reload 2/2 rounds, logout refuses the previous and the current cookie set with 401; throwaway torn down, all counts zero. | `pre-v0.7.3-20261005T134458Z.sql.gz` (10285 B) | `~/web-v0.7.3` |
+| 2026-10-01 18:11 | `c93f23c` | #50 #51 #52 #53 #54 | **v0.7.2**: private-beta withdraw gate (all paths), fee wording, landing follow-ups, rule files. New `.env`: `WITHDRAWALS_ENABLED=0`, `WITHDRAW_ALLOWED_EMAILS`. Verified: health and BUILD_INFO (nginx + public) at c93f23c, alembic 025, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 18:21 UTC, log scan clean, token absent; live gate check with a throwaway account (403 on create and resume, no Resume in the list, Settings beta line) torn down with all counts zero. | `pre-v0.7.2-20261001T181138Z.sql.gz` (9359 B) | `~/web-v0.7.2` |
 
 Earlier reference points, before this log starts: `v0.6.0` (`f639ae8`,
 2026-09-17, migrations 023 + 024, dump
@@ -84,6 +86,8 @@ before/after files next to it), public HTTPS on 2026-09-21 (dump
 | `v0.6.5-pre-audit` | `d4d69af` | Known-good point before the codebase audit batches |
 | `v0.7.0` | `97759aa` | Dashboard charts |
 | `v0.7.1` | `7717f25` | Release covering #44, #45, #46 |
+| `v0.7.2` | `c93f23c` | Withdraw gate, fee wording, landing follow-ups, rule files (#50–#54) |
+| `v0.7.3` | `c1190ea` | Refresh rotation grace window (#57) |
 
 To roll the code back: on the server, create a branch at the tag
 (`git branch rollback-v0.7.1 v0.7.1`) and deploy it with
@@ -145,18 +149,19 @@ update users set role = 'admin' where email = 'person@example.com';
 The owner account `support@minastech.ca` was promoted this way on 2026-09-22.
 Every admin action is written to the audit table.
 
-## Current known state (2026-10-01)
+## Current known state (2026-10-05, after the v0.7.3 deploy)
 
-- Server at `ff3058a` (PR #49), alembic `025`, dry run off, schedulers not
-  paused. Three customer accounts; `support@minastech.ca` is the admin.
-- One active purchase: XRP, weekly, accumulate, 10 USD, next run
-  **2026-10-05 00:12 UTC**. Nothing else is scheduled.
-- Open, not merged, not deployed: #50 withdraw gate, #51 fee wording, #52
-  landing follow-ups. They need `WITHDRAWALS_ENABLED=0` and
-  `WITHDRAW_ALLOWED_EMAILS=support@minastech.ca` in the server `.env` before
-  the deploy. Next release tag after they ship: `v0.7.2`.
-- Owner-side: results of the withdraw-mode purchase SQL, Resend quota retest,
-  KYC and compliance decisions, legal text review.
+- Server at `c1190ea` = `v0.7.3`, alembic `025`, dry run off, schedulers not
+  paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
+  the allowlisted owner can use withdraw mode.
+- One active purchase: XRP, weekly, accumulate, 10 USD; the 5 Oct buy filled
+  at 00:16:57 UTC (6.5845 XRP for 9.99988 USDT, fee in XRP); next run
+  **2026-10-12 00:16 UTC**. The only withdraw-mode purchase in the table is
+  the owner's own one-time BTC purchase from 2026-09-15, status failed.
+- Next: `v0.7.4` = PR #55 (low-balance warning, migration 026, sixth scheduler
+  job), on the owner's word; then `v0.7.5` = PR #60 + #61 (meme coins).
+- Owner-side: Resend quota retest, KYC and compliance decisions, legal text
+  review.
 - Backlog: issue #35 (order-dependent admin alert digest test), #39 (remove
   the purchase_scheduler shim), #40 (caddy access log); audit PR 5 (C3) waits
   for an explicit go.
