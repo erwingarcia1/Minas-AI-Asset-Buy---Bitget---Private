@@ -21,7 +21,7 @@ def test_all_templates_render_both_formats():
         "milestone": {"name": "sam", "milestone": "1,000"},
         "low_balance": {"greeting": "Hello,", "attempts": 3, "missed_cycles": 3, "purchases": [{"coin": "XRP", "amount_usdt": "10.00", "frequency": "weekly",
                                                       "run_at": "Saturday, Oct 11 at 8:16 PM ET (00:16 UTC)"}],
-                        "count": 1, "needed_usdt": "10.10", "balance_usdt": "3.50", "shortfall_usdt": "6.60",
+                        "count": 1, "count_words": "one", "needed_usdt": "10.10", "balance_usdt": "3.50", "shortfall_usdt": "6.60",
                         "exchange": "Bitget", "purchases_url": "https://x.test/purchases",
                         "unsubscribe_url": "https://x.test/settings/notifications"},
     }

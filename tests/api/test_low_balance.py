@@ -78,7 +78,7 @@ async def test_short_balance_warns_once_per_run_by_email_banner_and_telegram(db,
     assert "10.00 USDT of XRP" in m["text"] and "Needs about:    10.10 USDT" in m["text"]
     assert m["text"].startswith("Hello,") and user.email.split("@")[0] not in m["text"], "no first name stored: Hello, and never the email local part"
     assert "(includes a small 1% cushion for price changes and fees)" in m["text"]
-    assert "tries 3 times a few minutes apart" in m["text"] and "After 3 skipped cycles in a row" in m["text"]
+    assert "tries 3 times a few minutes apart" in m["text"] and "After 3 skipped buys in a row" in m["text"]
     assert "Available now:  3.50 USDT" in m["text"] and "Shortfall:      6.60 USDT" in m["text"]
     assert "spot" in m["text"].lower() and "/settings/notifications" in m["text"] and "/purchases" in m["text"]
     # telegram: one masked line, no raw email
@@ -212,7 +212,7 @@ async def test_two_purchases_on_one_account_are_summed(db, user, bitget_key, mai
     assert read.calls == [bitget_key.id] and out["checked"] == 2 and out["alerted"] == 2 and out["emails"] == 1
     assert lb.low_balance_outstanding(await reload(db, a.id)) and lb.low_balance_outstanding(await reload(db, b.id))
     m = mail.sent[0]["text"]
-    assert "Your next 2 scheduled buys share one Bitget balance" in m
+    assert "Your next two scheduled buys share one Bitget balance" in m
     assert "10.00 USDT of XRP" in m and "10.00 USDT of BTC" in m and "Needs about:    20.20 USDT in total" in m
     assert "Available now:  15.00 USDT" in m and "Shortfall:      5.20 USDT" in m
     assert len(tg) == 1 and "needs ~20.20 USDT in total, has 15.00 USDT (short 5.20)" in tg[0][0]

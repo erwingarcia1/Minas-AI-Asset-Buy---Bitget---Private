@@ -93,6 +93,10 @@ def fmt_run_time(dt: datetime) -> str:
     return f"{et:%A, %b} {et.day} at {et.strftime('%I:%M %p').lstrip('0')} ET ({utc:%H:%M} UTC)"
 
 
+def _count_words(n: int) -> str:
+    return {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"}.get(n, str(n))
+
+
 def _exchange_name(account: APIKey) -> str:
     return {"bitget": "Bitget", "binance": "Binance"}.get((account.exchange or "").lower(), account.exchange or "your exchange")
 
@@ -107,7 +111,7 @@ async def _email(user: User, account: APIKey, purchases: list, balance: float, n
         attempts=MAX_ATTEMPTS, missed_cycles=MAX_MISSED_CYCLES,
         purchases=[{"coin": p.crypto_symbol, "amount_usdt": f"{float(p.amount_usd):.2f}", "frequency": p.frequency.replace("_", " "),
                     "run_at": fmt_run_time(p.next_execution)} for p in purchases],
-        count=len(purchases), needed_usdt=f"{needed:.2f}", balance_usdt=f"{balance:.2f}",
+        count=len(purchases), count_words=_count_words(len(purchases)), needed_usdt=f"{needed:.2f}", balance_usdt=f"{balance:.2f}",
         shortfall_usdt=f"{max(needed - balance, 0.0):.2f}", exchange=_exchange_name(account),
         purchases_url=build_app_link("/purchases"),
         unsubscribe_url=build_app_link("/settings/notifications"),
