@@ -67,7 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
-| **pending** | PR #55 head | #55 | **v0.7.4**: pre-buy low-balance warning. **Migration 026** (two nullable columns on purchases; dump before, rehearsed down/up locally); alembic 025 → 026; **six** scheduler jobs after the deploy (`low_balance_check` every 30 min); no new `.env` lines. Deploys only on the owner's word, 30-minute purchase check against the 12 Oct 00:16 UTC XRP run. | `pre-v0.7.4-<UTC>.sql.gz` | `~/web-v0.7.4` |
+| 2026-10-06 13:07 | `1a4d119` | #55 | **v0.7.4**: pre-buy low-balance warning. **Migration 026** applied at boot (two nullable columns on purchases, 17 rows, 64 kB table), alembic 025 → 026; **six** scheduler jobs with `low_balance_check` first run at 13:37 UTC (nothing in window); no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at 1a4d119, holdings and digest identical (21 rows), purchase and withdrawal jobs ok, log scan clean, token absent, Redis untouched. Smoke: preference visible and on, dashboard and purchase row without a banner; a throwaway with an injected balance reader got exactly one email (Resend id in the log, drained within the minute), both banners appeared, a top-up cleared them with nothing sent; torn down with all counts zero. Gap noted: the sent email left no `notifications` row. | `pre-v0.7.4-20261006T130724Z.sql.gz` (11622 B) | `~/web-v0.7.4` |
 | 2026-10-06 11:07 | `b06e2c0` | #65 | **v0.7.3.1**: sign-out from a stale tab revokes for real (issue #64). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at b06e2c0, holdings and digest identical (21 rows), five jobs, purchase and withdrawal jobs ok at 11:17 UTC, log scan clean apart from the smoke tests' own lines, token absent, Redis untouched (67 → 70 revocation keys). Smoke: a v0.7.3 session survived the deploy; two-tab reload 2/2; stale-tab sign-out 204 and the other tab signed out on its next reload, 2/2; API logout with a stale header 204 and both cookie sets 401 afterwards; throwaway torn down, all counts zero. | `pre-v0.7.3.1-20261006T110642Z.sql.gz` (12068 B) | `~/web-v0.7.3.1` |
 | 2026-10-05 13:45 | `c1190ea` | #57 | **v0.7.3**: refresh rotation grace window (refresh and CSRF cookies). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at c1190ea, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 13:56 UTC, log scan clean apart from the smoke tests' own lines, token absent; Redis untouched (54 → 57 revocation keys, container not restarted); smoke: a session signed in on v0.7.2 survived the deploy, two-tab reload 2/2 rounds, logout refuses the previous and the current cookie set with 401; throwaway torn down, all counts zero. | `pre-v0.7.3-20261005T134458Z.sql.gz` (10285 B) | `~/web-v0.7.3` |
 | 2026-10-01 18:11 | `c93f23c` | #50 #51 #52 #53 #54 | **v0.7.2**: private-beta withdraw gate (all paths), fee wording, landing follow-ups, rule files. New `.env`: `WITHDRAWALS_ENABLED=0`, `WITHDRAW_ALLOWED_EMAILS`. Verified: health and BUILD_INFO (nginx + public) at c93f23c, alembic 025, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 18:21 UTC, log scan clean, token absent; live gate check with a throwaway account (403 on create and resume, no Resume in the list, Settings beta line) torn down with all counts zero. | `pre-v0.7.2-20261001T181138Z.sql.gz` (9359 B) | `~/web-v0.7.2` |
@@ -91,6 +91,7 @@ before/after files next to it), public HTTPS on 2026-09-21 (dump
 | `v0.7.2` | `c93f23c` | Withdraw gate, fee wording, landing follow-ups, rule files (#50–#54) |
 | `v0.7.3` | `c1190ea` | Refresh rotation grace window (#57) |
 | `v0.7.3.1` | `b06e2c0` | Sign-out from a stale tab (#65) |
+| `v0.7.4` | `1a4d119` | Low-balance warning, migration 026 (#55); rollback = `alembic downgrade 025` in the container, then redeploy v0.7.3.1 with `~/web-v0.7.3.1` |
 
 To roll the code back: on the server, create a branch at the tag
 (`git branch rollback-v0.7.1 v0.7.1`) and deploy it with
@@ -152,17 +153,21 @@ update users set role = 'admin' where email = 'person@example.com';
 The owner account `support@minastech.ca` was promoted this way on 2026-09-22.
 Every admin action is written to the audit table.
 
-## Current known state (2026-10-06, after the v0.7.3.1 deploy)
+## Current known state (2026-10-06, after the v0.7.4 deploy)
 
-- Server at `b06e2c0` = `v0.7.3.1`, alembic `025`, dry run off, schedulers not
-  paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
+- Server at `1a4d119` = `v0.7.4`, alembic `026`, six scheduler jobs, dry run off,
+  schedulers not paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
   the allowlisted owner can use withdraw mode.
 - Two active purchases, both XRP weekly accumulate: the original (10 USD, 5 Oct
   buy filled at 00:16:57 UTC, next run **2026-10-12 00:16 UTC**) and a second
   one created on 2026-10-05 18:16 UTC (next run **2026-10-12 18:16 UTC**). The only withdraw-mode purchase in the table is
   the owner's own one-time BTC purchase from 2026-09-15, status failed.
-- Next: `v0.7.4` = PR #55 (low-balance warning, migration 026, sixth scheduler
-  job), on the owner's word; then `v0.7.5` = PR #60 + #61 (meme coins).
+- Next: `v0.7.4.1` = PR #68 (schedule anchor, migration 027; executor change,
+  earliest Tue 13 Oct after both Monday XRP buys); then `v0.7.5` = PR #60 + #61
+  (meme coins).
+- A customer's USDC purchase was stopped on 2026-10-06 06:21 UTC after three
+  Bitget 40014 refusals (the key lacks spot order write permission); the owner
+  was told.
 - Owner-side: Resend quota retest, KYC and compliance decisions, legal text
   review.
 - Backlog: issue #35 (order-dependent admin alert digest test), #39 (remove
