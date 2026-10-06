@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4.1] — pending deploy
+
+### Fixed
+
+* **Read-only Bitget keys are refused at verification (PR #70).** A Read-only
+  key with Spot ticked reports the code `stor` (Spot → Read); it authenticates
+  and reads balances, verification called it "verified" because the code was
+  unconfirmed, and then every buy failed with Bitget 40014 (seen live on
+  2026-10-06). `stor` is now a known code meaning Read-only: verification
+  fails with "This key is Read-only, so AutoBuy can't place buys. In Bitget,
+  edit the key to Read-write with only Spot → Trade ticked, then verify
+  again." A Read-write key with Spot → Trade (`stow`) verifies as before.
+  Settings guidance names the Read-write requirement.
+
 ## [0.7.4] — 2026-10-06: pre-buy low-balance warning (PR #55)
 
 ### Added
