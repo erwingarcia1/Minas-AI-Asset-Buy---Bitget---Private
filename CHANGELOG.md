@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4.1] — pending deploy: schedule anchor, no more drift (PR #68)
+
+### Fixed
+
+* **Recurring purchases no longer drift later.** The next run was computed
+  from the moment a buy executed, so the scheduler's 5-minute tick offset
+  accumulated (the weekly XRP buy moved from 00:12 to 00:16 UTC in one week).
+  Migration 027 adds `purchases.schedule_anchor`, set at creation and on a
+  frequency edit and never by execution, failure, pause or resume; the next
+  run is the first anchor + k × period strictly after now. Monthly keeps the
+  anchor's day and clock, clamped to each month and computed from the anchor
+  every time (31 Jan → 28 Feb → 31 Mar). A paused purchase resumed late still
+  buys once immediately, then snaps back to the grid; a far-past due time
+  catches up with one buy; retries within a cycle never move anything; an
+  exhausted cycle advances to the next grid point. The grid is UTC, so the
+  Eastern display shifts an hour across the clock change while the UTC time
+  stays put. Backfill: active and paused purchases anchor on their current
+  next_execution (the live XRP buys keep 00:16 and 18:16 UTC), everything
+  else on created_at.
+
 ## [0.7.4] — pending deploy: pre-buy low-balance warning (PR #55)
 
 ### Added
