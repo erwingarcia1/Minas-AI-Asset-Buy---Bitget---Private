@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3.1] — pending deploy: sign-out from a stale tab (issue #64, PR #65)
+
+### Fixed
+
+* **Signing out from a tab whose CSRF value went stale now signs out for
+  real.** When another tab had rotated the cookies, the stale tab's logout
+  was refused with 403 and the web app showed the login page anyway, leaving
+  the refresh cookie valid on that computer. Logout now revokes the session
+  whenever the refresh cookie holds a valid token, whatever the CSRF header
+  says (the cookies are SameSite=Lax, so a cross-site POST cannot carry them
+  and a forged sign-out is not possible); without a valid cookie the CSRF
+  check applies as before. The web app no longer pretends: a refused sign-out
+  is retried once with a freshly refreshed CSRF value, and if that fails too
+  it shows "Sign-out failed, try again." and keeps the session visible.
+
 ## [0.7.3] — 2026-10-05: refresh rotation grace window (PR #57)
 
 ### Fixed
