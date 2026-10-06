@@ -165,6 +165,7 @@ async def create_purchase(
                                      payload.blockchain_network if payload.wallet_address else None,
                                      withdraw=payload.purchase_type == "autobuy")
 
+    first_due = utcnow()
     purchase = Purchase(
         user_id=current_user.id, exchange_account_id=account.id, crypto_symbol=payload.crypto_symbol,
         amount_usd=payload.amount_usd, frequency=payload.frequency,
@@ -174,7 +175,8 @@ async def create_purchase(
         blockchain_network=payload.blockchain_network, purchase_type=payload.purchase_type,
         travel_rule_info=payload.travel_rule_info.to_json() if payload.travel_rule_info else None,
         status="active", failure_count=0,
-        next_execution=utcnow(),  # due on the scheduler's next run
+        next_execution=first_due,  # due on the scheduler's next run
+        schedule_anchor=first_due,  # the grid every later run is computed from (migration 027)
     )
     db.add(purchase)
     await db.commit()
@@ -277,7 +279,13 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
         p.status = payload.status
     if payload.amount_usd is not None:
         p.amount_usd = payload.amount_usd
-    if payload.frequency is not None:
+    if payload.frequency is not None and payload.frequency != p.frequency:
+        from api.services.purchase_executor import next_on_grid
+        p.frequency = payload.frequency
+        p.schedule_anchor = utcnow()   # a new cadence starts from the edit: next run one period from now
+        if p.status == "active":
+            p.next_execution = next_on_grid(p.schedule_anchor, p.frequency, utcnow())
+    elif payload.frequency is not None:
         p.frequency = payload.frequency
     await db.commit()
     await db.refresh(p)

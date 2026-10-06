@@ -158,10 +158,44 @@ def _record_fill(tx: PurchaseTransaction, fill: dict, now: datetime) -> None:
     tx.executed_at = now
 
 
+def next_on_grid(anchor: datetime, frequency: str, now: datetime) -> Optional[datetime]:
+    """The first anchor + k × period strictly after `now` (None for one-time).
+
+    Daily/weekly step from the anchor in whole periods, so a late run (the
+    scheduler ticks every 5 minutes) never moves the schedule. Monthly keeps
+    the anchor's day and clock, clamped to each month's length and computed
+    from the anchor every time: 31 Jan -> 28 Feb -> 31 Mar, never stuck on the
+    28th. The grid is UTC: around a clock change the Eastern display shifts an
+    hour while the UTC time stays put."""
+    if frequency == "one_time":
+        return None
+    if frequency in ("daily", "weekly"):
+        step = timedelta(days=1 if frequency == "daily" else 7)
+        if now < anchor:
+            return anchor
+        k = int((now - anchor) // step) + 1
+        return anchor + k * step
+    if frequency == "monthly":
+        months = 0
+        while True:
+            year = anchor.year + (anchor.month - 1 + months) // 12
+            month = (anchor.month - 1 + months) % 12 + 1
+            candidate = anchor.replace(year=year, month=month, day=min(anchor.day, monthrange(year, month)[1]))
+            if candidate > now:
+                return candidate
+            months += 1
+    raise ValueError(f"unknown frequency {frequency!r}")
+
+
+def _grid_next(purchase: Purchase, now: datetime) -> Optional[datetime]:
+    anchor = purchase.schedule_anchor or purchase.next_execution or now
+    return next_on_grid(anchor, purchase.frequency, now)
+
+
 def _advance(purchase: Purchase, now: datetime) -> None:
     purchase.failure_count = 0
     purchase.last_error = None
-    nxt = add_frequency(now, purchase.frequency)
+    nxt = _grid_next(purchase, now)
     if nxt is None:
         purchase.status = "completed"
         purchase.next_execution = None
@@ -194,7 +228,7 @@ def _fail_attempt(purchase: Purchase, tx: PurchaseTransaction, message: str, now
         logger.warning("purchase %s attempt %s/%s failed: %s", purchase.id, attempt, MAX_ATTEMPTS, message)
         return info
     info["cycle_exhausted"] = True
-    nxt = add_frequency(now, purchase.frequency)
+    nxt = _grid_next(purchase, now)   # the missed cycle's successor on the anchor grid, never "now + period"
     if nxt is None or info["missed_cycles"] >= MAX_MISSED_CYCLES:
         purchase.status = "failed"
         purchase.next_execution = None
