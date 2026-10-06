@@ -38,9 +38,9 @@ async def test_finds_only_active_due_purchases(db, user, binance_key):
 # --------------------------------------------------------------------------- execution
 
 @pytest.mark.parametrize("frequency, expected_next", [
-    ("daily", NOW + timedelta(days=1)),
-    ("weekly", NOW + timedelta(days=7)),
-    ("monthly", datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)),
+    ("daily", (NOW - timedelta(minutes=5)) + timedelta(days=1)),
+    ("weekly", (NOW - timedelta(minutes=5)) + timedelta(days=7)),
+    ("monthly", datetime(2026, 10, 8, 11, 55, tzinfo=timezone.utc)),   # the due time's day and clock, next month
 ])
 async def test_success_updates_next_execution_by_frequency(db, user, binance_key, frequency, expected_next):
     p = await make_purchase(db, user, binance_key, frequency=frequency, next_execution=NOW - timedelta(minutes=5))
@@ -121,13 +121,14 @@ async def test_failure_records_attempts_and_misses_the_cycle_after_three(db, use
     await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=15), gateway=gw, dry_run=True)
     await db.refresh(p)
     assert p.status == "active" and p.failure_count == 3
-    assert p.next_execution == NOW + timedelta(minutes=15) + timedelta(days=1), "next normal interval, not stalled"
+    assert p.next_execution == NOW + timedelta(days=1), "the missed cycle's successor on the anchor grid (due time + a day), not stalled"
     assert "missed this cycle (1 of 3 in a row)" in p.last_error and "MIN_NOTIONAL" in p.last_error
     txs = await tx_for(db, p)
     assert [t.status for t in txs] == ["failed"] * 3 and all(t.error_message for t in txs)
     assert all(t.tx_type == "buy" and t.client_oid for t in txs)
-    # a failed purchase is never picked up again
-    assert p.id not in {x.id for x in await ps.find_due_purchases(db, NOW + timedelta(days=1))}
+    # the missed cycle is not retried early; the purchase is due again exactly on its next grid point
+    assert p.id not in {x.id for x in await ps.find_due_purchases(db, NOW + timedelta(days=1) - timedelta(seconds=1))}
+    assert p.id in {x.id for x in await ps.find_due_purchases(db, NOW + timedelta(days=1))}
 
 
 async def test_success_resets_failure_count(db, user, binance_key):
