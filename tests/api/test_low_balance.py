@@ -76,6 +76,9 @@ async def test_short_balance_warns_once_per_run_by_email_banner_and_telegram(db,
     assert m["to"] == user.email and m["subject"] == "Top up before your next AutoBuy purchase" and m["template"] == "low_balance"
     assert "Saturday, Oct 3 at 8:12 PM ET (00:12 UTC)" in m["text"] and "Times are Eastern Time with UTC in brackets" in m["text"]
     assert "10.00 USDT of XRP" in m["text"] and "Needs about:    10.10 USDT" in m["text"]
+    assert m["text"].startswith("Hello,") and user.email.split("@")[0] not in m["text"], "no first name stored: Hello, and never the email local part"
+    assert "(includes a small 1% cushion for price changes and fees)" in m["text"]
+    assert "tries 3 times a few minutes apart" in m["text"] and "After 3 skipped cycles in a row" in m["text"]
     assert "Available now:  3.50 USDT" in m["text"] and "Shortfall:      6.60 USDT" in m["text"]
     assert "spot" in m["text"].lower() and "/settings/notifications" in m["text"] and "/purchases" in m["text"]
     # telegram: one masked line, no raw email
@@ -223,3 +226,7 @@ def test_run_time_is_eastern_first_with_utc_in_brackets():
     from datetime import datetime, timezone
     assert lb.fmt_run_time(datetime(2026, 10, 12, 0, 16, 57, tzinfo=timezone.utc)) == "Sunday, Oct 11 at 8:16 PM ET (00:16 UTC)"
     assert lb.fmt_run_time(datetime(2026, 12, 1, 13, 5, tzinfo=timezone.utc)) == "Tuesday, Dec 1 at 8:05 AM ET (13:05 UTC)"   # EST after the clock change
+    # America/New_York, not a fixed offset: the same UTC clock reads an hour earlier after 1 Nov 2026 (EDT -> EST)
+    assert lb.fmt_run_time(datetime(2026, 10, 26, 0, 16, tzinfo=timezone.utc)) == "Sunday, Oct 25 at 8:16 PM ET (00:16 UTC)"
+    assert lb.fmt_run_time(datetime(2026, 11, 2, 0, 16, tzinfo=timezone.utc)) == "Sunday, Nov 1 at 7:16 PM ET (00:16 UTC)"
+    assert lb.DISPLAY_TZ == "America/New_York"

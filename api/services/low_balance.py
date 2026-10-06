@@ -100,9 +100,11 @@ def _exchange_name(account: APIKey) -> str:
 async def _email(user: User, account: APIKey, purchases: list, balance: float, needed: float) -> bool:
     """One email per exchange account per pass, listing every purchase in a check window on it."""
     from api.utils.links import build_app_link
+    from api.services.purchase_executor import MAX_ATTEMPTS, MAX_MISSED_CYCLES
     html, text = render(
         "low_balance",
-        name=(user.email or "").split("@")[0],
+        greeting=f"Hi {user.first_name}," if getattr(user, "first_name", None) else "Hello,",   # no first name is stored today
+        attempts=MAX_ATTEMPTS, missed_cycles=MAX_MISSED_CYCLES,
         purchases=[{"coin": p.crypto_symbol, "amount_usdt": f"{float(p.amount_usd):.2f}", "frequency": p.frequency.replace("_", " "),
                     "run_at": fmt_run_time(p.next_execution)} for p in purchases],
         count=len(purchases), needed_usdt=f"{needed:.2f}", balance_usdt=f"{balance:.2f}",

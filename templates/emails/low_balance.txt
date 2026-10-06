@@ -1,15 +1,16 @@
-Hi {{ name }},
+{{ greeting }}
 
 {% if count == 1 %}Your next scheduled buy looks underfunded.{% else %}Your next {{ count }} scheduled buys share one {{ exchange }} balance, and together they look underfunded.{% endif %}
 
 {% for p in purchases %}Purchase:       {{ p.amount_usdt }} USDT of {{ p.coin }} ({{ p.frequency }}), runs {{ p.run_at }}
 {% endfor %}Needs about:    {{ needed_usdt }} USDT{% if count > 1 %} in total{% endif %}
+                (includes a small 1% cushion for price changes and fees)
 Available now:  {{ balance_usdt }} USDT
 Shortfall:      {{ shortfall_usdt }} USDT
 
 How to top up: in {{ exchange }}, move USDT into the spot wallet of the sub-account {{ app_name }} uses (Assets -> Transfer -> to Spot, choose the sub-account). Funds parked in funding, earn or futures are not seen by the buy.
 
-If the balance is still short when a buy runs, {{ app_name }} tries three times a few minutes apart, then skips that cycle and waits for the next scheduled one. After several skipped cycles in a row the purchase is stopped and you are emailed. Nothing is ever bought twice. Your purchases: {{ purchases_url }}
+If the balance is still short when a buy runs, {{ app_name }} tries {{ attempts }} times a few minutes apart, then skips that cycle and waits for the next scheduled one. After {{ missed_cycles }} skipped cycles in a row the purchase is stopped and you are emailed. Nothing is ever bought twice. Your purchases: {{ purchases_url }}
 
 Times are Eastern Time with UTC in brackets. You receive low-balance warnings because they are switched on in your notification settings. Change which emails you get: {{ unsubscribe_url }}
 Security and failure alerts are always sent.
