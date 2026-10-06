@@ -7,7 +7,7 @@ only execution history.
 """
 import uuid
 
-from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String, UniqueConstraint, event
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -74,6 +74,9 @@ class Purchase(Base):
     failure_count = Column(Integer, nullable=False, default=0)  # consecutive failed attempts
     last_error = Column(String(500), nullable=True)
     next_execution = Column(DateTime(timezone=True), nullable=True)
+    # The fixed point the recurring schedule is computed from (migration 027): set at creation and on a
+    # frequency edit, never by execution, failure, pause or resume. next run = first anchor + k × period after now.
+    schedule_anchor = Column(DateTime(timezone=True), nullable=False)
     # pre-buy low-balance alert (migration 026): the run the last warning was for, and when it
     # was sent; both NULL when nothing is outstanding. The banner shows while alerted_for == next_execution.
     low_balance_alerted_for = Column(DateTime(timezone=True), nullable=True)
@@ -146,3 +149,10 @@ class PurchaseTransaction(Base):
     withdrawal_chain = Column(String(40), nullable=True)          # exchange chain name used for a withdrawal
 
     purchase = relationship("Purchase", back_populates="transactions")
+
+
+@event.listens_for(Purchase, "before_insert")
+def _default_schedule_anchor(mapper, connection, target) -> None:
+    """A purchase created without an explicit anchor anchors on its first due time."""
+    if target.schedule_anchor is None:
+        target.schedule_anchor = target.next_execution or utcnow()
