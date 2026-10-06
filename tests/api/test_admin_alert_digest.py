@@ -52,10 +52,19 @@ def sent(monkeypatch):
     return box
 
 
-async def test_nothing_is_emailed_while_no_alert_is_critical(db, sent, monkeypatch):
+async def test_nothing_is_emailed_while_no_alert_is_critical(db, user, bitget_key, sent, monkeypatch):
+    """Scoped to this test's own world: its purchase is healthy, so it raises no critical alert
+    and nothing is emailed FOR IT. Other users' leftovers in the shared test database (a stopped
+    purchase from an interrupted test, say) are critical in their own right and are emailed for;
+    the assertion compares what was emailed with what was critical instead of assuming a clean DB."""
+    from tests.conftest_autobuy import make_purchase
     monkeypatch.setattr(settings, "support_email", "support@example.com")
+    mine = await make_purchase(db, user, bitget_key, purchase_type="dca", status="active", failure_count=0)
     result = await admin_alerts.notify_critical_alerts(db)
-    assert "stopped_purchases" not in result["critical"] and result["emailed"] == [] and sent == []
+    assert set(result["emailed"]) == set(result["critical"]), "emails exactly for the critical alerts, none otherwise"
+    assert all(str(mine.id) not in (m["text"] or "") for m in sent), "this test's healthy purchase is never the subject"
+    if not result["critical"]:
+        assert sent == [], "nothing critical anywhere: nothing emailed"
 
 
 async def test_a_stopped_purchase_reaches_support_and_admins_by_email_once_per_six_hours(db, user, bitget_key, admin, sent, monkeypatch):

@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active purchase whose next run is about a day away (23–25 h) or about two
   hours away (1–3 h), reads the available spot USDT on its exchange account
   (one read per account per pass, never an order call) and, when it is below
-  the amount plus 1%, warns once per run: email "Top up before your next
-  AutoBuy purchase" (purchase, run time in UTC and labelled as such, balance,
-  shortfall, how to move USDT to spot, unsubscribe link), a banner on the
+  the sum of what every in-window purchase on that account needs (each amount
+  plus 1%), warns once per purchase per run, one email per account: email "Top up before your next
+  AutoBuy purchase" (purchases on that account, run time in Eastern Time with UTC in brackets,
+  balance, shortfall, how to move USDT to spot, unsubscribe link), a banner on the
   dashboard and on the purchase row ("Balance low for your next buy on …"),
   and one masked line in the admin Telegram chat. The two-hour window also
   warns when the day-before check never ran. A later check that finds enough
@@ -33,6 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `GET /api/v2/purchases` rows carry `low_balance_for_next_run` and
   `low_balance_alerted_at`; `GET /api/dashboard/stats` carries `low_balance`
   (the flagged purchases). Six scheduler jobs are now registered.
+
+## [0.7.3.1] — 2026-10-06: sign-out from a stale tab (issue #64, PR #65)
+
+### Fixed
+
+* **Signing out from a tab whose CSRF value went stale now signs out for
+  real.** When another tab had rotated the cookies, the stale tab's logout
+  was refused with 403 and the web app showed the login page anyway, leaving
+  the refresh cookie valid on that computer. Logout now revokes the session
+  whenever the refresh cookie holds a valid token, whatever the CSRF header
+  says (the cookies are SameSite=Lax, so a cross-site POST cannot carry them
+  and a forged sign-out is not possible); without a valid cookie the CSRF
+  check applies as before. The web app no longer pretends: a refused sign-out
+  is retried once with a freshly refreshed CSRF value, and if that fails too
+  it shows "Sign-out failed, try again." and keeps the session visible.
 
 ## [0.7.3] — 2026-10-05: refresh rotation grace window (PR #57)
 

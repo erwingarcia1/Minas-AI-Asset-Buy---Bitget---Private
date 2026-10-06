@@ -528,19 +528,32 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
 @limiter.limit("10/minute")
 async def logout(request: Request, response: Response):
     """Sign out: revoke the refresh token from the cookie server-side and clear
-    both session cookies. Needs the X-CSRF-Token header. The short-lived access
-    token simply expires. Always 204, even when no cookie was sent."""
-    _require_csrf(request)
+    both session cookies. The short-lived access token simply expires. Always
+    204 once the cookie holds a valid refresh token, **even when the CSRF
+    header does not match**: the cookies are SameSite=Lax, so a cross-site
+    POST cannot carry them and a forged sign-out is not possible, while a tab
+    whose CSRF value went stale after another tab rotated the cookies must
+    still be able to sign out for real (issue #64). Without a valid refresh
+    cookie the CSRF check applies as before (there is nothing to revoke)."""
     raw = request.cookies.get(REFRESH_COOKIE)
+    decoded = None
     if raw:
         try:
-            decoded = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
-            if decoded.get("type") == "refresh" and decoded.get("jti"):
-                await _revoke(decoded["jti"], int(decoded.get("exp", 0)))
-                await _drop_grace(decoded.get("prv"))   # a tab inside the grace window must not get this session back
-                await _drop_grace(decoded["jti"])
+            candidate = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
+            if candidate.get("type") == "refresh" and candidate.get("jti"):
+                decoded = candidate
         except JWTError:
-            pass   # nothing valid to revoke; the cookie is cleared anyway
+            decoded = None   # nothing valid to revoke; the cookie is cleared anyway
+    if decoded is None:
+        _require_csrf(request)
+    else:
+        csrf_reason = _csrf_problem(request)
+        if csrf_reason:
+            logger.info("logout accepted despite a CSRF problem: the refresh cookie is valid and is revoked",
+                        extra={"reason": csrf_reason})
+        await _revoke(decoded["jti"], int(decoded.get("exp", 0)))
+        await _drop_grace(decoded.get("prv"))   # a tab inside the grace window must not get this session back
+        await _drop_grace(decoded["jti"])
     out = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_session_cookies(out)
     return out
