@@ -27,7 +27,7 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
             {user.email} <StatusBadge status={user.kyc_status} />
           </span>
         )}
-        {signOutError && <span role="alert" className="text-xs text-red-600" data-testid="sign-out-error">{signOutError}</span>}
+        {signOutError && <span role="alert" className="text-sm text-red-600" data-testid="sign-out-error">{signOutError}</span>}
         <button className="btn-secondary" onClick={() => void signOut()} disabled={signingOut}>Sign out</button>
       </div>
     </header>
