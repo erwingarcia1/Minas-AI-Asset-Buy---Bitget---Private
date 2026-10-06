@@ -4,7 +4,7 @@ import { Alert, Loading, StatusBadge } from "@/components/Common";
 import Analytics from "@/components/Dashboard/Analytics";
 import PortfolioChart from "@/components/Dashboard/PortfolioChart";
 import { useAsync } from "@/hooks/useAsync";
-import { capitalize, fmtCrypto, fmtDate, fmtDay, fmtUsdt } from "@/utils/format";
+import { capitalize, fmtCrypto, fmtDay, fmtRunTime, fmtUsdt } from "@/utils/format";
 
 function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
@@ -37,7 +37,7 @@ export default function Dashboard() {
       )}
       {(stats.low_balance ?? []).map((n) => (
         <div key={n.purchase_id} data-testid="low-balance-banner">
-          <Alert kind="warning">Balance low for your next {n.crypto_symbol} buy on {fmtDate(n.next_execution)}. Move USDT into the spot wallet of your exchange sub-account before then. <Link to="/purchases" className="font-medium underline">See purchases</Link></Alert>
+          <Alert kind="warning">Balance low for your next {n.crypto_symbol} buy on {fmtRunTime(n.next_execution)}. Move USDT into the spot wallet of your exchange sub-account before then. <Link to="/purchases" className="font-medium underline">See purchases</Link></Alert>
         </div>
       ))}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
