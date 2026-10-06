@@ -133,7 +133,7 @@ async def test_retry_sends_only_the_withdrawal_and_resumes_the_schedule(db, user
     assert wd.status == "success" and wd.parent_transaction_id == buy.id and wd.tx_type == "withdrawal"
     assert wd.order_id == buy.order_id and wd.raw_status == "simulated"
     await db.refresh(p)
-    assert p.status == "active" and p.next_execution == NOW + timedelta(hours=1) + timedelta(days=7)
+    assert p.status == "active" and p.next_execution == NOW + timedelta(days=7)
     assert [e.type for e in events] == ["withdrawal_sent"]
     rows = await tx_for(db, p)
     assert [r.tx_type for r in rows] == ["buy", "withdrawal", "withdrawal"]

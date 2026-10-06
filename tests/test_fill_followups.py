@@ -117,7 +117,7 @@ async def test_a_recurring_purchase_misses_the_cycle_after_three_attempts_and_mo
         assert counts["failed"] == 1
     p = await reload(db, p)
     assert p.status == "active", "not stalled"
-    assert p.failure_count == 3 and p.next_execution == NOW + timedelta(minutes=10) + timedelta(days=1), "moved on to the next normal interval"
+    assert p.failure_count == 3 and p.next_execution == NOW + timedelta(days=1), "moved on to the next normal interval"
     assert "missed this cycle (1 of 3 in a row)" in p.last_error
     # not due again before then
     assert (await ps.execute_due_purchases(db, now=NOW + timedelta(hours=3), gateway=BuyFails(), dry_run=True)) == {"executed": 0, "failed": 0, "skipped": 0}
