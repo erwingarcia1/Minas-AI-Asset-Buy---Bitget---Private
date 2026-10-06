@@ -74,7 +74,7 @@ async def test_short_balance_warns_once_per_run_by_email_banner_and_telegram(db,
     assert len(mail.sent) == 1
     m = mail.sent[0]
     assert m["to"] == user.email and m["subject"] == "Top up before your next AutoBuy purchase" and m["template"] == "low_balance"
-    assert "2026-10-04 00:12 UTC" in m["text"] and "(times are UTC)" in m["text"]
+    assert "Saturday, Oct 3 at 8:12 PM ET (00:12 UTC)" in m["text"] and "Times are Eastern Time with UTC in brackets" in m["text"]
     assert "10.00 USDT of XRP" in m["text"] and "Needs about:    10.10 USDT" in m["text"]
     assert "Available now:  3.50 USDT" in m["text"] and "Shortfall:      6.60 USDT" in m["text"]
     assert "spot" in m["text"].lower() and "/settings/notifications" in m["text"] and "/purchases" in m["text"]
@@ -161,7 +161,9 @@ async def test_skips_ineligible_owners_and_unverified_keys_and_reads_each_accoun
     read = reader(15.0)   # enough for the 10, short for the 20
     out = await lb.check_low_balances(db, now=NOW, balance_reader=read)
     assert out["checked"] == 2 and read.calls == [bitget_key.id], "one balance read per account per pass"
-    assert out["alerted"] == 1 and out["sufficient"] == 1 and len(mail.sent) == 1 and "20.00 USDT" in mail.sent[0]["text"]
+    # 15 USDT against 10 + 20 (+1%): the ACCOUNT is short, so both purchases are flagged in one email
+    assert out["alerted"] == 2 and out["sufficient"] == 0 and out["emails"] == 1 and len(mail.sent) == 1
+    assert "20.00 USDT of BTC" in mail.sent[0]["text"] and "10.00 USDT of BTC" in mail.sent[0]["text"] and "30.30 USDT in total" in mail.sent[0]["text"]
     # unverified key: not a balance problem
     bitget_key.verified = False; await db.commit()
     read = reader(0.0)
@@ -195,3 +197,29 @@ async def test_preferences_api_exposes_the_new_category(db, user):
         assert r.status_code == 200 and r.json()["email_low_balance"] is False
         fresh = (await db.execute(select(User).where(User.id == user.id).execution_options(populate_existing=True))).scalar_one()
         assert Preferences.for_user(fresh).wants_email("email_low_balance") is False
+
+
+async def test_two_purchases_on_one_account_are_summed(db, user, bitget_key, mail, tg, no_order_path):
+    """Two 10 USDT purchases on the same exchange account, 15 USDT available: each alone would pass,
+    together they need 20.20. Both are flagged, one email lists both, one Telegram line."""
+    a = await make_purchase(db, user, bitget_key, crypto_symbol="XRP", amount_usd=10.0, next_execution=RUN)
+    b = await make_purchase(db, user, bitget_key, crypto_symbol="BTC", amount_usd=10.0, next_execution=RUN + timedelta(minutes=30))
+    read = reader(15.0)
+    out = await lb.check_low_balances(db, now=NOW, balance_reader=read)
+    assert read.calls == [bitget_key.id] and out["checked"] == 2 and out["alerted"] == 2 and out["emails"] == 1
+    assert lb.low_balance_outstanding(await reload(db, a.id)) and lb.low_balance_outstanding(await reload(db, b.id))
+    m = mail.sent[0]["text"]
+    assert "Your next 2 scheduled buys share one Bitget balance" in m
+    assert "10.00 USDT of XRP" in m and "10.00 USDT of BTC" in m and "Needs about:    20.20 USDT in total" in m
+    assert "Available now:  15.00 USDT" in m and "Shortfall:      5.20 USDT" in m
+    assert len(tg) == 1 and "needs ~20.20 USDT in total, has 15.00 USDT (short 5.20)" in tg[0][0]
+    # topped up to 25: enough for both; both banners clear, nothing sent
+    out = await lb.check_low_balances(db, now=NOW + timedelta(minutes=30), balance_reader=reader(25.0))
+    assert out["cleared"] == 2 and out["alerted"] == 0 and len(mail.sent) == 1 and len(tg) == 1
+    assert not lb.low_balance_outstanding(await reload(db, a.id)) and not lb.low_balance_outstanding(await reload(db, b.id))
+
+
+def test_run_time_is_eastern_first_with_utc_in_brackets():
+    from datetime import datetime, timezone
+    assert lb.fmt_run_time(datetime(2026, 10, 12, 0, 16, 57, tzinfo=timezone.utc)) == "Sunday, Oct 11 at 8:16 PM ET (00:16 UTC)"
+    assert lb.fmt_run_time(datetime(2026, 12, 1, 13, 5, tzinfo=timezone.utc)) == "Tuesday, Dec 1 at 8:05 AM ET (13:05 UTC)"   # EST after the clock change

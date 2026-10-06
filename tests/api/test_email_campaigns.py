@@ -19,9 +19,10 @@ def test_all_templates_render_both_formats():
         "kyc_rejected": {"name": "sam"},
         "downtime_alert": {"start": "2026-09-05 02:00", "end": "2026-09-05 03:00"},
         "milestone": {"name": "sam", "milestone": "1,000"},
-        "low_balance": {"name": "sam", "coin": "XRP", "amount_usdt": "10.00", "needed_usdt": "10.10",
-                        "balance_usdt": "3.50", "shortfall_usdt": "6.60", "run_at": "2026-10-05 00:12 UTC",
-                        "frequency": "weekly", "exchange": "Bitget", "purchases_url": "https://x.test/purchases",
+        "low_balance": {"name": "sam", "purchases": [{"coin": "XRP", "amount_usdt": "10.00", "frequency": "weekly",
+                                                      "run_at": "Saturday, Oct 11 at 8:16 PM ET (00:16 UTC)"}],
+                        "count": 1, "needed_usdt": "10.10", "balance_usdt": "3.50", "shortfall_usdt": "6.60",
+                        "exchange": "Bitget", "purchases_url": "https://x.test/purchases",
                         "unsubscribe_url": "https://x.test/settings/notifications"},
     }
     assert set(contexts) == TEMPLATES
