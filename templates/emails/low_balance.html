@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Top up before your next {{ app_name }} purchase{% endblock %}
+{% block body %}
+<div style="display:none;max-height:0;overflow:hidden;color:transparent;">Your {{ purchases[0].coin }} buy on {{ purchases[0].run_at }} needs about {{ needed_usdt }} USDT in your {{ exchange }} sub-account.</div>
+<p>{{ greeting }}</p>
+<p>{% if count == 1 %}Your next scheduled buy looks underfunded:{% else %}Your next {{ count_words }} scheduled buys share one {{ exchange }} balance, and together they look underfunded:{% endif %}</p>
+<table style="border-collapse:collapse;font-size:14px;">
+  {% for p in purchases %}
+  <tr><td style="padding:4px 12px 4px 0;color:#5a6763;">Purchase</td><td><b>{{ p.amount_usdt }} USDT of {{ p.coin }}</b> ({{ p.frequency }}) · runs {{ p.run_at }}</td></tr>
+  {% endfor %}
+  <tr><td style="padding:4px 12px 4px 0;color:#5a6763;">Needs about</td><td>{{ needed_usdt }} USDT{% if count > 1 %} in total{% endif %}<br><span style="color:#5a6763;font-size:12px;">(includes a small 1% cushion for price changes and fees)</span></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#5a6763;">Available now</td><td>{{ balance_usdt }} USDT</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#5a6763;">Shortfall</td><td><b>{{ shortfall_usdt }} USDT</b></td></tr>
+</table>
+<p><b>How to top up:</b> in {{ exchange }}, move USDT into the <b>spot</b> wallet of the sub-account {{ app_name }} uses (Assets → Transfer → to Spot, choose the sub-account). Funds parked in funding, earn or futures are not seen by the buy.</p>
+<p>If the balance is still short when a buy runs, {{ app_name }} tries {{ attempts }} times a few minutes apart, then skips that cycle and waits for the next scheduled one. After {{ missed_cycles }} skipped buys in a row the purchase is stopped and you are emailed. Nothing is ever bought twice. <a href="{{ purchases_url }}">See your purchases</a>.</p>
+<p style="color:#5a6763;font-size:12px;margin-top:24px;">Times are Eastern Time with UTC in brackets. You receive low-balance warnings because they are switched on in your notification settings. <a href="{{ unsubscribe_url }}">Unsubscribe or change which emails you get</a>. Security and failure alerts are always sent.</p>
+{% endblock %}

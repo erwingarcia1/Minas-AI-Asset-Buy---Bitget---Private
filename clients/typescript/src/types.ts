@@ -308,6 +308,13 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface LowBalanceNotice {
+  amount_usd: number;
+  crypto_symbol: string;
+  next_execution: string;
+  purchase_id: string;
+}
+
 export interface NotificationRow {
   channel: string;
   created_at: string;
@@ -369,6 +376,7 @@ export interface PortfolioSeriesResponse {
 export interface PreferencesPayload {
   device_token?: string | null;
   email_enabled?: boolean | null;
+  email_low_balance?: boolean | null;
   email_milestones?: boolean | null;
   email_purchase_confirmations?: boolean | null;
   email_weekly_summary?: boolean | null;
@@ -382,6 +390,7 @@ export interface PreferencesPayload {
 export interface PreferencesResponse {
   always_on_emails?: string[];
   email_enabled: boolean;
+  email_low_balance: boolean;
   email_milestones: boolean;
   email_purchase_confirmations: boolean;
   email_weekly_summary: boolean;
@@ -437,6 +446,8 @@ export interface PurchaseDetailOut {
   id: string;
   last_error?: string | null;
   latest_transaction?: TransactionOut | null;
+  low_balance_alerted_at?: string | null;
+  low_balance_for_next_run?: boolean;
   next_execution?: string | null;
   purchase_type: string;
   status: string;
@@ -462,6 +473,8 @@ export interface PurchaseOut {
   id: string;
   last_error?: string | null;
   latest_transaction?: TransactionOut | null;
+  low_balance_alerted_at?: string | null;
+  low_balance_for_next_run?: boolean;
   next_execution?: string | null;
   purchase_type: string;
   status: string;
@@ -495,6 +508,7 @@ export interface PurchaseUpdateRequest {
 export interface QuickStats {
   active_purchases: number;
   kyc_status: string;
+  low_balance?: LowBalanceNotice[];
   total_invested_usdt: number;
   transaction_count: number;
 }

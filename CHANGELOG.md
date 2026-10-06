@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] — pending deploy: pre-buy low-balance warning (PR #55)
+
+### Added
+
+* **Low-balance warning before a scheduled buy.** A new read-only scheduler job
+  (`low_balance_check`, every 30 minutes, advisory-locked) looks at every
+  active purchase whose next run is about a day away (23–25 h) or about two
+  hours away (1–3 h), reads the available spot USDT on its exchange account
+  (one read per account per pass, never an order call) and, when it is below
+  the sum of what every in-window purchase on that account needs (each amount
+  plus 1%), warns once per purchase per run, one email per account: email "Top up before your next
+  AutoBuy purchase" (purchases on that account, run time in Eastern Time with UTC in brackets,
+  balance, shortfall, how to move USDT to spot, unsubscribe link), a banner on the
+  dashboard and on the purchase row ("Balance low for your next buy on …"),
+  and one masked line in the admin Telegram chat. The two-hour window also
+  warns when the day-before check never ran. A later check that finds enough
+  balance clears the banner. An unreadable balance goes to admins only, never
+  to the customer. Purchases that are paused, cancelled, completed, already
+  past their run time, owned by a suspended or unverified user, or on an
+  unverified key are skipped. The executor, poller and withdrawal code are
+  untouched; the job's only writes are two bookkeeping columns.
+* Migration 026: `purchases.low_balance_alerted_for` / `low_balance_alerted_at`
+  (nullable, no backfill, no index).
+* Notification preference `email_low_balance` (on by default) in the existing
+  preferences JSON, exposed on `GET/PUT /api/notifications/preferences` and in
+  Settings → Email notifications.
+* `GET /api/v2/purchases` rows carry `low_balance_for_next_run` and
+  `low_balance_alerted_at`; `GET /api/dashboard/stats` carries `low_balance`
+  (the flagged purchases). Six scheduler jobs are now registered.
+
 ## [0.7.3.1] — 2026-10-06: sign-out from a stale tab (issue #64, PR #65)
 
 ### Fixed

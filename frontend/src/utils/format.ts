@@ -22,3 +22,14 @@ export const fmtDay = (iso: string | null | undefined) =>
 
 export const capitalize = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
+/** Scheduled run times for customers: Eastern Time first, the UTC clock in brackets
+ *  ("Saturday, Oct 11 at 8:16 PM ET (00:16 UTC)"). No per-user time zone is stored yet. */
+export const DISPLAY_TZ = "America/New_York";
+export const fmtRunTime = (iso: string | null | undefined) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: DISPLAY_TZ });
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: DISPLAY_TZ });
+  const utc = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  return `${day} at ${time} ET (${utc} UTC)`;
+};

@@ -221,6 +221,8 @@ class PurchaseOut(BaseModel):
     failure_count: int
     last_error: Optional[str] = None
     next_execution: Optional[datetime] = None
+    low_balance_for_next_run: bool = False          # a low-balance warning is outstanding for next_execution
+    low_balance_alerted_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     latest_transaction: Optional[TransactionOut] = None

@@ -1626,6 +1626,36 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "LowBalanceNotice": {
+        "properties": {
+          "amount_usd": {
+            "title": "Amount Usd",
+            "type": "number"
+          },
+          "crypto_symbol": {
+            "title": "Crypto Symbol",
+            "type": "string"
+          },
+          "next_execution": {
+            "format": "date-time",
+            "title": "Next Execution",
+            "type": "string"
+          },
+          "purchase_id": {
+            "format": "uuid",
+            "title": "Purchase Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purchase_id",
+          "crypto_symbol",
+          "amount_usd",
+          "next_execution"
+        ],
+        "title": "LowBalanceNotice",
+        "type": "object"
+      },
       "NotificationRow": {
         "properties": {
           "channel": {
@@ -1978,6 +2008,17 @@
             ],
             "title": "Email Enabled"
           },
+          "email_low_balance": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Low Balance"
+          },
           "email_milestones": {
             "anyOf": [
               {
@@ -2095,6 +2136,10 @@
             "title": "Email Enabled",
             "type": "boolean"
           },
+          "email_low_balance": {
+            "title": "Email Low Balance",
+            "type": "boolean"
+          },
           "email_milestones": {
             "title": "Email Milestones",
             "type": "boolean"
@@ -2144,6 +2189,7 @@
           "email_purchase_confirmations",
           "email_weekly_summary",
           "email_milestones",
+          "email_low_balance",
           "sms_enabled",
           "push_enabled",
           "quiet_hours_start",
@@ -2430,6 +2476,23 @@
               }
             ]
           },
+          "low_balance_alerted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Balance Alerted At"
+          },
+          "low_balance_for_next_run": {
+            "default": false,
+            "title": "Low Balance For Next Run",
+            "type": "boolean"
+          },
           "next_execution": {
             "anyOf": [
               {
@@ -2613,6 +2676,23 @@
                 "type": "null"
               }
             ]
+          },
+          "low_balance_alerted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Balance Alerted At"
+          },
+          "low_balance_for_next_run": {
+            "default": false,
+            "title": "Low Balance For Next Run",
+            "type": "boolean"
           },
           "next_execution": {
             "anyOf": [
@@ -2859,6 +2939,14 @@
           "kyc_status": {
             "title": "Kyc Status",
             "type": "string"
+          },
+          "low_balance": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LowBalanceNotice"
+            },
+            "title": "Low Balance",
+            "type": "array"
           },
           "total_invested_usdt": {
             "title": "Total Invested Usdt",
@@ -5830,7 +5918,7 @@
     },
     "/api/auth/logout": {
       "post": {
-        "description": "Sign out: revoke the refresh token from the cookie server-side and clear\nboth session cookies. Needs the X-CSRF-Token header. The short-lived access\ntoken simply expires. Always 204, even when no cookie was sent.",
+        "description": "Sign out: revoke the refresh token from the cookie server-side and clear\nboth session cookies. The short-lived access token simply expires. Always\n204 once the cookie holds a valid refresh token, **even when the CSRF\nheader does not match**: the cookies are SameSite=Lax, so a cross-site\nPOST cannot carry them and a forged sign-out is not possible, while a tab\nwhose CSRF value went stale after another tab rotated the cookies must\nstill be able to sign out for real (issue #64). Without a valid refresh\ncookie the CSRF check applies as before (there is nothing to revoke).",
         "operationId": "logout_api_auth_logout_post",
         "responses": {
           "204": {
@@ -6961,7 +7049,7 @@
         ]
       },
       "put": {
-        "description": "Update channel toggles, optional email categories (purchase confirmations,\nweekly summary, milestones), quiet hours (UTC), phone number, device token.\nSecurity and failure emails cannot be switched off.",
+        "description": "Update channel toggles, optional email categories (purchase confirmations,\nweekly summary, milestones, low-balance warnings), quiet hours (UTC), phone number, device token.\nSecurity and failure emails cannot be switched off.",
         "operationId": "update_preferences_api_notifications_preferences_put",
         "requestBody": {
           "content": {

@@ -88,4 +88,12 @@ describe("Dashboard", () => {
     await waitFor(() => expect(screen.getByText(/Identity not verified/)).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Verify now" })).toHaveAttribute("href", "/kyc");
   });
+
+  it("shows one low-balance banner per flagged purchase, linking to purchases", async () => {
+    vi.mocked(dashboardAPI.quickStats).mockResolvedValue({ ...stats, low_balance: [{ purchase_id: "p9", crypto_symbol: "XRP", amount_usd: 10, next_execution: "2026-10-05T00:12:08Z" }] } as never);
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("low-balance-banner")).toBeInTheDocument());
+    expect(screen.getByTestId("low-balance-banner")).toHaveTextContent(/Balance low for your next XRP buy on .+ Move USDT into the spot wallet/);
+    expect(screen.getByRole("link", { name: "See purchases" })).toHaveAttribute("href", "/purchases");
+  });
 });

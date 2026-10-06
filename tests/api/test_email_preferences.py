@@ -22,7 +22,7 @@ def test_preferences_default_on_and_only_optional_categories_can_be_off():
     p.email_purchase_confirmations = False
     assert not p.wants_email("email_purchase_confirmations")
     assert p.wants_email("password_changed") and p.wants_email("purchase_failed"), "unknown / security categories are always on"
-    assert set(OPTIONAL_EMAIL_CATEGORIES) == {"email_purchase_confirmations", "email_weekly_summary", "email_milestones"}
+    assert set(OPTIONAL_EMAIL_CATEGORIES) == {"email_purchase_confirmations", "email_weekly_summary", "email_milestones", "email_low_balance"}
     assert "password reset" in ALWAYS_ON_EMAILS and "purchase failed" in ALWAYS_ON_EMAILS and "withdrawal failed" in ALWAYS_ON_EMAILS
 
 

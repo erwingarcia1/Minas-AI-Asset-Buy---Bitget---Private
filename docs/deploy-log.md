@@ -36,9 +36,9 @@ with scp, and pass it with `--web`. The deploy refuses a bundle whose
 6. Deploy on the server only, with the command above. The script keeps the
    previous image tagged for rollback and fast-forwards git only.
 7. After: health commit, `BUILD_INFO` via nginx (:8080) and via the public
-   host, alembic head, holdings and digest identical to the baseline, the five
-   scheduler jobs registered (`execute_purchases`, `poll_withdrawals_job`,
-   `drain_email_outbox`, `admin_alert_digest`, `send_weekly_digest`), the
+   host, alembic head, holdings and digest identical to the baseline, the scheduler jobs registered (`execute_purchases`, `poll_withdrawals`,
+   `drain_email_outbox`, `admin_alert_digest`, `weekly_digest`, and from
+   v0.7.4 `low_balance_check`), the
    purchase job (every 5 min) and the withdrawal poll (every 10 min) each run
    once with status ok, an unfiltered WARNING/ERROR/Traceback scan of the API
    log since the restart.
@@ -67,6 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
+| **pending** | PR #55 head | #55 | **v0.7.4**: pre-buy low-balance warning. **Migration 026** (two nullable columns on purchases; dump before, rehearsed down/up locally); alembic 025 → 026; **six** scheduler jobs after the deploy (`low_balance_check` every 30 min); no new `.env` lines. Deploys only on the owner's word, 30-minute purchase check against the 12 Oct 00:16 UTC XRP run. | `pre-v0.7.4-<UTC>.sql.gz` | `~/web-v0.7.4` |
 | 2026-10-06 11:07 | `b06e2c0` | #65 | **v0.7.3.1**: sign-out from a stale tab revokes for real (issue #64). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at b06e2c0, holdings and digest identical (21 rows), five jobs, purchase and withdrawal jobs ok at 11:17 UTC, log scan clean apart from the smoke tests' own lines, token absent, Redis untouched (67 → 70 revocation keys). Smoke: a v0.7.3 session survived the deploy; two-tab reload 2/2; stale-tab sign-out 204 and the other tab signed out on its next reload, 2/2; API logout with a stale header 204 and both cookie sets 401 afterwards; throwaway torn down, all counts zero. | `pre-v0.7.3.1-20261006T110642Z.sql.gz` (12068 B) | `~/web-v0.7.3.1` |
 | 2026-10-05 13:45 | `c1190ea` | #57 | **v0.7.3**: refresh rotation grace window (refresh and CSRF cookies). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at c1190ea, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 13:56 UTC, log scan clean apart from the smoke tests' own lines, token absent; Redis untouched (54 → 57 revocation keys, container not restarted); smoke: a session signed in on v0.7.2 survived the deploy, two-tab reload 2/2 rounds, logout refuses the previous and the current cookie set with 401; throwaway torn down, all counts zero. | `pre-v0.7.3-20261005T134458Z.sql.gz` (10285 B) | `~/web-v0.7.3` |
 | 2026-10-01 18:11 | `c93f23c` | #50 #51 #52 #53 #54 | **v0.7.2**: private-beta withdraw gate (all paths), fee wording, landing follow-ups, rule files. New `.env`: `WITHDRAWALS_ENABLED=0`, `WITHDRAW_ALLOWED_EMAILS`. Verified: health and BUILD_INFO (nginx + public) at c93f23c, alembic 025, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 18:21 UTC, log scan clean, token absent; live gate check with a throwaway account (403 on create and resume, no Resume in the list, Settings beta line) torn down with all counts zero. | `pre-v0.7.2-20261001T181138Z.sql.gz` (9359 B) | `~/web-v0.7.2` |
