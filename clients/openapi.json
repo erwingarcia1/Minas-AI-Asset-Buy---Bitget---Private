@@ -5918,7 +5918,7 @@
     },
     "/api/auth/logout": {
       "post": {
-        "description": "Sign out: revoke the refresh token from the cookie server-side and clear\nboth session cookies. Needs the X-CSRF-Token header. The short-lived access\ntoken simply expires. Always 204, even when no cookie was sent.",
+        "description": "Sign out: revoke the refresh token from the cookie server-side and clear\nboth session cookies. The short-lived access token simply expires. Always\n204 once the cookie holds a valid refresh token, **even when the CSRF\nheader does not match**: the cookies are SameSite=Lax, so a cross-site\nPOST cannot carry them and a forged sign-out is not possible, while a tab\nwhose CSRF value went stale after another tab rotated the cookies must\nstill be able to sign out for real (issue #64). Without a valid refresh\ncookie the CSRF check applies as before (there is nothing to revoke).",
         "operationId": "logout_api_auth_logout_post",
         "responses": {
           "204": {
