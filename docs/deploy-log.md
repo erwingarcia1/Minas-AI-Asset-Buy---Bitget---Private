@@ -67,6 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
+| **pending** | PR #70 head | #70 | **v0.7.4.1**: Read-only Bitget keys (`stor`) refused at verification with a fix-it message; sent emails leave a history row; low-balance pass and digest jobs once per tick (Redis SET NX). **No migration, no `.env` lines, executor untouched.** Owner's window: Wed 7 or Thu 8 Oct. Checklist additions: 30-minute check against **all** active purchases including the USDC one; smoke = throwaway with two dummy keys verified in-process through a stub venue (no Bitget call): `stor` answers `read_only_key` with the exact message and the row reads failed, `stow` verifies; after deploy report the count of verified keys whose last recorded codes are read-only (1 before; the tester re-verifies, expect 0). | pre-deploy dump | bundle from the merge commit |
 | 2026-10-06 13:07 | `1a4d119` | #55 | **v0.7.4**: pre-buy low-balance warning. **Migration 026** applied at boot (two nullable columns on purchases, 17 rows, 64 kB table), alembic 025 → 026; **six** scheduler jobs with `low_balance_check` first run at 13:37 UTC (nothing in window); no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at 1a4d119, holdings and digest identical (21 rows), purchase and withdrawal jobs ok, log scan clean, token absent, Redis untouched. Smoke: preference visible and on, dashboard and purchase row without a banner; a throwaway with an injected balance reader got exactly one email (Resend id in the log, drained within the minute), both banners appeared, a top-up cleared them with nothing sent; torn down with all counts zero. Gap noted: the sent email left no `notifications` row. | `pre-v0.7.4-20261006T130724Z.sql.gz` (11622 B) | `~/web-v0.7.4` |
 | 2026-10-06 11:07 | `b06e2c0` | #65 | **v0.7.3.1**: sign-out from a stale tab revokes for real (issue #64). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at b06e2c0, holdings and digest identical (21 rows), five jobs, purchase and withdrawal jobs ok at 11:17 UTC, log scan clean apart from the smoke tests' own lines, token absent, Redis untouched (67 → 70 revocation keys). Smoke: a v0.7.3 session survived the deploy; two-tab reload 2/2; stale-tab sign-out 204 and the other tab signed out on its next reload, 2/2; API logout with a stale header 204 and both cookie sets 401 afterwards; throwaway torn down, all counts zero. | `pre-v0.7.3.1-20261006T110642Z.sql.gz` (12068 B) | `~/web-v0.7.3.1` |
 | 2026-10-05 13:45 | `c1190ea` | #57 | **v0.7.3**: refresh rotation grace window (refresh and CSRF cookies). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at c1190ea, holdings and digest identical, five jobs, purchase and withdrawal jobs ok at 13:56 UTC, log scan clean apart from the smoke tests' own lines, token absent; Redis untouched (54 → 57 revocation keys, container not restarted); smoke: a session signed in on v0.7.2 survived the deploy, two-tab reload 2/2 rounds, logout refuses the previous and the current cookie set with 401; throwaway torn down, all counts zero. | `pre-v0.7.3-20261005T134458Z.sql.gz` (10285 B) | `~/web-v0.7.3` |
@@ -162,9 +163,12 @@ Every admin action is written to the audit table.
   buy filled at 00:16:57 UTC, next run **2026-10-12 00:16 UTC**) and a second
   one created on 2026-10-05 18:16 UTC (next run **2026-10-12 18:16 UTC**). The only withdraw-mode purchase in the table is
   the owner's own one-time BTC purchase from 2026-09-15, status failed.
-- Next: `v0.7.4.1` = PR #68 (schedule anchor, migration 027; executor change,
-  earliest Tue 13 Oct after both Monday XRP buys); then `v0.7.5` = PR #60 + #61
-  (meme coins).
+- Next: `v0.7.4.1` = PR #70 (read-only keys refused, sent-row, tick guard; Wed 7
+  or Thu 8 Oct); then PR #68 (schedule anchor, migration 027; executor change,
+  earliest Tue 13 Oct after both Monday XRP buys; its changelog heading still
+  says 0.7.4.1 and moves to 0.7.4.2 at its pre-merge update); then `v0.7.5` =
+  PR #60 + #61 (meme coins); then the single-scheduler process as its own
+  release.
 - A customer's USDC purchase was stopped on 2026-10-06 06:21 UTC after three
   Bitget 40014 refusals (the key lacks spot order write permission); the owner
   was told.
