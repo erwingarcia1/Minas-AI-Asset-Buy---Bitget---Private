@@ -18,6 +18,9 @@ export default function LogoCredits() {
       <p className="mt-4 text-slate-700">
         Coin logos belong to their projects and appear here only to identify the asset.
       </p>
+      <p className="mt-2 text-sm text-slate-600" data-testid="trademark-line">
+        All coin logos are trademarks of their respective owners and are used only to identify each coin.
+      </p>
       <div className="mt-6 overflow-x-auto">
         <table className="w-full text-sm" data-testid="logo-credits">
           <thead className="text-left text-slate-500"><tr><th className="py-1 pr-3">Coin</th><th className="pr-3">Source</th><th className="pr-3">Licence or terms</th></tr></thead>

@@ -4,10 +4,11 @@ import LogoCredits from "@/pages/LogoCredits";
 import { LOGO_ENTRIES } from "@/utils/logoSources";
 
 describe("Logo credits page", () => {
-  it("lists only the coins that display a logo, with source and licence, the ETH attribution, and one line for the rest", () => {
+  it("lists every coin that displays a logo (all ten), the ETH attribution and the trademark line; no 'shown with their initial' line is left", () => {
     render(<MemoryRouter><LogoCredits /></MemoryRouter>);
-    for (const e of LOGO_ENTRIES.filter((e) => !e.file)) expect(screen.queryByTestId(`credit-${e.symbol}`)).toBeNull();
-    expect(screen.getByTestId("pending-logos")).toHaveTextContent("XLM, SHIB, PEPE and BONK are shown with their initial until an official logo is available.");
+    expect(screen.getAllByTestId(/^credit-/)).toHaveLength(10);
+    expect(screen.queryByTestId("pending-logos")).toBeNull();   // every coin has a file, so the line is gone on its own
+    expect(screen.getByTestId("trademark-line")).toHaveTextContent("All coin logos are trademarks of their respective owners and are used only to identify each coin.");
     for (const e of LOGO_ENTRIES.filter((e) => e.file)) {
       const row = screen.getByTestId(`credit-${e.symbol}`);
       expect(row).toHaveTextContent(e.symbol);

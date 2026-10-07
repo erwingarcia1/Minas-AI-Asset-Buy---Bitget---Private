@@ -27,10 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-* **Logo credits page** lists only the coins that display a logo; the coins
-  shown with their initial (XLM, SHIB, PEPE, BONK today) are named in one line,
-  built from the rows of `LOGO_SOURCES.md` without a file. The full table stays
-  in `LOGO_SOURCES.md`.
+* **Logo credits page** lists only the coins that display a logo; any coin
+  shown with its initial is named in one line built from the rows of
+  `LOGO_SOURCES.md` without a file, so the line disappears on its own once
+  every coin has a logo. A trademark line reads "All coin logos are trademarks
+  of their respective owners and are used only to identify each coin."
+* **XLM, SHIB, PEPE and BONK logos**: the icon Bitget displays for each spot
+  pair, downloaded once, stored in `frontend/public/logos/` at 64 px and
+  resized only (never recoloured, cropped or redrawn, never loaded from
+  Bitget's servers), recorded in `LOGO_SOURCES.md` as "Icon as displayed on
+  Bitget (URL); trademark of [project]; used unaltered only to identify the
+  coin". All ten coins now show a logo; clearing a File cell in
+  `LOGO_SOURCES.md` puts a coin back on its lettered circle.
 
 
 ## [0.7.6] — 2026-10-07: coin logos (PR #74)
