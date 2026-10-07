@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] — pending deploy: coin logos (PR #74)
+
+### Added
+
+* **Coin logos.** The coin cards, the purchase list, the holdings table, the
+  landing page coin list and the allocation legend show each coin's logo at
+  32 px (smaller in dense rows) on a white plate in place of the colour dot.
+  Six coins ship with a logo from the project's own brand source: BTC (public
+  domain), ETH (CC BY 4.0, credited), SOL (Solana Foundation brand guidelines),
+  XRP (the community symbol), USDC (Circle brand policy), DOGE (Dogecoin Core,
+  MIT). XLM, SHIB, PEPE and BONK show a lettered circle in their own colour
+  until a licensed mark arrives; the same circle is the fallback whenever a
+  file is missing or fails to load. Logos are decorative (`alt=""`) and are
+  served only from our own domain (`/logos/`).
+* **Logo credits page** at `/logo-credits`, linked from the site footer,
+  generated from `frontend/public/logos/LOGO_SOURCES.md`: one row per coin
+  with file, source, licence and any notice the licence asks for. Adding or
+  swapping a logo later is one file plus one line in that table, no code.
+
 ## [0.7.5] — 2026-10-07: meme coins, accumulate-only by category (PR #60 + PR #61)
 
 ### Added
