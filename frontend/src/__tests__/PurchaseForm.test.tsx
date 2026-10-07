@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PurchaseForm, { validateAmountUsd } from "@/components/Purchases/PurchaseForm";
 import { useAuthStore } from "@/store/authStore";
@@ -28,6 +28,14 @@ const ETH = "0x52908400098527886E0F7030069857D2E4169EE7";
 const BTC = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
 const CREATED = { purchase_id: "p1", status: "active", next_execution: null };
 
+/** Click the category tab that holds `symbol`, then its coin button. */
+function pickCoin(symbol: string) {
+  const tabs = screen.getAllByRole("tab");
+  const tabFor: Record<string, string> = { DOGE: "Meme coins", SHIB: "Meme coins", PEPE: "Meme coins", BONK: "Meme coins", USDC: "Stablecoins" };
+  fireEvent.click(tabs.find((t) => t.textContent === (tabFor[symbol] ?? "Main coins"))!);
+  fireEvent.click(within(screen.getByTestId("coin-picker")).getByRole("button", { name: new RegExp(`^${symbol}\\b`) }));
+}
+
 describe("unified purchase form (Auto-Buy / DCA)", () => {
   beforeEach(() => {
   useAuthStore.setState({ user: { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: true } } as never);   // the withdraw toggle exists only for allowlisted users; default off
@@ -44,7 +52,7 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
     render(<PurchaseForm />);
     await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText(/Withdraw immediately/));   // these flows were written for withdraw mode; it is opt-in now
-    fireEvent.change(screen.getByLabelText("Crypto"), { target: { value: "XRP" } });
+    pickCoin("XRP");
     await waitFor(() => expect(screen.getByTestId("chain-summary")).toHaveTextContent(/fee 0.2 XRP/), { timeout: 3000 });
   }
 
@@ -162,9 +170,14 @@ describe("unified purchase form (Auto-Buy / DCA)", () => {
   it("offers no USDT as a purchase coin (purchases are paid in USDT)", async () => {
     render(<PurchaseForm />);
     await ready();
-    const coins = Array.from((screen.getByLabelText("Crypto") as HTMLSelectElement).options).map((o) => o.value);
+    const coins: string[] = [];
+    for (const tab of screen.getAllByRole("tab")) {
+      fireEvent.click(tab);
+      coins.push(...within(screen.getByTestId("coin-picker")).getAllByRole("button").map((b) => b.querySelector("span")!.textContent!));
+    }
     expect(coins).not.toContain("USDT");
-    expect(coins).toEqual(expect.arrayContaining(["BTC", "ETH", "USDC", "SOL"]));
+    expect(coins).toEqual(expect.arrayContaining(["BTC", "ETH", "USDC", "SOL", "DOGE", "SHIB", "PEPE", "BONK"]));
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Main coins", "Stablecoins", "Meme coins"]);
   });
 
   it("accumulate mode hides the network, shows where coins are held and sends no chain", async () => {
@@ -314,5 +327,46 @@ describe("PurchaseForm: fee wording", () => {
     render(<PurchaseForm />);
     await waitFor(() => expect(screen.getByText(/Bitget's trading fee applies, taken from the coin you receive/)).toBeInTheDocument());
     expect(document.body.textContent).not.toMatch(/taker fee|0\.20%/);
+  });
+});
+
+describe("PurchaseForm: meme coins are accumulate-only by category", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useAuthStore.setState({ user: { id: "u9", email: "allowed@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: true } } as never);
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([KEY] as never);
+    vi.mocked(autoBuyAPI.create).mockResolvedValue(CREATED as never);
+    vi.mocked(marketAPI.coin).mockImplementation(async (coin: string) => ({ ...MARKET, coin, pair: `${coin}USDT`,
+      ...(coin === "PEPE" ? { name: "Pepe", category: "meme", category_label: "Meme coins", accumulate_only: true, risk_note: "Meme coins can move very sharply in price. Only buy what you can afford to lose.", quantity_precision: 0 } : {}) }) as never);
+  });
+
+  it("PEPE: risk line and held line under the picker, no withdraw toggle and no wallet field even for an allowed user, and the create is accumulate", async () => {
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    expect(screen.getByLabelText(/Withdraw immediately/)).toBeInTheDocument();   // BTC: allowed user sees the toggle
+    pickCoin("PEPE");
+    await waitFor(() => expect(screen.getByTestId("coin-risk")).toHaveTextContent("Meme coins can move very sharply in price. Only buy what you can afford to lose."));
+    expect(screen.getByTestId("coin-held")).toHaveTextContent("Bought and held in your Bitget sub-account. Meme coins can't be sent to a wallet.");
+    expect(screen.queryByLabelText(/Withdraw immediately/)).toBeNull();
+    expect(screen.queryByLabelText(/Wallet address/)).toBeNull();
+    expect(screen.getByTestId("held-on-exchange")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Purchase/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /Create Purchase/ }));
+    await waitFor(() => expect(autoBuyAPI.create).toHaveBeenCalled());
+    const body = vi.mocked(autoBuyAPI.create).mock.calls[0][0];
+    expect(body.crypto_symbol).toBe("PEPE");
+    expect(body.purchase_type).toBe("dca");
+    expect(body.wallet_address).toBeUndefined();
+    expect(body.blockchain_network).toBeUndefined();
+    // back to a main coin: the note goes, the toggle returns
+    pickCoin("BTC");
+    await waitFor(() => expect(screen.queryByTestId("coin-risk")).toBeNull());
+    expect(screen.getByLabelText(/Withdraw immediately/)).toBeInTheDocument();
+  });
+
+  it("the picker's labels describe and never rank", async () => {
+    render(<PurchaseForm />);
+    await waitFor(() => expect(userAPI.exchangeKeys).toHaveBeenCalled());
+    for (const t of screen.getAllByRole("tab")) expect(t.textContent).not.toMatch(/best|top|recommend|safe|popular/i);
   });
 });

@@ -23,6 +23,11 @@ describe("brand palette", () => {
     expect(new Set(values).size).toBe(values.length);
     expect(values).not.toContain("#543477");
     expect(ASSET_COLORS.SOL).toBe("#db2777");
+    // meme coins (v0.7.5): the owner's pairing, judged against the badges, the brand purple and the other coins
+    expect(ASSET_COLORS.DOGE).toBe("#7c4a1e");
+    expect(ASSET_COLORS.SHIB).toBe("#1e3a8a");
+    expect(ASSET_COLORS.PEPE).toBe("#65a30d");
+    expect(ASSET_COLORS.BONK).toBe("#334155");
   });
 
   it("status colours keep their semantics; the accumulate chip uses the tan accent", () => {

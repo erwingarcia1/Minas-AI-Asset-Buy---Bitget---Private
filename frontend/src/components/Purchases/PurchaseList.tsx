@@ -4,6 +4,7 @@ import { autoBuyAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
 import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/types";
+import { isAccumulateOnly } from "@/utils/exchangeNetworks";
 import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
 import { capitalize, fmtAmount, fmtDate, fmtRunTime } from "@/utils/format";
 import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
@@ -76,7 +77,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                   {withdrawAllowed && ["withdrawal_failed", "needs_info"].includes(p.status) && !p.exchange_key_removed && (
                     <button className="btn-primary !py-1" onClick={() => { if (confirm(`Send the ${p.crypto_symbol} already bought to ${p.wallet_address ?? "the wallet on file"} on ${p.blockchain_network} again? No new buy is placed.`)) void act(() => autoBuyAPI.retryWithdrawal(p.id)); }}>Retry withdrawal</button>
                   )}
-                  {withdrawAllowed && ["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
+                  {withdrawAllowed && !isAccumulateOnly(p.crypto_symbol) && ["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
                     <button className="btn-secondary !py-1" onClick={() => setSwitching(p)}>Switch to withdraw</button>
                   )}
                   {["active", "paused"].includes(p.status) && purchaseMode(p) === "autobuy" && (
