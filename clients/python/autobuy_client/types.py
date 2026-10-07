@@ -150,17 +150,37 @@ class ChangePasswordRequest(TypedDict):
     new_password: str
 
 
+class CoinCategory(TypedDict):
+    """CoinCategory."""
+    accumulate_only: bool
+    category: str
+    coins: List[CoinEntry]
+    label: str
+    risk_note: NotRequired[Optional[str]]
+
+
+class CoinEntry(TypedDict):
+    """CoinEntry."""
+    name: str
+    symbol: str
+
+
 class CoinMarketOut(TypedDict):
     """CoinMarketOut."""
+    accumulate_only: NotRequired[bool]
+    category: NotRequired[str]
+    category_label: NotRequired[str]
     chains: List[ChainOut]
     coin: str
     fee_mode: NotRequired[str]
     min_trade_usdt: float
+    name: NotRequired[str]
     note: NotRequired[str]
     online: bool
     pair: str
     price_ask: NotRequired[Optional[float]]
     quantity_precision: int
+    risk_note: NotRequired[Optional[str]]
     taker_fee_rate: NotRequired[Optional[float]]
 
 
@@ -456,6 +476,8 @@ class ProfileUpdateRequest(TypedDict):
 
 class PublicMeta(TypedDict):
     """PublicMeta."""
+    accumulate_only: NotRequired[List[str]]
+    coin_categories: NotRequired[List[CoinCategory]]
     coins: List[str]
     exchanges: List[str]
     server_ip: str
