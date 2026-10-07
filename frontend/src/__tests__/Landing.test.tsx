@@ -86,6 +86,7 @@ describe("Landing page", () => {
     expect(screen.getByText(/won't reflect coins you move or add yourself/)).toBeInTheDocument();
     expect(screen.getByText(/not financial advice\. Private beta\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Logo credits" })).toHaveAttribute("href", "/logo-credits");
     expect(screen.getByText(`© ${new Date().getFullYear()} Minas Academy`)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/testimonial|users trust|% return|certified|SOC ?2|ISO 27001/i);
     expect(screen.getByTestId("flow-animation")).toBeInTheDocument();
