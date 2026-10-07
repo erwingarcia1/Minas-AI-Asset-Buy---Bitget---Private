@@ -130,16 +130,34 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
+export interface CoinCategory {
+  accumulate_only: boolean;
+  category: string;
+  coins: CoinEntry[];
+  label: string;
+  risk_note?: string | null;
+}
+
+export interface CoinEntry {
+  name: string;
+  symbol: string;
+}
+
 export interface CoinMarketOut {
+  accumulate_only?: boolean;
+  category?: string;
+  category_label?: string;
   chains: ChainOut[];
   coin: string;
   fee_mode?: string;
   min_trade_usdt: number;
+  name?: string;
   note?: string;
   online: boolean;
   pair: string;
   price_ask?: number | null;
   quantity_precision: number;
+  risk_note?: string | null;
   taker_fee_rate?: number | null;
 }
 
@@ -407,6 +425,8 @@ export interface ProfileUpdateRequest {
 }
 
 export interface PublicMeta {
+  accumulate_only?: string[];
+  coin_categories?: CoinCategory[];
   coins: string[];
   exchanges: string[];
   server_ip: string;

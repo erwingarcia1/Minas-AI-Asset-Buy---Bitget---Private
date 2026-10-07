@@ -97,6 +97,15 @@ def scrub(text: Optional[str], limit: int = 160) -> str:
     return s[:limit]
 
 
+def _price(value) -> str:
+    """At least 4 significant digits with thousands separators (0.000004181, 84,487.36)."""
+    from api.services.history import fmt_price
+    try:
+        return fmt_price(float(value))
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _num(value, digits: int = 8) -> str:
     from api.services.history import fmt_amount
     try:
@@ -251,7 +260,7 @@ def format_purchase_event(event) -> Optional[Tuple[str, str]]:
         cost = tx.cost_usd if tx.cost_usd is not None else p.amount_usd
         dest = "→ withdrawing to the wallet next" if p.purchase_type == "autobuy" else "held on the exchange"
         text = (f"{dry}✅ Purchase completed\n"
-                f"{coin} · {float(cost):.2f} USDT → {_num(tx.amount_executed)} {coin} @ {_num(tx.fill_price)} USDT\n"
+                f"{coin} · {float(cost):.2f} USDT → {_num(tx.amount_executed)} {coin} @ {_price(tx.fill_price)} USDT\n"
                 f"{who} · {dest}")
         return text, f"buy_executed:{tx.id}"
     if event.type == "buy_failed":
