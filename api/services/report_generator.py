@@ -66,7 +66,7 @@ async def tax_summary(db, user_id, year: int) -> dict:
             "crypto": crypto, "lots": lot_list,
             "total_amount": round(amount, 8),
             "total_cost_usdt": round(cost, 2),
-            "average_price_usdt": round(cost / amount, 8) if amount else 0.0,
+            "average_price_usdt": round(cost / amount, 12) if amount else 0.0,   # 12: sub-cent coins keep 4 significant digits
         })
     return {
         "year": year, "method": "FIFO",
@@ -129,10 +129,11 @@ async def performance(db, user_id, market) -> dict:
 
 
 def _fmt(value, digits: int) -> str:
-    """Money keeps its 2 decimals; crypto amounts (8) are trimmed of trailing zeros."""
+    """CSV cells are machine-readable: money keeps its 2 decimals; crypto amounts (8)
+    are trimmed of trailing zeros; never any thousands grouping."""
     if value is None:
         return ""
-    return history.fmt_amount(value, digits) if digits >= 8 else f"{value:.{digits}f}"
+    return history.fmt_amount_plain(value, digits) if digits >= 8 else f"{value:.{digits}f}"
 
 
 def tax_summary_csv(summary: dict) -> str:
@@ -144,7 +145,7 @@ def tax_summary_csv(summary: dict) -> str:
         for lot in holding["lots"]:
             writer.writerow([
                 lot["datetime_utc"], holding["crypto"], _fmt(lot["amount"], 8), _fmt(lot.get("net_amount"), 8),
-                _fmt(lot["price"], 2), f"{lot['cost_usdt']:.2f}",
+                history.fmt_price_plain(lot["price"]), f"{lot['cost_usdt']:.2f}",
                 _fmt(lot["fee"], 8), lot["fee_currency"] or "",
                 lot["exchange"] or "", lot["order_id"] or "",
                 lot["purchase_type"], lot["tx_type"],
@@ -177,9 +178,9 @@ def tax_summary_pdf(summary: dict, email: str) -> bytes:
     ]
     data = [["Crypto", "Amount", "Cost (USD)", "Avg price"]]
     for h in summary["acquisitions"]:
-        data.append([h["crypto"], _fmt(h['total_amount'], 8),
-                     f"{h['total_cost_usdt']:.2f}",
-                     f"{h['average_price_usdt']:.2f}"])
+        data.append([h["crypto"], history.fmt_amount(h['total_amount']),
+                     f"{h['total_cost_usdt']:,.2f}",
+                     history.fmt_price(h['average_price_usdt'])])
     data.append(["TOTAL", "", f"{summary['total_acquired_usdt']:.2f}", ""])
     table = Table(data, colWidths=[3 * cm, 5 * cm, 4 * cm, 4 * cm])
     table.setStyle(TableStyle([

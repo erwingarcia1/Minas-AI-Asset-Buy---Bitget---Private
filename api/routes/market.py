@@ -12,7 +12,7 @@ from api.models import User
 from api.routes.user import get_current_user
 from api.services import bitget_market
 from api.utils.chains import DEFAULT_CHAIN_FOR_COIN, FAMILY_LABELS, TAG_CHAINS, family_for_chain
-from api.utils.exchange_networks import SUPPORTED_CRYPTOS
+from api.utils.exchange_networks import SUPPORTED_CRYPTOS, category_of, coin_spec
 
 router = APIRouter()
 logger = logging.getLogger("autobuy.market")
@@ -43,6 +43,11 @@ class ChainOut(BaseModel):
 
 class CoinMarketOut(BaseModel):
     coin: str
+    name: str = ""
+    category: str = "main"            # main | stable | meme (registry key)
+    category_label: str = "Main coins"
+    accumulate_only: bool = False     # category property: bought and held on the exchange, never withdraw mode
+    risk_note: Optional[str] = None   # neutral category note for the purchase form, or null
     pair: str
     online: bool
     min_trade_usdt: float
@@ -92,7 +97,9 @@ async def coin_market(coin: str, amount_usd: Optional[float] = Query(None, ge=1)
             row.estimated_received = round(est["received"], 8)
             row.meets_minimum = bitget_market.meets_minimum(est)
         out.append(row)
-    return CoinMarketOut(coin=coin, pair=symbol["symbol"], online=symbol["online"], min_trade_usdt=symbol["min_trade_usdt"],
+    spec, cat = coin_spec(coin), category_of(coin)
+    return CoinMarketOut(coin=coin, name=spec.name, category=cat.key, category_label=cat.label, accumulate_only=not spec.withdrawable,
+                         risk_note=cat.risk_note, pair=symbol["symbol"], online=symbol["online"], min_trade_usdt=symbol["min_trade_usdt"],
                          taker_fee_rate=symbol.get("taker_fee_rate"), quantity_precision=symbol["quantity_precision"],
                          price_ask=price, chains=out, fee_mode=bitget_market.fee_mode())
 

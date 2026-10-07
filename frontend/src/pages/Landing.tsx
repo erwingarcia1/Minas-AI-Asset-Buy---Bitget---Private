@@ -1,3 +1,4 @@
+import { CoinLogo } from "@/components/Common/CoinLogo";
 import { Link } from "react-router-dom";
 import { publicAPI } from "@/api/endpoints";
 import { BetaTicker, CopyButton } from "@/components/Common";
@@ -5,8 +6,7 @@ import { Faq, type FaqItem } from "@/components/Landing/Faq";
 import { FlowAnimation } from "@/components/Landing/FlowAnimation";
 import { SUPPORT_EMAIL_FALLBACK } from "@/config/beta";
 import { useAsync } from "@/hooks/useAsync";
-import { assetColor } from "@/utils/assetColors";
-import { AUTOBUY_CRYPTOS } from "@/utils/exchangeNetworks";
+import { COIN_CATEGORIES } from "@/utils/exchangeNetworks";
 import "./landing.css";
 
 const FAQ: FaqItem[] = [
@@ -53,7 +53,7 @@ export default function Landing() {
   const meta = useAsync(() => publicAPI.meta().catch(() => null));
   const supportEmail = meta.data?.support_email || SUPPORT_EMAIL_FALLBACK;
   const mailto = `mailto:${supportEmail}?subject=${encodeURIComponent("AutoBuy access request")}`;
-  const coins = meta.data?.coins?.length ? meta.data.coins : [...AUTOBUY_CRYPTOS];
+  const coinGroups = meta.data?.coin_categories?.length ? meta.data.coin_categories : COIN_CATEGORIES;
   const serverIp = meta.data?.server_ip ?? "";
   const year = new Date().getFullYear();
 
@@ -131,13 +131,21 @@ export default function Landing() {
           <div className="mx-auto grid max-w-6xl gap-10 px-4 md:grid-cols-2">
             <div>
               <h2 id="coins-title" className="text-2xl font-semibold text-brand-ink">Supported coins</h2>
-              <ul className="mt-5 flex flex-wrap gap-2" data-testid="coin-list">
-                {coins.map((c) => (
-                  <li key={c} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium">
-                    <span aria-hidden className="h-3 w-3 rounded-full" style={{ background: assetColor(c) }} />{c}
-                  </li>
+              <div className="mt-5 space-y-4" data-testid="coin-list">
+                {coinGroups.map((g) => (
+                  <div key={g.category} data-testid={`coin-group-${g.category}`}>
+                    <h3 className="text-sm font-semibold text-slate-700">{g.label}</h3>
+                    <ul className="mt-2 flex flex-wrap gap-2">
+                      {g.coins.map((c) => (
+                        <li key={c.symbol} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium" title={c.name}>
+                          <CoinLogo symbol={c.symbol} size={22} />{c.symbol}
+                        </li>
+                      ))}
+                    </ul>
+                    {g.accumulate_only && <p className="mt-1 text-xs text-slate-500">Bought and held in your Bitget sub-account.</p>}
+                  </div>
                 ))}
-              </ul>
+              </div>
               <p className="mt-3 text-xs text-slate-500">Exchanges: {(meta.data?.exchanges?.length ? meta.data.exchanges : ["bitget"]).map((e) => e === "bitget" ? "Bitget" : e).join(", ")}</p>
             </div>
             <div>
@@ -200,6 +208,7 @@ export default function Landing() {
             <span>Support: <a className="text-brand-600 underline" href={`mailto:${supportEmail}`}>{supportEmail}</a></span>
             <Link className="text-brand-600 underline" to="/terms">Terms</Link>
             <Link className="text-brand-600 underline" to="/privacy">Privacy</Link>
+            <Link className="text-brand-600 underline" to="/logo-credits">Logo credits</Link>
             <span>A Minas Academy product</span>
           </div>
           <p className="max-w-3xl text-xs text-slate-500">

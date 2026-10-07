@@ -181,6 +181,7 @@ async def resolve_purchase(purchase_id: UUID, payload: ResolvePurchase, admin: U
         if look.verdict != "ok":
             raise HTTPException(status_code=409, detail=f"the fill does not pass the guard: {look.verdict}")
         if p.purchase_type == "autobuy" and not payload.keep_on_exchange:
+            withdraw_gate.require_coin_withdrawable(p.crypto_symbol)
             withdraw_gate.require_owner_allowed_for_admin(p.user)   # the OWNER must be allowed, never the admin
         ps._record_fill(tx, look.fill, now)
         p.status = "active"
@@ -199,6 +200,7 @@ async def resolve_purchase(purchase_id: UUID, payload: ResolvePurchase, admin: U
             raise HTTPException(status_code=409, detail=f"the exchange reports the order as {look.state if look else 'unknown'}"
                                                         f"{': ' + look.error if look and look.error else ''}; only NOT FOUND or CANCELLED can be marked not sent")
         if p.purchase_type == "autobuy":
+            withdraw_gate.require_coin_withdrawable(p.crypto_symbol)
             withdraw_gate.require_owner_allowed_for_admin(p.user)   # making it due again would buy AND withdraw
         tx.status = "failed"
         tx.raw_status = look.state
@@ -237,6 +239,7 @@ async def force_retry(
         raise HTTPException(status_code=409, detail="purchase is needs_review: its buy outcome is unknown, re-arming it could buy "
                                                     "twice; inspect GET /api/admin/purchases/{id}/review and POST /resolve instead")
     if p.purchase_type == "autobuy":
+        withdraw_gate.require_coin_withdrawable(p.crypto_symbol)
         owner = (await db.execute(select(User).where(User.id == p.user_id))).scalar_one()
         withdraw_gate.require_owner_allowed_for_admin(owner)   # re-arming would withdraw on the next run
     p.status = "active"

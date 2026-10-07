@@ -220,6 +220,11 @@ export interface ChainInfo {
 
 export interface CoinMarket {
   coin: string;
+  name?: string;
+  category?: "main" | "stable" | "meme";
+  category_label?: string;
+  accumulate_only?: boolean;   // category property: held on the exchange, never withdraw mode
+  risk_note?: string | null;   // neutral category note shown under the coin picker
   pair: string;
   online: boolean;
   min_trade_usdt: number;
@@ -436,4 +441,11 @@ export interface DestinationCheck {
 }
 
 // ---- public facts for the landing page (GET /api/public/meta, anonymous) ---------
-export interface PublicMeta { coins: string[]; exchanges: string[]; support_email: string; server_ip: string }
+export interface PublicMeta {
+  coins: string[];
+  coin_categories?: import("@/utils/exchangeNetworks").CoinCategory[];
+  accumulate_only?: string[];
+  exchanges: string[];
+  support_email: string;
+  server_ip: string;
+}

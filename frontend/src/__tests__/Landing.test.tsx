@@ -66,6 +66,11 @@ describe("Landing page", () => {
     expect(screen.getByTestId("beta-badge")).toHaveTextContent("Private beta · by invitation");
     expect(screen.getByTestId("beta-ticker")).toBeInTheDocument();
     expect(screen.getByTestId("coin-list").textContent).toContain("XLM");
+    // grouped by category from the built-in registry when meta carries no categories
+    expect(screen.getByTestId("coin-group-main").textContent).toMatch(/Main coins.*BTC.*ETH.*SOL.*XRP.*XLM/s);
+    expect(screen.getByTestId("coin-group-stable").textContent).toMatch(/Stablecoins.*USDC/s);
+    expect(screen.getByTestId("coin-group-meme").textContent).toMatch(/Meme coins.*DOGE.*SHIB.*PEPE.*BONK.*Bought and held in your Bitget sub-account/s);
+    expect(screen.getByTestId("coin-list").textContent).not.toMatch(/best|top|recommend|safe|popular/i);
     expect(screen.getAllByRole("link", { name: "Request access" })[0]).toHaveAttribute("href", "mailto:support@minastech.ca?subject=AutoBuy%20access%20request");
     expect(screen.getAllByRole("link", { name: "Log in" })[0]).toHaveAttribute("href", "/login");
     const orEmail = screen.getAllByTestId("or-email");
@@ -81,6 +86,7 @@ describe("Landing page", () => {
     expect(screen.getByText(/won't reflect coins you move or add yourself/)).toBeInTheDocument();
     expect(screen.getByText(/not financial advice\. Private beta\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Logo credits" })).toHaveAttribute("href", "/logo-credits");
     expect(screen.getByText(`© ${new Date().getFullYear()} Minas Academy`)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/testimonial|users trust|% return|certified|SOC ?2|ISO 27001/i);
     expect(screen.getByTestId("flow-animation")).toBeInTheDocument();

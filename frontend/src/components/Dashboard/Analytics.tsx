@@ -1,9 +1,9 @@
+import { CoinLogo } from "@/components/Common/CoinLogo";
 import { analyticsAPI } from "@/api/endpoints";
 import { Alert, Loading } from "@/components/Common";
 import AllocationDonut from "@/components/Dashboard/AllocationDonut";
 import { useAsync } from "@/hooks/useAsync";
 import { usePortfolioRefresh } from "@/hooks/usePortfolioRefresh";
-import { assetColor } from "@/utils/assetColors";
 import { fmtPrice, fmtUsdt } from "@/utils/format";
 
 const pnlTone = (n?: number | null) => (n == null ? "" : n >= 0 ? "text-green-700" : "text-red-700");
@@ -65,9 +65,9 @@ export default function Analytics() {
               <tbody>
                 {perf.holdings.map((h) => (
                   <tr key={h.crypto} className="border-t border-slate-100">
-                    <td className="py-2 font-medium"><span aria-hidden className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: assetColor(h.crypto) }} />{h.crypto}</td>
-                    <td>{fmtPrice(h.average_buy_price, h.price_precision)}</td>
-                    <td>{h.current_price != null ? fmtPrice(h.current_price, h.price_precision) : "—"}</td>
+                    <td className="py-2 font-medium"><span className="inline-flex items-center gap-2"><CoinLogo symbol={h.crypto} size={20} />{h.crypto}</span></td>
+                    <td>{fmtPrice(h.average_buy_price)}</td>
+                    <td>{h.current_price != null ? fmtPrice(h.current_price) : "—"}</td>
                     <td className={pnlTone(h.unrealized_pnl_pct)}>{h.unrealized_pnl_pct != null ? `${h.unrealized_pnl_pct}%` : "—"}</td>
                   </tr>
                 ))}

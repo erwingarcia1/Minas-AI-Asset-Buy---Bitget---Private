@@ -717,8 +717,83 @@
         "title": "ChangePasswordRequest",
         "type": "object"
       },
+      "CoinCategory": {
+        "properties": {
+          "accumulate_only": {
+            "title": "Accumulate Only",
+            "type": "boolean"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coins": {
+            "items": {
+              "$ref": "#/components/schemas/CoinEntry"
+            },
+            "title": "Coins",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "risk_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Note"
+          }
+        },
+        "required": [
+          "category",
+          "label",
+          "accumulate_only",
+          "coins"
+        ],
+        "title": "CoinCategory",
+        "type": "object"
+      },
+      "CoinEntry": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "name"
+        ],
+        "title": "CoinEntry",
+        "type": "object"
+      },
       "CoinMarketOut": {
         "properties": {
+          "accumulate_only": {
+            "default": false,
+            "title": "Accumulate Only",
+            "type": "boolean"
+          },
+          "category": {
+            "default": "main",
+            "title": "Category",
+            "type": "string"
+          },
+          "category_label": {
+            "default": "Main coins",
+            "title": "Category Label",
+            "type": "string"
+          },
           "chains": {
             "items": {
               "$ref": "#/components/schemas/ChainOut"
@@ -738,6 +813,11 @@
           "min_trade_usdt": {
             "title": "Min Trade Usdt",
             "type": "number"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
           },
           "note": {
             "default": "Fees and minimums are Bitget's live values, cached for up to an hour.",
@@ -766,6 +846,17 @@
           "quantity_precision": {
             "title": "Quantity Precision",
             "type": "integer"
+          },
+          "risk_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Note"
           },
           "taker_fee_rate": {
             "anyOf": [
@@ -2219,6 +2310,22 @@
       },
       "PublicMeta": {
         "properties": {
+          "accumulate_only": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Accumulate Only",
+            "type": "array"
+          },
+          "coin_categories": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CoinCategory"
+            },
+            "title": "Coin Categories",
+            "type": "array"
+          },
           "coins": {
             "items": {
               "type": "string"

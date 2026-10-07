@@ -52,7 +52,7 @@ async def test_completed_purchase_email(db, user, binance_key, capture):
     mail = mails[0]
     assert mail["to"] == user.email
     assert mail["subject"].startswith("[DRY RUN] ✓ Purchase complete") and "BTC" in mail["subject"]
-    assert "50000.00" in mail["text"] and "ORD-1" in mail["text"] and "held on the exchange" in mail["text"]
+    assert "50,000.00" in mail["text"] and "ORD-1" in mail["text"] and "held on the exchange" in mail["text"]
 
 
 async def test_failed_purchase_email(db, user, binance_key, capture):

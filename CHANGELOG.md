@@ -25,7 +25,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next_execution (the live XRP buys keep 00:16 and 18:16 UTC), everything
   else on created_at.
 
-## [0.7.4] — pending deploy: pre-buy low-balance warning (PR #55)
+## [0.7.6] — 2026-10-07: coin logos (PR #74)
+
+### Added
+
+* **Coin logos.** The coin cards, the purchase list, the holdings table, the
+  landing page coin list and the allocation legend show each coin's logo at
+  32 px (smaller in dense rows) on a white plate in place of the colour dot.
+  Six coins ship with a logo from the project's own brand source: BTC (public
+  domain), ETH (CC BY 4.0, credited), SOL (Solana Foundation brand guidelines),
+  XRP (the community symbol), USDC (Circle brand policy), DOGE (Dogecoin Core,
+  MIT). XLM, SHIB, PEPE and BONK show a lettered circle in their own colour
+  until a licensed mark arrives; the same circle is the fallback whenever a
+  file is missing or fails to load. Logos are decorative (`alt=""`) and are
+  served only from our own domain (`/logos/`).
+* **Logo credits page** at `/logo-credits`, linked from the site footer,
+  generated from `frontend/public/logos/LOGO_SOURCES.md`: one row per coin
+  with file, source, licence and any notice the licence asks for. Adding or
+  swapping a logo later is one file plus one line in that table, no code.
+
+## [0.7.5] — 2026-10-07: meme coins, accumulate-only by category (PR #60 + PR #61)
+
+### Added
+
+* **Coin registry with categories.** `api/utils/exchange_networks.py` now
+  holds every purchase coin with a display name, a category and the address
+  family its withdrawals use. Categories: Main coins (BTC, ETH, SOL, XRP,
+  XLM), Stablecoins (USDC), Meme coins (DOGE, SHIB, PEPE, BONK; Bitget USDT pairs
+  checked online on 2026-10-02, 1 USDT minimum; PEPE and BONK trade in whole coins).
+  Labels describe, never rank.
+* **Meme coins are accumulate-only, as a category property.** They are bought
+  and held on the exchange; withdraw mode is never offered for them, whatever
+  `WITHDRAWALS_ENABLED` or `WITHDRAW_ALLOWED_EMAILS` say. Enforced next to the
+  existing withdraw gate at every path: create in withdraw mode or with a
+  wallet on file, switch to withdraw, set a wallet, retry withdrawal, admin
+  force-retry and both admin resolutions (keeping the coins on the exchange
+  stays possible). 403 `withdrawals_disabled` with "DOGE is bought and held on
+  Bitget only; it can't be sent to a wallet." plus `coin` and `accumulate_only`.
+* `GET /api/v2/market/coins/{coin}` carries `name`, `category`,
+  `category_label`, `accumulate_only` and `risk_note` (the neutral category
+  note: "Meme coins can move very sharply in price. Only buy what you can
+  afford to lose."). `GET /api/public/meta` carries `coin_categories` and
+  `accumulate_only`.
+
+### Changed
+
+* **Number display.** Prices now show at least 4 significant digits, never
+  fewer than 2 decimals, with thousands separators (84,487.36; 0.000004181)
+  instead of the pair's precision; coin amounts keep at most 8 decimals below
+  1,000 coins and show at most 2 decimals with thousands separators from
+  1,000 (2,389,380.23 PEPE). Applied to emails, Telegram and the PDF report.
+  The CSV stays machine-readable: no grouping, dot decimal point, prices at
+  full useful precision (this also fixes the "0.00" price column for sub-cent
+  coins), amounts at up to 8 decimals; a test parses it back. The API's JSON
+  keeps raw numbers. Full precision stays in the database.
+## [0.7.4.1] — 2026-10-07
+
+### Fixed
+
+* **Read-only Bitget keys are refused at verification (PR #70).** A Read-only
+  key with Spot ticked reports the code `stor` (Spot → Read); it authenticates
+  and reads balances, verification called it "verified" because the code was
+  unconfirmed, and then every buy failed with Bitget 40014 (seen live on
+  2026-10-06). `stor` is now a known code meaning Read-only: verification
+  fails with "This key is Read-only, so AutoBuy can't place buys. In Bitget,
+  edit the key to Read-write with only Spot → Trade ticked, then verify
+  again." A Read-write key with Spot → Trade (`stow`) verifies as before.
+  Settings guidance names the Read-write requirement.
+* **Every successfully sent email leaves a history row.** The outbox recorded a
+  `notifications` row only when a message was delivered on a retry; a
+  first-attempt delivery (the live low-balance email) left nothing.
+* **Scheduler jobs run once per tick.** Each API worker runs its own scheduler,
+  so the low-balance pass and the two digest jobs fired once per worker (three
+  passes per tick on the server, serialised by the advisory lock but not
+  deduplicated). A Redis `SET NX` with a 60 s TTL now claims the tick; the
+  other workers skip without opening the database. Redis trouble lets the job
+  through to the advisory lock. The purchase and withdrawal jobs are untouched.
+
+## [0.7.4] — 2026-10-06: pre-buy low-balance warning (PR #55)
 
 ### Added
 

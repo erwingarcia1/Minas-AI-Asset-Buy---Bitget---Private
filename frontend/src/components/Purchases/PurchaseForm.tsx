@@ -5,7 +5,8 @@ import { Alert } from "@/components/Common";
 import type { ApiKey, AutoBuyFrequency, AutoBuyPurchaseCreated, ChainInfo, CoinMarket } from "@/types";
 import { DEFAULT_CHAIN_FOR_COIN, addressVerdictForChain } from "@/utils/chains";
 import { fmtCrypto } from "@/utils/format";
-import { AUTOBUY_CRYPTOS, AUTOBUY_FREQUENCIES } from "@/utils/exchangeNetworks";
+import { AUTOBUY_FREQUENCIES, categoryOf, isAccumulateOnly } from "@/utils/exchangeNetworks";
+import CoinPicker from "./CoinPicker";
 import { DestinationFields, destinationBody, destinationOk, type DestinationState } from "./DestinationFields";
 import { capitalize } from "@/utils/format";
 import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
@@ -98,6 +99,8 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
   const verdict = useMemo(() => (addressTouched || hasAddress) && hasAddress ? addressVerdictForChain(address, chain) : null, [address, chain, addressTouched, hasAddress]);
   const addressMissing = withdraw && !hasAddress && addressTouched;   // required only when withdrawing
   const amountError = validateAmountUsd(amountNumber);
+  const accumulateOnly = market?.accumulate_only ?? isAccumulateOnly(crypto);      // category property; the API refuses withdraw mode for these anyway
+  const riskNote = market?.risk_note ?? categoryOf(crypto)?.risk_note ?? null;
   const pairWarning = market && !market.online ? `${market.pair} is not trading on Bitget right now.` : null;
   const chainWarning = withdraw && chainInfo
     ? !chainInfo.withdrawable ? `Bitget has ${crypto} withdrawals on ${chain} suspended.`
@@ -170,12 +173,11 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
       {pairWarning && <Alert kind="error">{pairWarning}</Alert>}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div>
-          <label className="label" htmlFor="pf-crypto">Crypto</label>
-          <select id="pf-crypto" className="input" value={crypto} onChange={(e) => { setCryptoE(e.target.value); setChain(DEFAULT_CHAIN_FOR_COIN[e.target.value] ?? ""); }}>
-            {AUTOBUY_CRYPTOS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+        <div className="sm:col-span-2 lg:col-span-3">
+          <CoinPicker value={crypto} onChange={(c) => { setCryptoE(c); setChain(DEFAULT_CHAIN_FOR_COIN[c] ?? ""); if (isAccumulateOnly(c)) { setWithdraw(false); setAddress(""); setAddressTouched(false); } }} />
           {market && <p className="mt-1 text-xs text-slate-400">{market.pair} · min order {market.min_trade_usdt} USDT · Bitget's trading fee applies, taken from the coin you receive</p>}
+          {riskNote && <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800" data-testid="coin-risk">{riskNote}</p>}
+          {accumulateOnly && <p className="mt-1 text-xs text-slate-500" data-testid="coin-held">Bought and held in your Bitget sub-account. {market?.category_label ?? categoryOf(crypto)?.label ?? "These coins"} can't be sent to a wallet.</p>}
         </div>
         <div>
           <label className="label" htmlFor="pf-amount">Amount (USD)</label>
@@ -199,7 +201,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           <p className="mt-1 text-xs text-slate-400">No network needed: coins stay in your exchange account.</p>
         </div>}
 
-        <div className="sm:col-span-2 lg:col-span-3">
+        {!accumulateOnly && <div className="sm:col-span-2 lg:col-span-3">
           <label className="label" htmlFor="pf-address">
             Wallet address {withdraw ? <span className="text-red-600">*</span> : <span className="font-normal text-slate-400">{withdrawAllowed ? "(optional — accumulate never withdraws; add one later to switch)" : "(optional)"}</span>}
           </label>
@@ -221,7 +223,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
           {withdraw && <p className="mt-1 text-xs text-slate-500">Bitget only sends to addresses saved in your Bitget address book; add this address there first.</p>}
           {needsTag && <DestinationFields coin={crypto} chain={chain} address={address} addressValid={verdict?.ok === true}
                                           value={destination} onChange={(v) => { setSuccess(null); setDestination(v); }} idPrefix="pf-dest" />}
-        </div>
+        </div>}
 
         <div className="sm:col-span-2">
           <label className="label" htmlFor="pf-account">Exchange account</label>
@@ -238,7 +240,7 @@ export default function PurchaseForm({ onCreated }: { onCreated?: (r: AutoBuyPur
         </div>
       </div>
 
-      {withdrawAllowed ? (
+      {accumulateOnly ? null : withdrawAllowed ? (
         <label className="flex cursor-pointer items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
           <input id="pf-withdraw" type="checkbox" className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                  checked={withdraw} onChange={(e) => setWithdrawE(e.target.checked)} />

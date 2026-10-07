@@ -65,6 +65,12 @@ describe("PurchaseList: parked purchases and withdrawal rows", () => {
     expect(screen.queryByRole("button", { name: "Switch to withdraw" })).toBeNull();
   });
 
+  it("never offers Switch to withdraw on a meme coin, even to an allowed user", () => {
+    render(<PurchaseList purchases={[{ ...base, id: "m1", crypto_symbol: "PEPE", purchase_type: "dca", withdraw_immediately: false, status: "active", blockchain_network: null, wallet_address: null, last_error: null },
+      { ...base, id: "d2", purchase_type: "dca", withdraw_immediately: false, status: "active", blockchain_network: null, wallet_address: null, last_error: null }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getAllByRole("button", { name: "Switch to withdraw" })).toHaveLength(1);   // the BTC row only
+  });
+
   it("shows the low-balance banner only while a warning is outstanding for the next run", () => {
     render(<PurchaseList purchases={[{ ...base, id: "a1", status: "active", last_error: null, next_execution: "2026-10-05T00:12:08Z", low_balance_for_next_run: true, low_balance_alerted_at: "2026-10-04T00:15:00Z" },
       { ...base, id: "a2", status: "active", last_error: null, next_execution: "2026-10-05T00:12:08Z", low_balance_for_next_run: false }]} onChanged={vi.fn()} onError={vi.fn()} />);

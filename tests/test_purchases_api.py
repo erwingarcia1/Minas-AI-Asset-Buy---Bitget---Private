@@ -127,7 +127,7 @@ async def test_market_endpoint_reports_chains_fees_and_minimum_purchase(client, 
     assert by["BTC"]["meets_minimum"] is False and 40 < by["BTC"]["min_purchase_usd"] < 45
     assert by["BEP20"]["family"] == "ethereum" and by["BEP20"]["meets_minimum"] is True
     assert by["LIGHTNING"]["supported"] is False and by["LIGHTNING"]["withdrawable"] is False
-    assert (await client.get("/api/v2/market/coins/DOGE", headers=auth(user))).status_code == 404
+    assert (await client.get("/api/v2/market/coins/ZZZ", headers=auth(user))).status_code == 404   # DOGE is a purchase coin since v0.7.5
     assert (await client.get("/api/v2/market/coins/USDT", headers=auth(user))).status_code == 404
 
 
@@ -151,7 +151,7 @@ async def test_create_rejects_foreign_or_missing_exchange_account(client, db, us
 
 
 @pytest.mark.parametrize("over", [
-    {"amount_usd": 0}, {"amount_usd": -5}, {"amount_usd": 2_000_000}, {"crypto_symbol": "DOGE"}, {"frequency": "hourly"},
+    {"amount_usd": 0}, {"amount_usd": -5}, {"amount_usd": 2_000_000}, {"crypto_symbol": "ZZZ"}, {"frequency": "hourly"},
     {"blockchain_network": "devnet"}, {"blockchain_network": "LIGHTNING"}, {"wallet_address": "short"},
 ])
 async def test_create_schema_validation(client, user, binance_key, over):

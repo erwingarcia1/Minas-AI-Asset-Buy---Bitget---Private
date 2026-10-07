@@ -1,9 +1,11 @@
+import { CoinLogo } from "@/components/Common/CoinLogo";
 import { tagLabelForChain } from "@/utils/chains";
 import { useEffect, useState } from "react";
 import { autoBuyAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
 import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/types";
+import { isAccumulateOnly } from "@/utils/exchangeNetworks";
 import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
 import { capitalize, fmtAmount, fmtDate, fmtRunTime } from "@/utils/format";
 import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
@@ -53,7 +55,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
             {purchases.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-500">No purchases yet.</td></tr>}
             {purchases.map((p) => (
               <tr key={p.id} className="border-t border-slate-100" data-testid="purchase-row">
-                <td className="whitespace-nowrap px-4 py-2 font-medium">{p.crypto_symbol}
+                <td className="whitespace-nowrap px-4 py-2 font-medium"><span className="inline-flex items-center gap-2"><CoinLogo symbol={p.crypto_symbol} size={24} />{p.crypto_symbol}</span>
                   <div className="text-xs font-normal text-slate-400" data-testid="purchase-venue">
                     {p.exchange_key_removed || (!p.exchange && !p.exchange_account_id) ? <span className="text-red-600">Exchange key removed</span> : capitalize(p.exchange ?? "")}
                     {purchaseMode(p) === "dca" ? ` · Held on ${capitalize(p.exchange ?? "exchange")}` : p.blockchain_network ? ` · ${p.blockchain_network}` : ""}
@@ -76,7 +78,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                   {withdrawAllowed && ["withdrawal_failed", "needs_info"].includes(p.status) && !p.exchange_key_removed && (
                     <button className="btn-primary !py-1" onClick={() => { if (confirm(`Send the ${p.crypto_symbol} already bought to ${p.wallet_address ?? "the wallet on file"} on ${p.blockchain_network} again? No new buy is placed.`)) void act(() => autoBuyAPI.retryWithdrawal(p.id)); }}>Retry withdrawal</button>
                   )}
-                  {withdrawAllowed && ["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
+                  {withdrawAllowed && !isAccumulateOnly(p.crypto_symbol) && ["active", "paused"].includes(p.status) && purchaseMode(p) === "dca" && (
                     <button className="btn-secondary !py-1" onClick={() => setSwitching(p)}>Switch to withdraw</button>
                   )}
                   {["active", "paused"].includes(p.status) && purchaseMode(p) === "autobuy" && (

@@ -96,11 +96,30 @@ def poll_withdrawals_job() -> dict:
         return {"confirmed": 0, "failed": 0, "pending": 0, "skipped": 0}
 
 
+# Every gunicorn worker runs its own APScheduler, so a job fires once per worker
+# within the same second. The advisory locks below serialise those runs but do
+# not dedupe them (a pass that takes milliseconds is over before the next worker
+# tries). The first SET NX on this key wins the tick; the others skip. Redis
+# trouble lets the job through to the advisory lock rather than silencing it.
+TICK_GUARD_TTL_SECONDS = 60
+
+
+async def _claim_tick(name: str, ttl: int = TICK_GUARD_TTL_SECONDS) -> bool:
+    try:
+        from api.services.redis_client import get_redis
+        return bool(await get_redis().set(f"autobuy:job:{name}:tick", str(os.getpid()), nx=True, ex=ttl))
+    except Exception as exc:
+        logger.warning("tick guard for %s unavailable (%s); relying on the advisory lock", name, exc)
+        return True
+
+
 ALERT_DIGEST_LOCK_KEY = 0x41424144  # "ABAD"
 
 
 async def _alert_digest_once() -> dict:
     from api.services.admin_alerts import notify_critical_alerts
+    if not await _claim_tick("admin_alert_digest"):
+        return {"critical": [], "emailed": [], "recipients": [], "skipped": "tick"}
     engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
     try:
         async with engine.connect() as lock_conn:
@@ -134,6 +153,9 @@ DIGEST_LOCK_KEY = 0x41425744  # "ABWD"
 
 async def _send_weekly_digest_once() -> bool:
     from api.services.email_campaigns import send_weekly_summaries
+    if not await _claim_tick("weekly_digest"):
+        logger.info("weekly digest skipped: another worker took this tick (pid=%s)", os.getpid())
+        return False
     engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
     try:
         async with engine.connect() as lock_conn:
@@ -158,6 +180,8 @@ LOW_BALANCE_LOCK_KEY = 0x41424C42  # "ABLB"
 async def _check_low_balances_once() -> dict:
     from api.services.low_balance import check_low_balances
     from api.services import telegram
+    if not await _claim_tick("low_balance_check"):
+        return {"skipped": "tick"}
     engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
     try:
         async with engine.connect() as lock_conn:
