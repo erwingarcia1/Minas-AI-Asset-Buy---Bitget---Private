@@ -5,6 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4.1] — 2026-10-07
+
+### Fixed
+
+* **Read-only Bitget keys are refused at verification (PR #70).** A Read-only
+  key with Spot ticked reports the code `stor` (Spot → Read); it authenticates
+  and reads balances, verification called it "verified" because the code was
+  unconfirmed, and then every buy failed with Bitget 40014 (seen live on
+  2026-10-06). `stor` is now a known code meaning Read-only: verification
+  fails with "This key is Read-only, so AutoBuy can't place buys. In Bitget,
+  edit the key to Read-write with only Spot → Trade ticked, then verify
+  again." A Read-write key with Spot → Trade (`stow`) verifies as before.
+  Settings guidance names the Read-write requirement.
+* **Every successfully sent email leaves a history row.** The outbox recorded a
+  `notifications` row only when a message was delivered on a retry; a
+  first-attempt delivery (the live low-balance email) left nothing.
+* **Scheduler jobs run once per tick.** Each API worker runs its own scheduler,
+  so the low-balance pass and the two digest jobs fired once per worker (three
+  passes per tick on the server, serialised by the advisory lock but not
+  deduplicated). A Redis `SET NX` with a 60 s TTL now claims the tick; the
+  other workers skip without opening the database. Redis trouble lets the job
+  through to the advisory lock. The purchase and withdrawal jobs are untouched.
+
+## [0.7.4] — 2026-10-06: pre-buy low-balance warning (PR #55)
+
+### Added
+
+* **Low-balance warning before a scheduled buy.** A new read-only scheduler job
+  (`low_balance_check`, every 30 minutes, advisory-locked) looks at every
+  active purchase whose next run is about a day away (23–25 h) or about two
+  hours away (1–3 h), reads the available spot USDT on its exchange account
+  (one read per account per pass, never an order call) and, when it is below
+  the sum of what every in-window purchase on that account needs (each amount
+  plus 1%), warns once per purchase per run, one email per account: email "Top up before your next
+  AutoBuy purchase" (purchases on that account, run time in Eastern Time with UTC in brackets,
+  balance, shortfall, how to move USDT to spot, unsubscribe link), a banner on the
+  dashboard and on the purchase row ("Balance low for your next buy on …"),
+  and one masked line in the admin Telegram chat. The two-hour window also
+  warns when the day-before check never ran. A later check that finds enough
+  balance clears the banner. An unreadable balance goes to admins only, never
+  to the customer. Purchases that are paused, cancelled, completed, already
+  past their run time, owned by a suspended or unverified user, or on an
+  unverified key are skipped. The executor, poller and withdrawal code are
+  untouched; the job's only writes are two bookkeeping columns.
+* Migration 026: `purchases.low_balance_alerted_for` / `low_balance_alerted_at`
+  (nullable, no backfill, no index).
+* Notification preference `email_low_balance` (on by default) in the existing
+  preferences JSON, exposed on `GET/PUT /api/notifications/preferences` and in
+  Settings → Email notifications.
+* `GET /api/v2/purchases` rows carry `low_balance_for_next_run` and
+  `low_balance_alerted_at`; `GET /api/dashboard/stats` carries `low_balance`
+  (the flagged purchases). Six scheduler jobs are now registered.
+
+## [0.7.3.1] — 2026-10-06: sign-out from a stale tab (issue #64, PR #65)
+
+### Fixed
+
+* **Signing out from a tab whose CSRF value went stale now signs out for
+  real.** When another tab had rotated the cookies, the stale tab's logout
+  was refused with 403 and the web app showed the login page anyway, leaving
+  the refresh cookie valid on that computer. Logout now revokes the session
+  whenever the refresh cookie holds a valid token, whatever the CSRF header
+  says (the cookies are SameSite=Lax, so a cross-site POST cannot carry them
+  and a forged sign-out is not possible); without a valid cookie the CSRF
+  check applies as before. The web app no longer pretends: a refused sign-out
+  is retried once with a freshly refreshed CSRF value, and if that fails too
+  it shows "Sign-out failed, try again." and keeps the session visible.
+
+## [0.7.3] — 2026-10-05: refresh rotation grace window (PR #57)
+
+### Fixed
+
+* **Two tabs refreshing at the same moment no longer sign the user out.** The
+  refresh token is single use (rotation); a second tab presenting the same
+  cookie a moment later got 401 and the cleared cookies signed both tabs out.
+  Now exactly one request rotates the token (an atomic SET NX claim in Redis)
+  and the other gets the very same new session back: same access token, same
+  refresh cookie, same CSRF value, cached encrypted (Fernet, the app's own
+  helper) for 30 seconds under the id of the token it replaced. The grace
+  covers only the immediately previous token: the next rotation drops it, a
+  token two rotations old is refused as before, logout and a password change
+  drop it, and a password change made elsewhere is caught by the cached
+  session's issue time. A real refusal still clears the cookies; a grace
+  response is an ordinary 200 with Set-Cookie, so the web client needed no
+  change. Refresh tokens now carry `prv`, the id of the token they replaced.
+* **The CSRF cookie rotates with the refresh cookie, and the window covers it
+  too.** Found while preparing the release: a second tab that built its
+  request with the previous CSRF value, but whose browser attached the
+  rotated cookies when it was sent, got a 403 and was signed out. The
+  rotation's cached entry now remembers the CSRF value it validated; inside
+  the window such a request gets the same cached session. Any other mismatch,
+  and the same header once the window is gone, stay a 403.
+* Tokens issued before this release (no `prv` claim) refresh, get the window,
+  and die on logout and password change exactly like new ones (tested).
+* The committed OpenAPI spec and SDKs were regenerated from the merged code.
+
 ## [Unreleased] — 2026-10-01: withdraw gate, remaining paths (PR #54)
 
 ### Fixed

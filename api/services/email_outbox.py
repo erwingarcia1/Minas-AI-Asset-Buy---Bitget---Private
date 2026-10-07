@@ -253,8 +253,8 @@ async def drain(budget_seconds: float = DRAIN_BUDGET_SECONDS,
             counts["sent"] += 1
             if msg["attempts"] > 1:
                 logger.info("email delivered on attempt %d: to=%s template=%s", msg["attempts"], msg["to"], msg.get("template"))
-                if msg.get("user_id"):
-                    await _record_notification(msg, "sent")
+            if msg.get("user_id"):   # history row for the user, first attempt or retry (v0.7.4.1: was retries only)
+                await _record_notification(msg, "sent")
             continue
         msg["last_error"] = error
         if msg["attempts"] >= max_attempts(msg.get("category", "confirmation")):

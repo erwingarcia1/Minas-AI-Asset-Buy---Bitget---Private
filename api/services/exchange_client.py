@@ -36,7 +36,10 @@ _LegacyClient = _LegacyBinance
 # Bitget reports a key's permissions as short codes in `authorities`
 # (GET /api/v2/spot/account/info). Confirmed from Bitget's "Edit API key"
 # screen on 2026-09-11:
-#   stow = Spot -> Trade            (REQUIRED for purchases)
+#   stow = Spot -> Trade            (REQUIRED for purchases; a Read-write key)
+#   stor = Spot -> Read             (a READ-ONLY key with Spot ticked: it authenticates and
+#                                    reads balances, but every order fails with 40014.
+#                                    Seen live on 2026-10-06; rejected since v0.7.4.1)
 #   smow = Margin -> Trade          (spot margin; not needed)
 #   taxw = Taxation -> Search       (read trading history; not needed)
 #   p2pw = P2P -> Search            (read merchant info; not needed)
@@ -46,12 +49,13 @@ _LegacyClient = _LegacyBinance
 # The code Bitget uses for external Withdraw is still unconfirmed, so ANY other
 # code is treated as "withdrawal possible" until it has been confirmed.
 BITGET_TRADE_TOKENS = {"trade", "stow"}
+BITGET_READ_ONLY_TOKENS = {"stor"}      # Spot -> Read: the key is Read-only, orders are refused (40014)
 BITGET_WITHDRAW_TOKENS = {"withdraw"}
 # recognised, harmless for withdrawals, but more than AutoBuy needs
 BITGET_EXTRA_TOKENS = {"smow", "taxw", "p2pw", "wtow", "transfer"}
 BITGET_EXTRA_LABELS = {"smow": "Margin trade", "taxw": "Taxation search", "p2pw": "P2P search",
                        "wtow": "Wallet transfer (internal)", "transfer": "Transfer (internal)"}
-BITGET_KNOWN_TOKENS = BITGET_TRADE_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_EXTRA_TOKENS | {"readonly", "read"}
+BITGET_KNOWN_TOKENS = BITGET_TRADE_TOKENS | BITGET_READ_ONLY_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_EXTRA_TOKENS | {"readonly", "read"}
 
 
 def interpret_bitget_authorities(auths: list) -> dict:
@@ -69,12 +73,14 @@ def interpret_bitget_authorities(auths: list) -> dict:
     unconfirmed = sorted(tokens - BITGET_KNOWN_TOKENS)
     extra = sorted(tokens & BITGET_EXTRA_TOKENS)
     if not tokens:
-        return {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": []}
+        return {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": [], "read_only": False}
     trade = bool(tokens & BITGET_TRADE_TOKENS)
     withdraw = bool(tokens & BITGET_WITHDRAW_TOKENS)
+    read_only = bool(tokens & BITGET_READ_ONLY_TOKENS) and not trade   # Spot -> Read without Spot -> Trade
     fully_understood = not unconfirmed
     return {
-        "can_trade": True if trade else (False if fully_understood else None),
+        "read_only": read_only,
+        "can_trade": False if read_only else (True if trade else (False if fully_understood else None)),
         "can_withdraw": True if withdraw else (False if fully_understood else None),
         "permissions_known": trade or withdraw or fully_understood,
         "unconfirmed": unconfirmed,

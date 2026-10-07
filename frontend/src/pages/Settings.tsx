@@ -136,7 +136,7 @@ export default function Settings() {
                   ) : <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span>}</li>
             )}
             <li data-testid="fee-note">Fees: Bitget's trading fee applies, taken from the coin you receive. AutoBuy adds no fee of its own.</li>
-            <li>Bitget reports permissions as codes. Spot → Trade is required; Margin → Trade, Wallet → Transfer, Taxation → Search and P2P → Search are recognised as not needed (a warning, nothing blocked). Any code we have not confirmed yet is treated as "withdrawal possible": use such a key only where that is intended.</li>
+            <li>Create the key as <b>Read-write</b>. A Read-only key won&apos;t work: AutoBuy will refuse it and ask you to change it. Bitget reports permissions as codes. Spot → Trade is required; Margin → Trade, Wallet → Transfer, Taxation → Search and P2P → Search are recognised as not needed (a warning, nothing blocked). Any code we have not confirmed yet is treated as "withdrawal possible": use such a key only where that is intended.</li>
           </ul>
           {!withdrawAllowed && (
             <p className="mt-2 text-slate-600" data-testid="withdraw-unavailable">Sending to your own wallet is coming later. For now, coins stay in your Bitget sub-account.</p>

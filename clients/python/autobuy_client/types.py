@@ -349,6 +349,14 @@ class LoginRequest(TypedDict):
     password: str
 
 
+class LowBalanceNotice(TypedDict):
+    """LowBalanceNotice."""
+    amount_usd: float
+    crypto_symbol: str
+    next_execution: str
+    purchase_id: str
+
+
 class NotificationRow(TypedDict):
     """NotificationRow."""
     channel: str
@@ -385,6 +393,7 @@ class PlatformStats(TypedDict):
     active_purchases: int
     failed_transactions_24h: int
     signups_7d: int
+    signups_by_day: NotRequired[List[SignupDay]]
     suspended_users: int
     total_invested_usdt: float
     total_transactions: int
@@ -393,10 +402,27 @@ class PlatformStats(TypedDict):
     volume_7d_usdt: float
 
 
+class PortfolioSeriesResponse(TypedDict):
+    """Portfolio value over a range: history from Bitget candle closes, the last point at the same current price the performance card uses. A bucket with no candle carries the previous close forward (carried_forward counts them)."""
+    bucket_seconds: int
+    buys: List[SeriesBuy]
+    carried_forward: NotRequired[int]
+    change_pct: NotRequired[Optional[float]]
+    change_usdt: NotRequired[Optional[float]]
+    current_value: NotRequired[Optional[float]]
+    granularity: str
+    invested: float
+    note: str
+    points: List[SeriesPoint]
+    range: str
+    unpriced: NotRequired[List[str]]
+
+
 class PreferencesPayload(TypedDict):
     """PreferencesPayload."""
     device_token: NotRequired[Optional[str]]
     email_enabled: NotRequired[Optional[bool]]
+    email_low_balance: NotRequired[Optional[bool]]
     email_milestones: NotRequired[Optional[bool]]
     email_purchase_confirmations: NotRequired[Optional[bool]]
     email_weekly_summary: NotRequired[Optional[bool]]
@@ -411,6 +437,7 @@ class PreferencesResponse(TypedDict):
     """PreferencesResponse."""
     always_on_emails: NotRequired[List[str]]
     email_enabled: bool
+    email_low_balance: bool
     email_milestones: bool
     email_purchase_confirmations: bool
     email_weekly_summary: bool
@@ -425,6 +452,14 @@ class PreferencesResponse(TypedDict):
 class ProfileUpdateRequest(TypedDict):
     """ProfileUpdateRequest."""
     email: NotRequired[Optional[str]]
+
+
+class PublicMeta(TypedDict):
+    """PublicMeta."""
+    coins: List[str]
+    exchanges: List[str]
+    server_ip: str
+    support_email: str
 
 
 class PurchaseCreateRequest(TypedDict):
@@ -463,6 +498,8 @@ class PurchaseDetailOut(TypedDict):
     id: str
     last_error: NotRequired[Optional[str]]
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    low_balance_alerted_at: NotRequired[Optional[str]]
+    low_balance_for_next_run: NotRequired[bool]
     next_execution: NotRequired[Optional[str]]
     purchase_type: str
     status: str
@@ -489,6 +526,8 @@ class PurchaseOut(TypedDict):
     id: str
     last_error: NotRequired[Optional[str]]
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    low_balance_alerted_at: NotRequired[Optional[str]]
+    low_balance_for_next_run: NotRequired[bool]
     next_execution: NotRequired[Optional[str]]
     purchase_type: str
     status: str
@@ -525,6 +564,7 @@ class QuickStats(TypedDict):
     """QuickStats."""
     active_purchases: int
     kyc_status: str
+    low_balance: NotRequired[List[LowBalanceNotice]]
     total_invested_usdt: float
     transaction_count: int
 
@@ -549,6 +589,7 @@ class RecurringResponse(TypedDict):
 class RegisterRequest(TypedDict):
     """RegisterRequest."""
     email: str
+    invite_code: NotRequired[Optional[str]]
     password: str
 
 
@@ -572,6 +613,7 @@ class ResolvePurchase(TypedDict):
     """ResolvePurchase."""
     action: str
     attempt_id: NotRequired[Optional[str]]
+    keep_on_exchange: NotRequired[bool]
     note: str
 
 
@@ -595,6 +637,27 @@ class SendVerificationRequest(TypedDict):
     email: str
 
 
+class SeriesBuy(TypedDict):
+    """SeriesBuy."""
+    amount: float
+    cost_usd: float
+    crypto: str
+    t: int
+
+
+class SeriesPoint(TypedDict):
+    """SeriesPoint."""
+    invested: float
+    t: int
+    value: float
+
+
+class SignupDay(TypedDict):
+    """SignupDay."""
+    count: int
+    day: str
+
+
 class StatusResponse(TypedDict):
     """StatusResponse."""
     applicant_id: NotRequired[Optional[str]]
@@ -604,6 +667,13 @@ class StatusResponse(TypedDict):
     retryable: NotRequired[bool]
     review_status: NotRequired[Optional[str]]
     synced: NotRequired[bool]
+
+
+class TelegramTestResult(TypedDict):
+    """TelegramTestResult."""
+    configured: bool
+    error: NotRequired[Optional[str]]
+    sent: bool
 
 
 class TimelinePoint(TypedDict):
@@ -726,6 +796,11 @@ class UndeliveredEmail(TypedDict):
     user_id: NotRequired[Optional[str]]
 
 
+class UnsuspendPayload(TypedDict):
+    """UnsuspendPayload."""
+    pause_withdraw_mode: NotRequired[bool]
+
+
 class UpcomingPurchase(TypedDict):
     """UpcomingPurchase."""
     amount_usdt: float
@@ -755,6 +830,7 @@ class UserProfile(TypedDict):
     updated_at: str
     wallet_hold_reason: NotRequired[Optional[str]]
     wallet_hold_until: NotRequired[Optional[str]]
+    withdrawals_allowed: NotRequired[bool]
 
 
 class UserPublicProfile(TypedDict):

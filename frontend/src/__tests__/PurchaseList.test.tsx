@@ -71,6 +71,14 @@ describe("PurchaseList: parked purchases and withdrawal rows", () => {
     expect(screen.getAllByRole("button", { name: "Switch to withdraw" })).toHaveLength(1);   // the BTC row only
   });
 
+  it("shows the low-balance banner only while a warning is outstanding for the next run", () => {
+    render(<PurchaseList purchases={[{ ...base, id: "a1", status: "active", last_error: null, next_execution: "2026-10-05T00:12:08Z", low_balance_for_next_run: true, low_balance_alerted_at: "2026-10-04T00:15:00Z" },
+      { ...base, id: "a2", status: "active", last_error: null, next_execution: "2026-10-05T00:12:08Z", low_balance_for_next_run: false }]} onChanged={vi.fn()} onError={vi.fn()} />);
+    const banners = screen.getAllByTestId("low-balance-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]).toHaveTextContent(/^Balance low for your next buy on .+\.$/);
+  });
+
   it("an allowed user still gets Resume on a paused withdraw-mode purchase", () => {
     render(<PurchaseList purchases={[{ ...base, status: "paused", last_error: null }]} onChanged={vi.fn()} onError={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();

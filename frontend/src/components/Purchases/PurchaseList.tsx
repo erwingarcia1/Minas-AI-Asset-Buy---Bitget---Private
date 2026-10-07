@@ -6,7 +6,7 @@ import { Alert, Loading, StatusBadge } from "@/components/Common";
 import { purchaseMode, type AutoBuyPurchase, type AutoBuyTransaction } from "@/types";
 import { isAccumulateOnly } from "@/utils/exchangeNetworks";
 import { SwitchToWithdrawDialog } from "./SwitchModeDialog";
-import { capitalize, fmtAmount, fmtDate } from "@/utils/format";
+import { capitalize, fmtAmount, fmtDate, fmtRunTime } from "@/utils/format";
 import { notifyPortfolioChanged } from "@/hooks/usePortfolioRefresh";
 import { useAuthStore } from "@/store/authStore";
 
@@ -67,7 +67,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
                   <StatusBadge status={purchaseMode(p) === "autobuy" ? "autobuy" : purchaseMode(p) === "dca" ? "accumulate" : "unknown mode"} />
                   <div className="mt-1 font-mono text-xs text-slate-400" title={p.wallet_address ?? ""}>{p.wallet_address ? `${p.wallet_address.slice(0, 12)}…` : "no wallet on file"}</div>
                 </td>
-                <td className="px-4 py-2"><StatusBadge status={p.status} />{p.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.last_error}>{p.last_error}</div>}{PARKED[p.status] && <div className="mt-1 max-w-xs text-xs text-slate-500" data-testid="parked-help">{PARKED[p.status]}</div>}</td>
+                <td className="px-4 py-2"><StatusBadge status={p.status} />{p.low_balance_for_next_run && <div className="mt-1 text-xs font-medium text-amber-700" role="status" data-testid="low-balance-banner">Balance low for your next buy on {fmtRunTime(p.next_execution)}.</div>}{p.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.last_error}>{p.last_error}</div>}{PARKED[p.status] && <div className="mt-1 max-w-xs text-xs text-slate-500" data-testid="parked-help">{PARKED[p.status]}</div>}</td>
                 <td className="whitespace-nowrap px-4 py-2 text-xs">{fmtDate(p.next_execution)}</td>
                 <td className="space-x-2 whitespace-nowrap px-4 py-2 text-right">
                   <button className="btn-secondary !py-1" onClick={() => setOpen(open?.id === p.id ? null : p)}>{open?.id === p.id ? "Hide" : "Transactions"}</button>

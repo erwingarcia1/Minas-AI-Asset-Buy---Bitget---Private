@@ -21,6 +21,7 @@ class PreferencesPayload(BaseModel):
     email_purchase_confirmations: Optional[bool] = None
     email_weekly_summary: Optional[bool] = None
     email_milestones: Optional[bool] = None
+    email_low_balance: Optional[bool] = None
     sms_enabled: Optional[bool] = None
     push_enabled: Optional[bool] = None
     quiet_hours_start: Optional[int] = Field(default=None, ge=0, le=23)
@@ -43,6 +44,7 @@ class PreferencesResponse(BaseModel):
     email_purchase_confirmations: bool
     email_weekly_summary: bool
     email_milestones: bool
+    email_low_balance: bool
     always_on_emails: List[str] = list(ALWAYS_ON_EMAILS)   # never optional: security + failures
     sms_enabled: bool
     push_enabled: bool
@@ -72,7 +74,7 @@ async def update_preferences(
     db: AsyncSession = Depends(get_db),
 ):
     """Update channel toggles, optional email categories (purchase confirmations,
-    weekly summary, milestones), quiet hours (UTC), phone number, device token.
+    weekly summary, milestones, low-balance warnings), quiet hours (UTC), phone number, device token.
     Security and failure emails cannot be switched off."""
     prefs = Preferences.for_user(current_user)
     for field in ("email_enabled", "sms_enabled", "push_enabled",

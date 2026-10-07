@@ -31,9 +31,11 @@ import type {
   LoginRequest,
   PerformanceResponse,
   PlatformStats,
+  PortfolioSeriesResponse,
   PreferencesPayload,
   PreferencesResponse,
   ProfileUpdateRequest,
+  PublicMeta,
   PurchaseCreateRequest,
   PurchaseCreatedOut,
   PurchaseDetailOut,
@@ -51,12 +53,14 @@ import type {
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
+  TelegramTestResult,
   TimelineResponse,
   TokenResponse,
   TransactionListResponse,
   TransactionOut,
   TransactionResponse,
   TransactionStats,
+  UnsuspendPayload,
   UserOut,
   UserProfile,
   UserPublicProfile,
@@ -102,6 +106,8 @@ export declare class AdminApi {
   resumeScheduler(): Promise<unknown>;
   /** Platform Stats — `GET /api/admin/stats` */
   platformStats(): Promise<PlatformStats>;
+  /** Telegram Test — `POST /api/admin/telegram/test` */
+  telegramTest(): Promise<TelegramTestResult>;
   /** All Transactions — `GET /api/admin/transactions` */
   allTransactions(query?: { status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }): Promise<AdminTransactionList>;
   /** List Users — `GET /api/admin/users` */
@@ -115,7 +121,7 @@ export declare class AdminApi {
   /** Suspend User — `POST /api/admin/users/{user_id}/suspend` */
   suspendUser(userId: string): Promise<unknown>;
   /** Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend` */
-  unsuspendUser(userId: string): Promise<unknown>;
+  unsuspendUser(userId: string, body?: UnsuspendPayload | null): Promise<unknown>;
 }
 
 /** `analytics` endpoints. */
@@ -161,6 +167,8 @@ export declare class DashboardApi {
   dashboard(): Promise<DashboardResponse>;
   /** Analytics Timeline — `GET /api/dashboard/analytics/timeline` */
   analyticsTimeline(query?: { days?: number }): Promise<TimelineResponse>;
+  /** Portfolio Series — `GET /api/dashboard/portfolio/series` */
+  portfolioSeries(query?: { range?: string }): Promise<PortfolioSeriesResponse>;
   /** Quick Stats — `GET /api/dashboard/stats` */
   quickStats(): Promise<QuickStats>;
 }
@@ -230,6 +238,13 @@ export declare class NotificationsApi {
   updatePreferences(body: PreferencesPayload): Promise<PreferencesResponse>;
   /** Send Test — `POST /api/notifications/test` */
   sendTest(): Promise<unknown>;
+}
+
+/** `public` endpoints. */
+export declare class PublicApi {
+  constructor(http: HttpTransport);
+  /** Public Meta — `GET /api/public/meta` */
+  publicMeta(): Promise<PublicMeta>;
 }
 
 /** `reports` endpoints. */
@@ -306,8 +321,6 @@ export declare class WalletsApi {
 /** `webhooks` endpoints. */
 export declare class WebhooksApi {
   constructor(http: HttpTransport);
-  /** Resend Events — `POST /api/webhooks/resend` */
-  resendEvents(): Promise<unknown>;
   /** Sumsub Events — `POST /api/webhooks/sumsub` */
   sumsubEvents(): Promise<unknown>;
 }
@@ -323,6 +336,7 @@ export interface Api {
   readonly integrations: IntegrationsApi;
   readonly kyc: KycApi;
   readonly notifications: NotificationsApi;
+  readonly public: PublicApi;
   readonly reports: ReportsApi;
   readonly transactions: TransactionsApi;
   readonly user: UserApi;
