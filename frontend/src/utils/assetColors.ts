@@ -11,6 +11,7 @@ export const ASSET_COLORS: Record<string, string> = {
   DOGE: "#7c4a1e",   // chocolate brown: away from the amber "paused" badge
   SHIB: "#1e3a8a",   // navy: away from SOL's pink; judged against ETH indigo and USDC blue in the real donut
   PEPE: "#65a30d",   // lime: away from the green "active" badge
+  BONK: "#334155",   // charcoal: away from the slate "Other" grey and the brand purple
   Other: "#94a3b8",
 };
 const FALLBACKS = ["#d97706", "#db2777", "#4f46e5", "#0891b2", "#65a30d", "#ca8a04"];   // no purples: they would read as the brand colour
