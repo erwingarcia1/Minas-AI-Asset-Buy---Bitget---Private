@@ -182,11 +182,11 @@ def _event(**kw):
 
 def test_message_formats_are_short_masked_and_marked():
     text, key = telegram.format_purchase_event(_event())
-    assert text == ("✅ Purchase completed\nXLM · 2.00 USDT → 9.53 XLM @ 0.20985 USDT\n"
+    assert text == ("✅ Purchase completed\nXLM · 2.00 USDT → 9.53 XLM @ 0.2099 USDT\n"
                     "su…@minastech.ca · → withdrawing to the wallet next")
     text, _ = telegram.format_purchase_event(_event(purchase=_event().purchase.__class__(crypto_symbol="BTC", amount_usd=50, purchase_type="dca", wallet_address=None, blockchain_network=None),
                                                     tx=_event().tx.__class__(id=1, amount_executed=0.000594, cost_usd=49.98360312, fill_price=84147.14, withdrawal_id=None, withdrawal_chain=None, raw_status="filled", status="success", tx_type="buy")))
-    assert text == "✅ Purchase completed\nBTC · 49.98 USDT → 0.000594 BTC @ 84147.14 USDT\nsu…@minastech.ca · held on the exchange"
+    assert text == "✅ Purchase completed\nBTC · 49.98 USDT → 0.000594 BTC @ 84,147.14 USDT\nsu…@minastech.ca · held on the exchange"
     text, key = telegram.format_purchase_event(_event(type="buy_failed", error="43012: Insufficient balance", attempt=2))
     assert text == "❌ Purchase failed\nXLM · 2.00 USDT · attempt 2/3\nsu…@minastech.ca\nReason: 43012: Insufficient balance"
     assert key == "buy_failed:43012: Insufficient balance"
@@ -259,7 +259,7 @@ async def test_executor_outcome_is_identical_with_telegram_disabled_enabled_and_
     assert len(fake.requests) == expected_calls
     if mode == "enabled":
         texts = fake.texts()
-        assert texts[0].startswith("[dry run] ✅ Purchase completed\nBTC · 100.00 USDT → 0.002 BTC @ 50000 USDT")
+        assert texts[0].startswith("[dry run] ✅ Purchase completed\nBTC · 100.00 USDT → 0.002 BTC @ 50,000.00 USDT")
         assert texts[1].startswith("[dry run] 📤 Withdrawal sent (simulated")
         assert texts[2].startswith("[dry run] ❌ Purchase failed\nBTC · 50.00 USDT · attempt 1/3")
         assert user.email not in "".join(texts) and p.wallet_address not in "".join(texts)

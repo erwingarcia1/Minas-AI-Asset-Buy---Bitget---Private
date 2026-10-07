@@ -24,6 +24,7 @@ from api.config import settings
 from api.models import APIKey, Purchase, User, utcnow
 from api.services import telegram
 from api.services.email_service import email_service
+from api.services.history import fmt_price as fmt_usdt   # money for humans: separators, at least 2 decimals (v0.7.5)
 from api.services.email_templates import render
 from api.services.notifications import Preferences
 
@@ -109,10 +110,10 @@ async def _email(user: User, account: APIKey, purchases: list, balance: float, n
         "low_balance",
         greeting=f"Hi {user.first_name}," if getattr(user, "first_name", None) else "Hello,",   # no first name is stored today
         attempts=MAX_ATTEMPTS, missed_cycles=MAX_MISSED_CYCLES,
-        purchases=[{"coin": p.crypto_symbol, "amount_usdt": f"{float(p.amount_usd):.2f}", "frequency": p.frequency.replace("_", " "),
+        purchases=[{"coin": p.crypto_symbol, "amount_usdt": fmt_usdt(p.amount_usd), "frequency": p.frequency.replace("_", " "),
                     "run_at": fmt_run_time(p.next_execution)} for p in purchases],
-        count=len(purchases), count_words=_count_words(len(purchases)), needed_usdt=f"{needed:.2f}", balance_usdt=f"{balance:.2f}",
-        shortfall_usdt=f"{max(needed - balance, 0.0):.2f}", exchange=_exchange_name(account),
+        count=len(purchases), count_words=_count_words(len(purchases)), needed_usdt=fmt_usdt(needed), balance_usdt=fmt_usdt(balance),
+        shortfall_usdt=fmt_usdt(max(needed - balance, 0.0)), exchange=_exchange_name(account),
         purchases_url=build_app_link("/purchases"),
         unsubscribe_url=build_app_link("/settings/notifications"),
     )
@@ -150,7 +151,7 @@ async def check_low_balances(db, now: Optional[datetime] = None, balance_reader:
         out.checked += 1
         groups.setdefault(account.id, (user, account, []))[2].append(p)
     for user, account, purchases in groups.values():
-        coins = ", ".join(f"{p.crypto_symbol} {float(p.amount_usd):.2f}" for p in purchases)
+        coins = ", ".join(f"{p.crypto_symbol} {fmt_usdt(p.amount_usd)}" for p in purchases)
         try:
             balance = float(await asyncio.to_thread(reader, account))
         except Exception as exc:   # noqa: BLE001  (any client error: report, never raise)
@@ -187,7 +188,7 @@ async def check_low_balances(db, now: Optional[datetime] = None, balance_reader:
         if emailed:
             out.emails += 1
         await telegram.send(
-            f"⚠️ Low balance before a buy\n{coins} USDT · needs ~{needed:.2f} USDT in total, has {balance:.2f} USDT (short {needed - balance:.2f})\n"
+            f"⚠️ Low balance before a buy\n{coins} USDT · needs ~{fmt_usdt(needed)} USDT in total, has {fmt_usdt(balance)} USDT (short {fmt_usdt(needed - balance)})\n"
             f"{telegram.mask_email(user.email)} · next run {fmt_run_time(purchases[0].next_execution)} · {'email queued' if emailed else 'no email (preference off or queue failed)'}",
             f"low_balance:{account.id}:{purchases[0].next_execution.isoformat()}")
     await db.commit()
