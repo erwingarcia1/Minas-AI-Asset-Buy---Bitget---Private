@@ -42,6 +42,8 @@ IP_CODES = {
 TRANSPORT_CODES = {"NETWORK", "HTTP"}
 
 VENUE_NAMES = {"binance": "Binance", "bitget": "Bitget"}
+READ_ONLY_MESSAGE = ("This key is Read-only, so AutoBuy can't place buys. In Bitget, edit the key to Read-write "
+                     "with only Spot → Trade ticked, then verify again.")
 
 
 @dataclass
@@ -113,6 +115,13 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
     can_withdraw = info.get("can_withdraw")
     permissions = list(info.get("permissions") or [])
     extra = list(info.get("extra") or [])
+    if info.get("read_only"):
+        outcome = Verification(verified=False, result="read_only_key", detail=READ_ONLY_MESSAGE,
+                               withdrawal_enabled=can_withdraw, permissions=permissions, extra_permissions=extra)
+        _record(key, outcome, now)
+        await db.commit()
+        logger.warning("api_key_verification_failed", extra={**log_ctx, "result": outcome.result, "permissions": permissions})
+        return outcome
     if can_trade is False:
         outcome = Verification(verified=False, result="no_trade_permission",
                                detail=f"Spot trading permission is required. {venue} accepted the key but it "

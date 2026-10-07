@@ -146,6 +146,32 @@ async def test_no_trade_permission(db, user, binance_key, client):
     await assert_row(db, binance_key, verified=False, status="failed", error_contains="spot trading", withdrawal=False, before=before)
 
 
+async def test_read_only_bitget_key_is_refused_with_the_fix_it_message(db, user, binance_key, client):
+    """Seen live on 2026-10-06: a Read-only Bitget key with Spot ticked reports 'stor', passed
+    verification as 'verified' (unconfirmed code) and then every buy failed with 40014."""
+    from api.services.exchange_client import interpret_bitget_authorities
+    Venue.info = {**interpret_bitget_authorities(["stor"]), "permissions": ["stor"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is False and body["result"] == "read_only_key"
+    assert body["detail"] == ("This key is Read-only, so AutoBuy can't place buys. In Bitget, edit the key to Read-write "
+                              "with only Spot → Trade ticked, then verify again.")
+    await assert_row(db, binance_key, verified=False, status="failed", error_contains="Read-only", withdrawal=False, before=before)
+
+
+async def test_read_write_bitget_key_with_spot_trade_verifies(db, user, binance_key, client):
+    from api.services.exchange_client import interpret_bitget_authorities
+    Venue.info = {**interpret_bitget_authorities(["stow"]), "permissions": ["stow"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["result"] == "ok" and body["withdrawal_enabled"] is False
+    await assert_row(db, binance_key, verified=True, status="verified", withdrawal=False, before=before)
+
+
 async def test_permissions_not_reported_still_verifies(db, user, binance_key, client):
     Venue.info = {"can_trade": None, "can_withdraw": None, "permissions": [], "permissions_known": False}
     binance_key.exchange = "bitget"   # a Bitget key whose authorities list is empty/unrecognised
@@ -221,12 +247,15 @@ async def test_executor_refuses_unverified_key(db, user, binance_key):
 def test_bitget_authorities_interpretation():
     from api.services.exchange_client import interpret_bitget_authorities as f
     # documented words
-    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": []}
-    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": []}
-    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True, "unconfirmed": [], "extra": []}
+    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
+    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
+    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
     # nothing / only unknown codes: never a rejection, never "safe"
-    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": []}
-    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": ["zzz"], "extra": []}
+    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": [], "read_only": False}
+    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": ["zzz"], "extra": [], "read_only": False}
+    # Bitget v2 codes seen live: stor = Spot -> Read (Read-only key), stow = Spot -> Trade (Read-write key)
+    assert f(["stor"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": True}
+    assert f(["stor", "stow"])["read_only"] is False and f(["stor", "stow"])["can_trade"] is True
 
 
 @pytest.mark.parametrize("code, trade, extra", [
@@ -247,7 +276,7 @@ def test_live_bitget_key_with_all_five_codes_cannot_withdraw():
     from api.services.exchange_client import interpret_bitget_authorities as f
     live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
     assert live == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [],
-                    "extra": ["p2pw", "smow", "taxw", "wtow"]}
+                    "extra": ["p2pw", "smow", "taxw", "wtow"], "read_only": False}
     # any other code (e.g. whatever Bitget uses for Withdraw) still means "withdrawal possible"
     unknown = f(["stow", "wdxx"])
     assert unknown["can_trade"] is True and unknown["can_withdraw"] is None and unknown["unconfirmed"] == ["wdxx"]

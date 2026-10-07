@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4.1] — pending deploy
+
+### Fixed
+
+* **Read-only Bitget keys are refused at verification (PR #70).** A Read-only
+  key with Spot ticked reports the code `stor` (Spot → Read); it authenticates
+  and reads balances, verification called it "verified" because the code was
+  unconfirmed, and then every buy failed with Bitget 40014 (seen live on
+  2026-10-06). `stor` is now a known code meaning Read-only: verification
+  fails with "This key is Read-only, so AutoBuy can't place buys. In Bitget,
+  edit the key to Read-write with only Spot → Trade ticked, then verify
+  again." A Read-write key with Spot → Trade (`stow`) verifies as before.
+  Settings guidance names the Read-write requirement.
+* **Every successfully sent email leaves a history row.** The outbox recorded a
+  `notifications` row only when a message was delivered on a retry; a
+  first-attempt delivery (the live low-balance email) left nothing.
+* **Scheduler jobs run once per tick.** Each API worker runs its own scheduler,
+  so the low-balance pass and the two digest jobs fired once per worker (three
+  passes per tick on the server, serialised by the advisory lock but not
+  deduplicated). A Redis `SET NX` with a 60 s TTL now claims the tick; the
+  other workers skip without opening the database. Redis trouble lets the job
+  through to the advisory lock. The purchase and withdrawal jobs are untouched.
+
 ## [0.7.4] — 2026-10-06: pre-buy low-balance warning (PR #55)
 
 ### Added

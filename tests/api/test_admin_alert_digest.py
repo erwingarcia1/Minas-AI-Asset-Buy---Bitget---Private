@@ -61,7 +61,8 @@ async def test_nothing_is_emailed_while_no_alert_is_critical(db, user, bitget_ke
     monkeypatch.setattr(settings, "support_email", "support@example.com")
     mine = await make_purchase(db, user, bitget_key, purchase_type="dca", status="active", failure_count=0)
     result = await admin_alerts.notify_critical_alerts(db)
-    assert set(result["emailed"]) <= set(result["critical"]), "an email only ever accompanies a critical alert"
+    # "emailed" lists recipients and "critical" lists alert names (issue #35: an earlier version compared the two sets)
+    assert not result["emailed"] or result["critical"], "an email only ever accompanies a critical alert"
     assert all(str(mine.id) not in (m["text"] or "") for m in sent), "this test's healthy purchase is never the subject"
     if not result["critical"]:
         assert sent == [], "nothing critical anywhere: nothing emailed"

@@ -143,6 +143,22 @@ async def test_transient_failure_is_retried_with_backoff_then_delivered(db, user
     assert [n.status for n in rows] == ["sent"]
 
 
+async def test_a_first_attempt_delivery_records_a_sent_row_for_the_user(db, user, working_provider):
+    """v0.7.4.1: the live low-balance email was sent on the first attempt and left no history row."""
+    await email_outbox.enqueue(user.email, "Low balance", "<p>x</p>", "x", template="low_balance",
+                               category="confirmation", user_id=str(user.id), now=T0)
+    assert (await email_outbox.drain(now=T0))["sent"] == 1 and len(working_provider) == 1
+    rows = (await db.execute(select(Notification).where(Notification.user_id == user.id, Notification.template == "low_balance"))).scalars().all()
+    assert [(n.channel, n.status, n.subject) for n in rows] == [("email", "sent", "Low balance")]
+
+
+async def test_a_message_without_a_user_id_records_nothing(db, user, working_provider):
+    await email_outbox.enqueue(user.email, "No owner", "<p>x</p>", "x", template="generic", now=T0)
+    assert (await email_outbox.drain(now=T0))["sent"] == 1
+    rows = (await db.execute(select(Notification).where(Notification.user_id == user.id, Notification.template == "generic"))).scalars().all()
+    assert rows == []
+
+
 def test_backoff_schedule_spans_about_fifteen_minutes_and_failures_get_more_attempts():
     delays = [email_outbox.backoff_for(n) for n in range(1, email_outbox.max_attempts("failure"))]
     assert delays == [30, 60, 120, 240, 480] and sum(delays) == 930   # 15.5 min
