@@ -20,6 +20,7 @@ const NotFound = lazy(() => import("@/pages/NotFound"));
 const Landing = lazy(() => import("@/pages/Landing"));
 const Terms = lazy(() => import("@/pages/Terms"));
 const Privacy = lazy(() => import("@/pages/Privacy"));
+const LogoCredits = lazy(() => import("@/pages/LogoCredits"));
 
 /** `/`: the landing page for visitors, the dashboard for signed-in users.
  *  A returning session (CSRF cookie present) waits for the silent refresh so
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/logo-credits" element={<LogoCredits />} />
           </Routes>
         </Suspense>
       </BrowserRouter>
