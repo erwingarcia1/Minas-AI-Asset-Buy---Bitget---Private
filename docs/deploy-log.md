@@ -67,6 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
+| 2026-10-07 18:07 | `4228170` | #60 + #61 | **v0.7.5**: meme coins DOGE, SHIB, PEPE, BONK as accumulate-only; coin categories (main / stable / meme) in the picker, the landing page, market and public meta; withdraw gate refuses meme coins on every path, allowlisted owner included; number formatters (humans: separators, at least 4 significant digits for prices; CSV plain); low-balance email and Telegram line through the money formatter. No migration (alembic 026), no `.env` lines, executor untouched. Pre-merge: #60 conflicts in CHANGELOG, docs/API.md and the generated clients (both sides kept, clients regenerated: 9 schema additions); #61 one conflict in PurchaseList.test.tsx (both tests kept); BONK's colour `#334155` was missing from the asset colour map and was added. Deploy launched detached; bundle checksums `9c69c7ed…` matched. Verified: health and BUILD_INFO (nginx + public) at 4228170, six jobs on four workers, purchase and withdrawal jobs ok, public meta lists the three categories, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (30 rows `7ce57f96…`). Smoke (throwaway, no purchase created, no Bitget call): landing shows the meme group; at 1280 and 360 px the category tabs show, PEPE shows the risk line word for word and hides the withdraw toggle and wallet field, BTC shows no risk line; teardown counts zero. Owner's own one-time meme buy to follow. | `pre-v0.7.5-20261007T180701Z.sql.gz` (13951 B) | `~/web-v0.7.5` |
 | 2026-10-07 13:32 | `111596c` | #70 | **v0.7.4.1**: Read-only Bitget keys (`stor`) refused at verification with a fix-it message; every sent email leaves a `notifications` row; low-balance pass and digest jobs once per tick (Redis `SET NX`, 60 s). No migration (alembic 026), no `.env` lines, executor untouched. Pre-merge: main unchanged since the branch was cut, no conflicts; spec and SDKs regenerate identically. Deploy launched detached after a dropped SSH connection (partial bundle folder removed, bundle re-copied with matching checksums `b2b607db…`). Verified: health and BUILD_INFO (nginx + public) at 111596c, six jobs on each of four workers, purchase and withdrawal jobs ok, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (30 rows `7ce57f96…`). Additions: no active purchase within 30 min (three XRP, 12–13 Oct; the USDC rows are completed or stopped); stub-venue smoke in-container with no Bitget call: `stor` → `read_only_key` with the exact message and a failed row, `stow` → verified; throwaway low-balance case sent exactly one email and left exactly **one** notifications row (sent), torn down with all counts zero; first low-balance tick at 14:02 logged **one** pass (was two or three). Verified keys still recording read-only codes after deploy: **1** (the tester's record; re-verify pending). | `pre-v0.7.4.1-20261007T133153Z.sql.gz` (13953 B) | `~/web-v0.7.4.1` |
 | 2026-10-06 13:07 | `1a4d119` | #55 | **v0.7.4**: pre-buy low-balance warning. **Migration 026** applied at boot (two nullable columns on purchases, 17 rows, 64 kB table), alembic 025 → 026; **six** scheduler jobs with `low_balance_check` first run at 13:37 UTC (nothing in window); no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at 1a4d119, holdings and digest identical (21 rows), purchase and withdrawal jobs ok, log scan clean, token absent, Redis untouched. Smoke: preference visible and on, dashboard and purchase row without a banner; a throwaway with an injected balance reader got exactly one email (Resend id in the log, drained within the minute), both banners appeared, a top-up cleared them with nothing sent; torn down with all counts zero. Gap noted: the sent email left no `notifications` row. | `pre-v0.7.4-20261006T130724Z.sql.gz` (11622 B) | `~/web-v0.7.4` |
 | 2026-10-06 11:07 | `b06e2c0` | #65 | **v0.7.3.1**: sign-out from a stale tab revokes for real (issue #64). No migration, alembic 025, no new `.env` lines. Verified: health and BUILD_INFO (nginx + public) at b06e2c0, holdings and digest identical (21 rows), five jobs, purchase and withdrawal jobs ok at 11:17 UTC, log scan clean apart from the smoke tests' own lines, token absent, Redis untouched (67 → 70 revocation keys). Smoke: a v0.7.3 session survived the deploy; two-tab reload 2/2; stale-tab sign-out 204 and the other tab signed out on its next reload, 2/2; API logout with a stale header 204 and both cookie sets 401 afterwards; throwaway torn down, all counts zero. | `pre-v0.7.3.1-20261006T110642Z.sql.gz` (12068 B) | `~/web-v0.7.3.1` |
@@ -94,6 +95,7 @@ before/after files next to it), public HTTPS on 2026-09-21 (dump
 | `v0.7.3.1` | `b06e2c0` | Sign-out from a stale tab (#65) |
 | `v0.7.4` | `1a4d119` | Low-balance warning, migration 026 (#55); rollback = `alembic downgrade 025` in the container, then redeploy v0.7.3.1 with `~/web-v0.7.3.1` |
 | `v0.7.4.1` | `111596c` | Read-only keys refused, sent-row, tick guard (#70); no migration: rollback = redeploy v0.7.4 with `~/web-v0.7.4` |
+| `v0.7.5` | `4228170` | Meme coins and categories (#60 + #61); no migration: rollback = redeploy v0.7.4.1 with `~/web-v0.7.4.1` |
 
 To roll the code back: on the server, create a branch at the tag
 (`git branch rollback-v0.7.1 v0.7.1`) and deploy it with
@@ -155,22 +157,22 @@ update users set role = 'admin' where email = 'person@example.com';
 The owner account `support@minastech.ca` was promoted this way on 2026-09-22.
 Every admin action is written to the audit table.
 
-## Current known state (2026-10-07, after the v0.7.4.1 deploy)
+## Current known state (2026-10-07, after the v0.7.5 deploy)
 
-- Server at `111596c` = `v0.7.4.1`, alembic `026`, six scheduler jobs, dry run off,
+- Server at `4228170` = `v0.7.5`, alembic `026`, six scheduler jobs, dry run off,
   schedulers not paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
   the allowlisted owner can use withdraw mode.
-- Two active purchases, both XRP weekly accumulate: the original (10 USD, 5 Oct
-  buy filled at 00:16:57 UTC, next run **2026-10-12 00:16 UTC**) and a second
-  one created on 2026-10-05 18:16 UTC (next run **2026-10-12 18:16 UTC**). The only withdraw-mode purchase in the table is
+- Three active purchases, all XRP weekly accumulate: the original (10 USD, next
+  run **2026-10-12 00:16 UTC**), a second created on 2026-10-05 (next run
+  **2026-10-12 18:16 UTC**) and a third created on 2026-10-06 (next run
+  **2026-10-13 14:42 UTC**). The only withdraw-mode purchase in the table is
   the owner's own one-time BTC purchase from 2026-09-15, status failed.
-- Next: `v0.7.4.2` = PR #68 (schedule anchor, migration 027; executor change,
-  earliest Tue 13 Oct after both Monday XRP buys); then `v0.7.5` = PR #60 + #61
-  (meme coins, plus #71 balance check on create/resume); then the
-  single-scheduler process as its own release.
-- A customer's USDC purchase was stopped on 2026-10-06 06:21 UTC after three
-  Bitget 40014 refusals (the key lacks spot order write permission); the owner
-  was told.
+- Next: `v0.7.5.1` = PR #68 (schedule anchor, migration 027; executor change;
+  only after the 13 Oct 14:42 UTC XRP buy); then #71 (balance check on create
+  and resume); then the single-scheduler process as its own release.
+- The 2026-10-06 USDC stop (Bitget 40014) was a Read-only key; the tester
+  switched it to Read-write. Verification refuses such keys since v0.7.4.1; one
+  verified key still records read-only codes until the tester re-verifies.
 - Owner-side: Resend quota retest, KYC and compliance decisions, legal text
   review.
 - Backlog: issue #35 (order-dependent admin alert digest test), #39 (remove
