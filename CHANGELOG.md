@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5.1] — pending deploy: schedule anchor, no more drift (PR #68)
+
+### Fixed
+
+* **Recurring purchases no longer drift later.** The next run was computed
+  from the moment a buy executed, so the scheduler's 5-minute tick offset
+  accumulated (the weekly XRP buy moved from 00:12 to 00:16 UTC in one week).
+  Migration 027 adds `purchases.schedule_anchor`, set at creation and on a
+  frequency edit and never by execution, failure, pause or resume; the next
+  run is the first anchor + k × period strictly after now. Monthly keeps the
+  anchor's day and clock, clamped to each month and computed from the anchor
+  every time (31 Jan → 28 Feb → 31 Mar). A paused purchase resumed late still
+  buys once immediately, then snaps back to the grid; a far-past due time
+  catches up with one buy; retries within a cycle never move anything; an
+  exhausted cycle advances to the next grid point. The grid is UTC, so the
+  Eastern display shifts an hour across the clock change while the UTC time
+  stays put. Backfill: active and paused purchases anchor on their current
+  next_execution (the live XRP buys keep 00:16 and 18:16 UTC), everything
+  else on created_at.
+
+### Changed
+
+* **Logo credits page** lists only the coins that display a logo; any coin
+  shown with its initial is named in one line built from the rows of
+  `LOGO_SOURCES.md` without a file, so the line disappears on its own once
+  every coin has a logo. A trademark line reads "All coin logos are trademarks
+  of their respective owners and are used only to identify each coin."
+* **XLM, SHIB, PEPE and BONK logos**: the icon Bitget displays for each spot
+  pair, downloaded once, stored in `frontend/public/logos/` at 64 px and
+  resized only (never recoloured, cropped or redrawn, never loaded from
+  Bitget's servers), recorded in `LOGO_SOURCES.md` as "Icon as displayed on
+  Bitget (URL); trademark of [project]; used unaltered only to identify the
+  coin". All ten coins now show a logo; clearing a File cell in
+  `LOGO_SOURCES.md` puts a coin back on its lettered circle.
+
+
 ## [0.7.6] — 2026-10-07: coin logos (PR #74)
 
 ### Added

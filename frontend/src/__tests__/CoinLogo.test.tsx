@@ -44,10 +44,11 @@ describe("LOGO_SOURCES.md", () => {
     }
   });
 
-  it("the six approved coins have logos and the four pending ones are letter circles", () => {
-    expect(LOGO_ENTRIES.filter((e) => e.file).map((e) => e.symbol).sort()).toEqual(["BTC", "DOGE", "ETH", "SOL", "USDC", "XRP"]);
-    expect(LOGO_ENTRIES.filter((e) => !e.file).map((e) => e.symbol).sort()).toEqual(["BONK", "PEPE", "SHIB", "XLM"]);
+  it("all ten supported coins have a logo file", () => {
+    expect(LOGO_ENTRIES.filter((e) => e.file).map((e) => e.symbol).sort()).toEqual([...SUPPORTED].sort());
+    expect(LOGO_ENTRIES.filter((e) => !e.file)).toEqual([]);
     expect(logoEntry("eth")?.notice).toMatch(/CC BY 4\.0/);
+    for (const s of ["XLM", "SHIB", "PEPE", "BONK"]) expect(logoEntry(s)?.source).toMatch(/^Icon as displayed on Bitget \(https:\/\/img\.bgstatic\.com\/.+\); trademark of .+; used unaltered only to identify the coin$/);
   });
 });
 
@@ -67,20 +68,6 @@ describe("CoinLogo", () => {
     unmount();
     render(<CoinLogo symbol="USDC" size={32} />);
     expect(screen.getByTestId("coin-logo").querySelector("img")).toHaveAttribute("width", "32");
-  });
-
-  it("a coin without a logo shows the letter circle in its own colour, bold white initial, same size", () => {
-    for (const [symbol, colour] of [["SHIB", ASSET_COLORS.SHIB], ["PEPE", ASSET_COLORS.PEPE], ["BONK", ASSET_COLORS.BONK], ["XLM", ASSET_COLORS.XLM]] as const) {
-      const { unmount } = render(<CoinLogo symbol={symbol} size={32} />);
-      const el = screen.getByTestId("coin-letter");
-      expect(el).toHaveAttribute("data-letter", symbol[0]);
-      expect(el.textContent).toBe("");   // the initial is CSS-drawn, so the card's text stays the plain symbol
-      expect(el).toHaveStyle({ width: "32px", height: "32px", background: colour });
-      expect(el.className).toMatch(/font-extrabold/);
-      expect(el.className).toMatch(/text-white/);
-      expect(el).toHaveAttribute("aria-hidden", "true");
-      unmount();
-    }
   });
 
   it("falls back to the letter circle when the file fails to load", () => {
