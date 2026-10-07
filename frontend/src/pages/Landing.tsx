@@ -1,3 +1,4 @@
+import { CoinLogo } from "@/components/Common/CoinLogo";
 import { Link } from "react-router-dom";
 import { publicAPI } from "@/api/endpoints";
 import { BetaTicker, CopyButton } from "@/components/Common";
@@ -5,7 +6,6 @@ import { Faq, type FaqItem } from "@/components/Landing/Faq";
 import { FlowAnimation } from "@/components/Landing/FlowAnimation";
 import { SUPPORT_EMAIL_FALLBACK } from "@/config/beta";
 import { useAsync } from "@/hooks/useAsync";
-import { assetColor } from "@/utils/assetColors";
 import { COIN_CATEGORIES } from "@/utils/exchangeNetworks";
 import "./landing.css";
 
@@ -138,7 +138,7 @@ export default function Landing() {
                     <ul className="mt-2 flex flex-wrap gap-2">
                       {g.coins.map((c) => (
                         <li key={c.symbol} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium" title={c.name}>
-                          <span aria-hidden className="h-3 w-3 rounded-full" style={{ background: assetColor(c.symbol) }} />{c.symbol}
+                          <CoinLogo symbol={c.symbol} size={22} />{c.symbol}
                         </li>
                       ))}
                     </ul>
@@ -208,6 +208,7 @@ export default function Landing() {
             <span>Support: <a className="text-brand-600 underline" href={`mailto:${supportEmail}`}>{supportEmail}</a></span>
             <Link className="text-brand-600 underline" to="/terms">Terms</Link>
             <Link className="text-brand-600 underline" to="/privacy">Privacy</Link>
+            <Link className="text-brand-600 underline" to="/logo-credits">Logo credits</Link>
             <span>A Minas Academy product</span>
           </div>
           <p className="max-w-3xl text-xs text-slate-500">

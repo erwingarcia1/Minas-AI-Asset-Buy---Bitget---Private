@@ -1,6 +1,6 @@
+import { CoinLogo } from "@/components/Common/CoinLogo";
 import { useEffect, useState } from "react";
 import { COIN_CATEGORIES, categoryOf, type CoinCategory } from "@/utils/exchangeNetworks";
-import { assetColor } from "@/utils/assetColors";
 
 /** Category tabs first, then the coins in that category as buttons with name and symbol.
  *  Mobile-first: tabs wrap, buttons fill a responsive grid. The groups come from
@@ -26,7 +26,7 @@ export default function CoinPicker({ value, onChange, groups = COIN_CATEGORIES, 
           <button key={c.symbol} type="button" aria-pressed={c.symbol === value} disabled={disabled}
                   className={`rounded-lg border p-2 text-left ${c.symbol === value ? "border-brand-600 ring-2 ring-brand-100" : "border-slate-200 bg-white hover:border-slate-300"}`}
                   onClick={() => onChange(c.symbol)}>
-            <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: assetColor(c.symbol) }} />{c.symbol}</span>
+            <span className="flex items-center gap-2 text-sm font-semibold text-slate-900"><CoinLogo symbol={c.symbol} size={32} />{c.symbol}</span>
             <span className="block text-xs text-slate-500">{c.name}</span>
           </button>
         ))}

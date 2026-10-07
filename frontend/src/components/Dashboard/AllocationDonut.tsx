@@ -1,3 +1,4 @@
+import { CoinLogo } from "@/components/Common/CoinLogo";
 import { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { PerformanceHolding } from "@/types";
@@ -118,6 +119,7 @@ export default function AllocationDonut({ holdings, priceAvailable, totalMarketV
                       onMouseEnter={() => setActive(i)} onMouseLeave={() => setActive(null)}
                       onFocus={() => setActive(i)} onBlur={() => setActive(null)}
                       aria-label={`${s.name}: ${pctText(s.pct)}, ${fmtUsdt(s.usdt)}${s.members ? ` (${s.members.join(", ")})` : `, ${fmtCrypto(s.amount, s.name)}`}`}>
+                {!s.members && <CoinLogo symbol={s.name} size={16} />}
                 <span aria-hidden className="h-3 w-3 shrink-0 rounded-sm" style={{ background: assetColor(s.name) }} />
                 <span className="w-14 font-medium">{s.name}</span>
                 <span className="w-14 text-slate-600">{pctText(s.pct)}</span>

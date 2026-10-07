@@ -14,6 +14,7 @@ Where to look:
 - [`SETUP_GUIDE.md`](SETUP_GUIDE.md) — local development
 - [`CHANGELOG.md`](CHANGELOG.md) — what shipped, what is verified against the live exchange and what is not
 - `clients/` — generated Python, JavaScript and TypeScript SDKs from the committed OpenAPI spec
+- `frontend/public/logos/` — coin logos served from our own domain; `LOGO_SOURCES.md` there lists each file, source and licence and drives the `/logo-credits` page
 
 The legacy sub-account auto-buy bot, its Flask admin UI and the on-chain
 meme-buy subsystem were removed from this repository on 2026-09-22 (tag

@@ -1,3 +1,4 @@
+import { CoinLogo } from "@/components/Common/CoinLogo";
 import { tagLabelForChain } from "@/utils/chains";
 import { useEffect, useState } from "react";
 import { autoBuyAPI } from "@/api/endpoints";
@@ -54,7 +55,7 @@ export default function PurchaseList({ purchases, onChanged, onError }: Props) {
             {purchases.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-500">No purchases yet.</td></tr>}
             {purchases.map((p) => (
               <tr key={p.id} className="border-t border-slate-100" data-testid="purchase-row">
-                <td className="whitespace-nowrap px-4 py-2 font-medium">{p.crypto_symbol}
+                <td className="whitespace-nowrap px-4 py-2 font-medium"><span className="inline-flex items-center gap-2"><CoinLogo symbol={p.crypto_symbol} size={24} />{p.crypto_symbol}</span>
                   <div className="text-xs font-normal text-slate-400" data-testid="purchase-venue">
                     {p.exchange_key_removed || (!p.exchange && !p.exchange_account_id) ? <span className="text-red-600">Exchange key removed</span> : capitalize(p.exchange ?? "")}
                     {purchaseMode(p) === "dca" ? ` · Held on ${capitalize(p.exchange ?? "exchange")}` : p.blockchain_network ? ` · ${p.blockchain_network}` : ""}
