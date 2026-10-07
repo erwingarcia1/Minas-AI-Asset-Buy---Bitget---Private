@@ -222,6 +222,22 @@ async def test_two_purchases_on_one_account_are_summed(db, user, bitget_key, mai
     assert not lb.low_balance_outstanding(await reload(db, a.id)) and not lb.low_balance_outstanding(await reload(db, b.id))
 
 
+async def test_pepe_purchase_in_the_two_purchase_email_shows_its_usdt_figures(db, user, bitget_key, mail, tg, no_order_path):
+    """v0.7.5: a meme-coin purchase is a USDT amount like any other; the email and the Telegram line
+    carry the purchase amounts, the total, the balance and the shortfall through the money formatter
+    (separators, at least 2 decimals) and never show a 0.00 for the coin."""
+    await make_purchase(db, user, bitget_key, crypto_symbol="PEPE", amount_usd=10.0, next_execution=RUN)
+    await make_purchase(db, user, bitget_key, crypto_symbol="XRP", amount_usd=1500.0, next_execution=RUN + timedelta(minutes=30))
+    out = await lb.check_low_balances(db, now=NOW, balance_reader=reader(15.0))
+    assert out["alerted"] == 2 and out["emails"] == 1
+    m = mail.sent[0]["text"]
+    assert "10.00 USDT of PEPE" in m and "1,500.00 USDT of XRP" in m
+    assert "Needs about:    1,525.10 USDT in total" in m and "Available now:  15.00 USDT" in m and "Shortfall:      1,510.10 USDT" in m
+    import re
+    assert not re.search(r"\b0\.00 USDT of", m), "a purchase amount rendered as zero"
+    assert "PEPE 10.00, XRP 1,500.00 USDT · needs ~1,525.10 USDT in total, has 15.00 USDT (short 1,510.10)" in tg[0][0]
+
+
 def test_run_time_is_eastern_first_with_utc_in_brackets():
     from datetime import datetime, timezone
     assert lb.fmt_run_time(datetime(2026, 10, 12, 0, 16, 57, tzinfo=timezone.utc)) == "Sunday, Oct 11 at 8:16 PM ET (00:16 UTC)"
