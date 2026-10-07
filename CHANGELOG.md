@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next_execution (the live XRP buys keep 00:16 and 18:16 UTC), everything
   else on created_at.
 
+### Changed
+
+* **Logo credits page** lists only the coins that display a logo; the coins
+  shown with their initial (XLM, SHIB, PEPE, BONK today) are named in one line,
+  built from the rows of `LOGO_SOURCES.md` without a file. The full table stays
+  in `LOGO_SOURCES.md`.
+
+
 ## [0.7.6] — 2026-10-07: coin logos (PR #74)
 
 ### Added
