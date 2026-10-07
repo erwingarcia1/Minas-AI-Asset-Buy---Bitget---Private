@@ -27,6 +27,7 @@ from api.schemas.purchases import (MAX_AMOUNT_USD, MIN_AMOUNT_USD,  # noqa: F401
                                    PurchaseCreatedOut, PurchaseCreateRequest, PurchaseDetailOut, PurchaseOut,
                                    PurchaseUpdateRequest, RetryWithdrawalOut, TransactionOut, TravelRuleInfo)
 from api.services import bitget_market, wallet_hold, withdraw_gate
+from api.services.low_balance import low_balance_outstanding
 from api.utils.address_denylist import DENYLIST_REASON, is_denylisted
 from api.utils.chains import DEFAULT_CHAIN_FOR_COIN, check_destination, family_for_chain, normalize_chain, validate_address_for_chain
 from api.utils.exchange_networks import SUPPORTED_CRYPTOS
@@ -61,6 +62,7 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
         exchange_key_removed=p.exchange_account is None,
         status=p.status, failure_count=p.failure_count, last_error=p.last_error,
         next_execution=p.next_execution, created_at=p.created_at, updated_at=p.updated_at,
+        low_balance_for_next_run=low_balance_outstanding(p), low_balance_alerted_at=p.low_balance_alerted_at,
         latest_transaction=_tx_out(txs[0]) if txs else None,
         travel_rule_info=TravelRuleInfo(**p.travel_rule_dict()) if p.travel_rule_dict() else None,
     )

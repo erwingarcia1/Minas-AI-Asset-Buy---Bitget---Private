@@ -46,8 +46,8 @@ async def _run(db, user, key, gateway, **purchase):
 async def test_completed_purchase_email(db, user, binance_key, capture):
     from tests.test_purchase_events import RichGateway
     counts = await _run(db, user, binance_key, RichGateway(), purchase_type="dca", amount_usd=100)
-    assert counts["executed"] == 1
-    mails = [m for m in capture.sent if m["template"] == "purchase"]
+    assert counts["executed"] >= 1, "this test's purchase ran (the executor also picks up any other due purchase in the shared test database)"
+    mails = [m for m in capture.sent if m["template"] == "purchase" and m["to"] == user.email]   # scoped to this test's user
     assert len(mails) == 1
     mail = mails[0]
     assert mail["to"] == user.email

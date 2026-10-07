@@ -17,7 +17,7 @@ let currentUser: Record<string, unknown> | null = authUser;   // null = session 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: currentUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
 import { notificationAPI, userAPI } from "@/api/endpoints";
 
-const PREFS = { email_enabled: true, email_purchase_confirmations: true, email_weekly_summary: true, email_milestones: true,
+const PREFS = { email_enabled: true, email_purchase_confirmations: true, email_weekly_summary: true, email_milestones: true, email_low_balance: true,
   always_on_emails: ["password reset", "password changed", "purchase failed", "withdrawal failed", "withdrawal needs information"],
   sms_enabled: false, push_enabled: true, quiet_hours_start: 21, quiet_hours_end: 8, phone_number: null, has_device_token: false };
 

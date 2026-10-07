@@ -150,37 +150,17 @@ class ChangePasswordRequest(TypedDict):
     new_password: str
 
 
-class CoinCategory(TypedDict):
-    """CoinCategory."""
-    accumulate_only: bool
-    category: str
-    coins: List[CoinEntry]
-    label: str
-    risk_note: NotRequired[Optional[str]]
-
-
-class CoinEntry(TypedDict):
-    """CoinEntry."""
-    name: str
-    symbol: str
-
-
 class CoinMarketOut(TypedDict):
     """CoinMarketOut."""
-    accumulate_only: NotRequired[bool]
-    category: NotRequired[str]
-    category_label: NotRequired[str]
     chains: List[ChainOut]
     coin: str
     fee_mode: NotRequired[str]
     min_trade_usdt: float
-    name: NotRequired[str]
     note: NotRequired[str]
     online: bool
     pair: str
     price_ask: NotRequired[Optional[float]]
     quantity_precision: int
-    risk_note: NotRequired[Optional[str]]
     taker_fee_rate: NotRequired[Optional[float]]
 
 
@@ -369,6 +349,14 @@ class LoginRequest(TypedDict):
     password: str
 
 
+class LowBalanceNotice(TypedDict):
+    """LowBalanceNotice."""
+    amount_usd: float
+    crypto_symbol: str
+    next_execution: str
+    purchase_id: str
+
+
 class NotificationRow(TypedDict):
     """NotificationRow."""
     channel: str
@@ -434,6 +422,7 @@ class PreferencesPayload(TypedDict):
     """PreferencesPayload."""
     device_token: NotRequired[Optional[str]]
     email_enabled: NotRequired[Optional[bool]]
+    email_low_balance: NotRequired[Optional[bool]]
     email_milestones: NotRequired[Optional[bool]]
     email_purchase_confirmations: NotRequired[Optional[bool]]
     email_weekly_summary: NotRequired[Optional[bool]]
@@ -448,6 +437,7 @@ class PreferencesResponse(TypedDict):
     """PreferencesResponse."""
     always_on_emails: NotRequired[List[str]]
     email_enabled: bool
+    email_low_balance: bool
     email_milestones: bool
     email_purchase_confirmations: bool
     email_weekly_summary: bool
@@ -466,8 +456,6 @@ class ProfileUpdateRequest(TypedDict):
 
 class PublicMeta(TypedDict):
     """PublicMeta."""
-    accumulate_only: NotRequired[List[str]]
-    coin_categories: NotRequired[List[CoinCategory]]
     coins: List[str]
     exchanges: List[str]
     server_ip: str
@@ -510,6 +498,8 @@ class PurchaseDetailOut(TypedDict):
     id: str
     last_error: NotRequired[Optional[str]]
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    low_balance_alerted_at: NotRequired[Optional[str]]
+    low_balance_for_next_run: NotRequired[bool]
     next_execution: NotRequired[Optional[str]]
     purchase_type: str
     status: str
@@ -536,6 +526,8 @@ class PurchaseOut(TypedDict):
     id: str
     last_error: NotRequired[Optional[str]]
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    low_balance_alerted_at: NotRequired[Optional[str]]
+    low_balance_for_next_run: NotRequired[bool]
     next_execution: NotRequired[Optional[str]]
     purchase_type: str
     status: str
@@ -572,6 +564,7 @@ class QuickStats(TypedDict):
     """QuickStats."""
     active_purchases: int
     kyc_status: str
+    low_balance: NotRequired[List[LowBalanceNotice]]
     total_invested_usdt: float
     transaction_count: int
 

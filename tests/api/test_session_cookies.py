@@ -73,7 +73,14 @@ async def test_refresh_works_from_the_cookie_with_the_csrf_header_and_rotates(ac
         assert c.cookies[REFRESH_COOKIE] != first_cookie and c.cookies[CSRF_COOKIE] == body["csrf_token"], "both cookies rotated"
         # the new access token works
         assert (await c.get("/api/user/profile", headers={"Authorization": f"Bearer {body['access_token']}"})).status_code == 200
-        # the previous refresh cookie is revoked (replay after rotation fails)
+        # the previous refresh cookie is revoked: inside the 30 s rotation grace a replay
+        # gets the SAME session back (a second tab), after it the replay fails
+        replay = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: first_cookie, CSRF_COOKIE: body["csrf_token"]},
+                              headers={CSRF_HEADER: body["csrf_token"]})
+        assert replay.status_code == 200 and replay.json()["access_token"] == body["access_token"]
+        from api.routes.auth import GRACE_PREFIX
+        from api.services.redis_client import get_redis
+        await get_redis().delete(GRACE_PREFIX + jwt.get_unverified_claims(first_cookie)["jti"])   # window over
         replay = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: first_cookie, CSRF_COOKIE: body["csrf_token"]},
                               headers={CSRF_HEADER: body["csrf_token"]})
         assert replay.status_code == 401
@@ -86,7 +93,9 @@ async def test_csrf_header_is_required_and_must_match_the_cookie(account):
         assert missing.status_code == 403 and missing.json()["detail"]["error"] == "csrf_failed"
         wrong = await c.post("/api/auth/refresh", headers={CSRF_HEADER: "not-the-cookie"})
         assert wrong.status_code == 403
-        assert (await c.post("/api/auth/logout")).status_code == 403, "logout needs it too"
+        # logout with a valid refresh cookie succeeds without the header (SameSite=Lax cookies cannot be
+        # sent cross-site, and a stale tab must still be able to sign out for real); see test_logout_stale_csrf
+        assert (await c.post("/api/auth/logout", cookies={REFRESH_COOKIE: "not-a-token", CSRF_COOKIE: "x"})).status_code == 403, "no valid cookie: the CSRF check still applies"
         assert c.cookies.get(REFRESH_COOKIE), "a failed CSRF check does not touch the session"
         ok = await c.post("/api/auth/refresh", headers={CSRF_HEADER: login["csrf_token"]})
         assert ok.status_code == 200
