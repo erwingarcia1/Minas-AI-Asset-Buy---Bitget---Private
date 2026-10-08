@@ -50,9 +50,47 @@ async def _email(key: APIKey, paused: int) -> bool:
                                      category="failure", user_id=user.id)
 
 
+READY_SUBJECT = "Good news: AutoBuy now works with your Bitget account"
+
+
+async def _email_ready(key: APIKey) -> bool:
+    from api.utils.links import build_app_link
+    html, text = render("unified_ready", greeting="Hello,", purchases_url=build_app_link("/purchases"))
+    return await email_service.queue(key.user.email, READY_SUBJECT, html, text, template="unified_ready",
+                                     category="confirmation", user_id=key.user.id)
+
+
+async def reverify_flagged(db, client_factory=None) -> dict:
+    """One-off after the v0.8.0 deploy: every key flagged as Unified by v0.7.7 is verified again (now through
+    v3), its mode stored, and its owner emailed "Good news…". Nothing is resumed: the customer presses Resume."""
+    out = {"flagged": 0, "verified": 0, "still_failed": 0, "emails": 0}
+    keys = (await db.execute(select(APIKey).options(selectinload(APIKey.user))
+                             .where(APIKey.exchange == "bitget", APIKey.verified.is_(False),
+                                    APIKey.verification_error.like("%Unified Trading mode%")))).scalars().all()
+    for key in keys:
+        out["flagged"] += 1
+        outcome = await kv.verify_api_key(db, key, client_factory=client_factory)
+        if not outcome.verified:
+            out["still_failed"] += 1
+            logger.warning("reverify after v0.8.0: key %s still fails: %s", key.id, outcome.result)
+            continue
+        out["verified"] += 1
+        try:
+            if await _email_ready(key):
+                out["emails"] += 1
+        except Exception as exc:   # noqa: BLE001
+            logger.error("ready email not queued for key %s: %s", key.id, exc)
+    await db.commit()
+    if out["flagged"]:
+        await telegram.send(f"✅ v0.8.0 re-verify: {out['flagged']} flagged key(s), {out['verified']} verified as Unified, "
+                            f"{out['still_failed']} still failing, {out['emails']} email(s) queued", "unified_reverify")
+    logger.info("reverify flagged keys: %s", out)
+    return out
+
+
 async def check_unified_accounts(db, client_factory=None) -> dict:
     """One pass over the verified Bitget keys. Returns counts."""
-    out = {"checked": 0, "turned_unified": 0, "unreadable": 0, "emails": 0, "paused": 0}
+    out = {"checked": 0, "turned_unified": 0, "switched": 0, "unreadable": 0, "emails": 0, "paused": 0}
     keys = (await db.execute(select(APIKey).options(selectinload(APIKey.user))
                              .where(APIKey.exchange == "bitget", APIKey.verified.is_(True)))).scalars().all()
     for key in keys:
@@ -68,6 +106,16 @@ async def check_unified_accounts(db, client_factory=None) -> dict:
         except Exception as exc:   # noqa: BLE001
             out["unreadable"] += 1
             logger.exception("unified check crashed on key %s: %s", key.id, type(exc).__name__)
+            continue
+        # v0.8.0: AutoBuy speaks v3 now. Re-verify through the Unified client; when that works the key keeps
+        # trading and nothing is paused or emailed. Only when v3 also refuses does the v0.7.7 flagging run.
+        reverified = await kv.verify_api_key(db, key, client_factory=client_factory)
+        if reverified.verified:
+            out["switched"] += 1
+            await telegram.send(
+                f"ℹ️ Bitget account switched to Unified, AutoBuy follows\n{telegram.mask_email(key.user.email)} · key {str(key.id)[:8]}… "
+                f"· verified through v3, purchases keep running", f"unified_switched:{key.id}")
+            logger.info("api_key_switched_to_unified", extra={"user_id": str(key.user_id), "key_id": str(key.id)})
             continue
         now = datetime.now(timezone.utc)
         kv._record(key, kv.Verification(verified=False, result="unified_account", detail=kv.unified_message(),

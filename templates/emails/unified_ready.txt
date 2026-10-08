@@ -1,0 +1,7 @@
+{{ greeting }}
+
+Good news: AutoBuy now works with your Bitget account. Press Resume on your purchases whenever you're ready.
+
+Your purchases: {{ purchases_url }}
+
+{% if support_email %}Questions? {{ support_email }}{% endif %}
