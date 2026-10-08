@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from api.models import APIKey
+from api.models import APIKey, Purchase
 from api.services import key_verification as kv
 from api.services import telegram
 from api.services.email_service import email_service
@@ -32,18 +32,27 @@ JOB_HOUR_UTC = 6     # 06:20 UTC daily: outside every current buy window and bef
 JOB_MINUTE_UTC = 20
 
 
-async def _email(key: APIKey) -> bool:
+async def _pause_purchases(db, key: APIKey) -> int:
+    """The normal pause path (what the Pause button does: status -> paused, nothing else), for every
+    active purchase on the key, so no attempt runs and fails on it. Returns how many were paused."""
+    rows = (await db.execute(select(Purchase).where(Purchase.exchange_account_id == key.id, Purchase.status == "active"))).scalars().all()
+    for p in rows:
+        p.status = "paused"
+    return len(rows)
+
+
+async def _email(key: APIKey, paused: int) -> bool:
     from api.utils.links import build_app_link
     user = key.user
-    html, text = render("unified_account", greeting="Hello,", message=kv.unified_message(),
-                        settings_url=build_app_link("/settings"))
+    html, text = render("unified_account", greeting="Hello,", message=kv.unified_message(), paused=paused,
+                        settings_url=build_app_link("/settings"), purchases_url=build_app_link("/purchases"))
     return await email_service.queue(user.email, SUBJECT, html, text, template="unified_account",
                                      category="failure", user_id=user.id)
 
 
 async def check_unified_accounts(db, client_factory=None) -> dict:
     """One pass over the verified Bitget keys. Returns counts."""
-    out = {"checked": 0, "turned_unified": 0, "unreadable": 0, "emails": 0}
+    out = {"checked": 0, "turned_unified": 0, "unreadable": 0, "emails": 0, "paused": 0}
     keys = (await db.execute(select(APIKey).options(selectinload(APIKey.user))
                              .where(APIKey.exchange == "bitget", APIKey.verified.is_(True)))).scalars().all()
     for key in keys:
@@ -64,16 +73,18 @@ async def check_unified_accounts(db, client_factory=None) -> dict:
         kv._record(key, kv.Verification(verified=False, result="unified_account", detail=kv.unified_message(),
                                         error_code="40085", permissions=[p for p in (key.permissions or "").split(",") if p]), now)
         out["turned_unified"] += 1
+        paused = await _pause_purchases(db, key)   # v0.7.7.1: nothing runs and fails on a flagged key
+        out["paused"] += paused
         emailed = False
         try:
-            emailed = await _email(key)
+            emailed = await _email(key, paused)
         except Exception as exc:   # noqa: BLE001
             logger.error("unified-account email not queued for key %s: %s", key.id, exc)
         if emailed:
             out["emails"] += 1
         await telegram.send(
             f"⚠️ Bitget account turned Unified\n{telegram.mask_email(key.user.email)} · key {str(key.id)[:8]}… · "
-            f"verified off, buys on it will not run · {'email queued' if emailed else 'no email'}",
+            f"verified off, {paused} active purchase(s) paused · {'email queued' if emailed else 'no email'}",
             f"unified_account:{key.id}")
         logger.warning("api_key_turned_unified", extra={"user_id": str(key.user_id), "key_id": str(key.id)})
     await db.commit()

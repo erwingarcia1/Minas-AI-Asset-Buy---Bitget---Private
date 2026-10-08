@@ -3,6 +3,6 @@
 {% block body %}
 <p>{{ greeting }}</p>
 <p>{{ message }}</p>
-<p>Until then, scheduled buys on this key will not run. <a href="{{ settings_url }}">Your settings</a></p>
+<p>{% if paused %}We've paused your purchases so nothing fails; nothing was bought. <a href="{{ purchases_url }}">Your purchases</a>{% else %}Until then, scheduled buys on this key will not run.{% endif %} · <a href="{{ settings_url }}">Your settings</a></p>
 {% if support_email %}<p style="color:#5a6763;font-size:13px;">Questions? {{ support_email }}</p>{% endif %}
 {% endblock %}
