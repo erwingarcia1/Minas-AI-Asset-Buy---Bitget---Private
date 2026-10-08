@@ -71,6 +71,15 @@ describe("PurchaseList: parked purchases and withdrawal rows", () => {
     expect(screen.getAllByRole("button", { name: "Switch to withdraw" })).toHaveLength(1);   // the BTC row only
   });
 
+  it("a paused purchase on a flagged key offers no working Resume, only the key's message", () => {
+    const msg = "This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet.";
+    render(<PurchaseList purchases={[{ ...base, id: "f1", status: "paused", last_error: null, purchase_type: "dca", withdraw_immediately: false, exchange_key_error: msg }]} onChanged={() => {}} />);
+    const blocked = screen.getByTestId("resume-blocked");
+    expect(blocked).toBeDisabled();
+    expect(blocked).toHaveAttribute("title", msg);
+    expect(screen.queryByRole("button", { name: "Resume" })).toBe(blocked);
+  });
+
   it("shows the key's verification problem under the status when the key is no longer verified", () => {
     const msg = "This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. Please contact support@minastech.ca and we'll let you know as soon as it's ready.";
     render(<PurchaseList purchases={[{ ...base, id: "u1", status: "active", last_error: null, exchange_key_error: msg },

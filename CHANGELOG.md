@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Withdraw-immediately purchases are refused on a Unified key for now
   (`unified_account_withdraw`): v3 withdrawals are not built. Settings shows
   each key's mode and says both account types work for buying and holding.
+## [0.7.7.2] — 2026-10-08: no purchase on an unverified or flagged key (PR #82)
+
+### Fixed
+
+* Creating a purchase on a key that is not verified, and resuming a paused
+  purchase on such a key, are refused at once (`409 exchange_key_unverified`)
+  with the key's own message, for example "This Bitget account uses Unified
+  Trading mode…", instead of being accepted and left to fail at buy time.
+  Pausing and editing the amount still work. The purchases list shows a
+  disabled Resume carrying the message. No executor change.
 
 ## [0.7.7.1] — 2026-10-08: a flagged Unified key pauses its purchases (PR #79)
 
