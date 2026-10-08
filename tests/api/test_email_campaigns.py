@@ -19,6 +19,7 @@ def test_all_templates_render_both_formats():
         "kyc_rejected": {"name": "sam"},
         "downtime_alert": {"start": "2026-09-05 02:00", "end": "2026-09-05 03:00"},
         "milestone": {"name": "sam", "milestone": "1,000"},
+        "unified_ready": {"greeting": "Hello,", "purchases_url": "https://x.test/purchases"},
         "unified_account": {"greeting": "Hello,", "message": "This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet.", "paused": 1, "settings_url": "https://x.test/settings", "purchases_url": "https://x.test/purchases"},
         "low_balance": {"greeting": "Hello,", "attempts": 3, "missed_cycles": 3, "purchases": [{"coin": "XRP", "amount_usdt": "10.00", "frequency": "weekly",
                                                       "run_at": "Saturday, Oct 11 at 8:16 PM ET (00:16 UTC)"}],
