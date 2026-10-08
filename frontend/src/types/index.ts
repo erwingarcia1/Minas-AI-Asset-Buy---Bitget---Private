@@ -170,7 +170,7 @@ export interface ApiKey {
 
 export interface KeyVerifyResponse {
   verified: boolean;
-  result: "ok" | "invalid_key" | "ip_not_allowed" | "no_trade_permission" | "unreachable" | "error";
+  result: "ok" | "invalid_key" | "ip_not_allowed" | "no_trade_permission" | "read_only_key" | "unified_account" | "unreachable" | "error";
   detail: string;
   withdrawal_permission_warning: boolean;
   verification_status: VerificationStatus;
@@ -294,6 +294,7 @@ export interface AutoBuyPurchase {
   exchange_account_id: string | null;
   exchange: string | null;
   exchange_key_removed?: boolean;   // the key was deleted: the purchase cannot run again
+  exchange_key_error?: string | null;   // the key's last verification problem (for example a Unified account); null while verified
   status: AutoBuyStatus;
   failure_count: number;
   last_error: string | null;
