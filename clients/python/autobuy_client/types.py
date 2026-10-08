@@ -514,6 +514,7 @@ class PurchaseDetailOut(TypedDict):
     crypto_symbol: str
     exchange: NotRequired[Optional[str]]
     exchange_account_id: NotRequired[Optional[str]]
+    exchange_key_error: NotRequired[Optional[str]]
     exchange_key_removed: NotRequired[bool]
     failure_count: int
     frequency: str
@@ -542,6 +543,7 @@ class PurchaseOut(TypedDict):
     crypto_symbol: str
     exchange: NotRequired[Optional[str]]
     exchange_account_id: NotRequired[Optional[str]]
+    exchange_key_error: NotRequired[Optional[str]]
     exchange_key_removed: NotRequired[bool]
     failure_count: int
     frequency: str

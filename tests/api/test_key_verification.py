@@ -172,6 +172,29 @@ async def test_read_write_bitget_key_with_spot_trade_verifies(db, user, binance_
     await assert_row(db, binance_key, verified=True, status="verified", withdrawal=False, before=before)
 
 
+async def test_unified_account_is_refused_with_the_fix_it_message(db, user, binance_key, client, caplog):
+    """Bitget answers every Classic (v2) call with 40085 once the account is migrated to Unified Trading mode."""
+    Venue.error = ExchangeClientError("Bitget error 40085: You are in Unified Account mode, and the Classic Account API is not supported at this time", "40085")
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is False and body["result"] == "unified_account"
+    from api.config import settings
+    assert body["detail"] == ("This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. "
+                              f"Please contact {settings.support_email or 'support'} and we'll let you know as soon as it's ready.")
+    await assert_row(db, binance_key, verified=False, status="failed", error_contains="Unified Trading mode", withdrawal=None, before=before)
+
+
+async def test_classic_account_with_spot_trade_still_verifies_after_the_unified_rule(db, user, binance_key, client):
+    from api.services.exchange_client import interpret_bitget_authorities
+    Venue.info = {**interpret_bitget_authorities(["stow"]), "permissions": ["stow"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["result"] == "ok"
+
+
 async def test_permissions_not_reported_still_verifies(db, user, binance_key, client):
     Venue.info = {"can_trade": None, "can_withdraw": None, "permissions": [], "permissions_known": False}
     binance_key.exchange = "bitget"   # a Bitget key whose authorities list is empty/unrecognised

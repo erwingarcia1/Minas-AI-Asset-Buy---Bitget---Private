@@ -217,6 +217,7 @@ class PurchaseOut(BaseModel):
     exchange_account_id: Optional[UUID] = None
     exchange: Optional[str] = None
     exchange_key_removed: bool = False   # the key was deleted: the purchase cannot run again
+    exchange_key_error: Optional[str] = None   # the key's last verification problem (for example a Unified account); None while verified
     status: str
     failure_count: int
     last_error: Optional[str] = None

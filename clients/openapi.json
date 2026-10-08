@@ -2544,6 +2544,17 @@
             ],
             "title": "Exchange Account Id"
           },
+          "exchange_key_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Key Error"
+          },
           "exchange_key_removed": {
             "default": false,
             "title": "Exchange Key Removed",
@@ -2744,6 +2755,17 @@
               }
             ],
             "title": "Exchange Account Id"
+          },
+          "exchange_key_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Key Error"
           },
           "exchange_key_removed": {
             "default": false,

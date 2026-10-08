@@ -42,6 +42,14 @@ IP_CODES = {
 TRANSPORT_CODES = {"NETWORK", "HTTP"}
 
 VENUE_NAMES = {"binance": "Binance", "bitget": "Bitget"}
+UNIFIED_CODES = {"bitget": {"40085"}}   # "You are in Unified Account mode, and the Classic Account API is not supported"
+
+
+def unified_message() -> str:
+    """Customer-facing text for a migrated account; the support address comes from settings (SUPPORT_EMAIL)."""
+    from api.config import settings
+    return ("This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. "
+            f"Please contact {settings.support_email or 'support'} and we'll let you know as soon as it's ready.")
 READ_ONLY_MESSAGE = ("This key is Read-only, so AutoBuy can't place buys. In Bitget, edit the key to Read-write "
                      "with only Spot → Trade ticked, then verify again.")
 
@@ -76,6 +84,15 @@ def classify(exchange: str, exc: ExchangeClientError) -> tuple[str, str]:
     return "error", f"{venue} error {code}: {msg[:200]}"
 
 
+def _client_for(key: APIKey, client_factory=None) -> ExchangeClient:
+    """Venue client for a stored key; credentials are decrypted here and never logged."""
+    from api.routes.exchange import decrypt_value
+    factory = client_factory or ExchangeClient
+    return factory(decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
+                   passphrase=decrypt_value(key.encrypted_passphrase) if key.encrypted_passphrase else "",
+                   exchange=key.exchange)
+
+
 def _check(client: ExchangeClient) -> dict:
     return client.get_account_info()
 
@@ -83,11 +100,7 @@ def _check(client: ExchangeClient) -> dict:
 async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verification:
     """Run the check and persist the outcome on ``key``. Never raises for venue
     problems; only unexpected programming errors propagate."""
-    from api.routes.exchange import decrypt_value
-    factory = client_factory or ExchangeClient
-    client = factory(decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
-                     passphrase=decrypt_value(key.encrypted_passphrase) if key.encrypted_passphrase else "",
-                     exchange=key.exchange)
+    client = _client_for(key, client_factory)
     now = datetime.now(timezone.utc)
     venue = VENUE_NAMES.get(key.exchange, key.exchange)
     log_ctx = {"user_id": str(key.user_id), "key_id": str(key.id), "exchange": key.exchange}
@@ -95,7 +108,10 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
     try:
         info = await asyncio.to_thread(_check, client)
     except ExchangeClientError as exc:
-        result, detail = classify(key.exchange, exc)
+        if str(exc.code) in UNIFIED_CODES.get(key.exchange, set()):
+            result, detail = "unified_account", unified_message()   # v0.7.7: the account was migrated to Unified Trading mode
+        else:
+            result, detail = classify(key.exchange, exc)
         outcome = Verification(verified=False, result=result, detail=detail, error_code=str(exc.code))
         _record(key, outcome, now)
         await db.commit()

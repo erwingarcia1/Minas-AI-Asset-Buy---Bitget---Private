@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] — pending deploy: Unified Trading accounts detected before a buy fails (PR #77)
+
+### Added
+
+* **Verification refuses Unified Trading accounts.** Bitget is migrating Classic
+  accounts to Unified Trading mode in batches; a migrated account answers every
+  Classic (v2) call with 40085 and a buy on it parks for review. Verification
+  now treats 40085 as `unified_account` and records it on the key like the
+  read-only refusal, with the message "This Bitget account uses Unified Trading
+  mode, which AutoBuy doesn't support yet. We're adding it now. Please contact
+  support@minastech.ca and we'll let you know as soon as it's ready."
+* **Daily read-only check** (`unified_account_check`, 06:20 UTC, seventh
+  scheduler job): the same account-info call for every verified Bitget key.
+  A key that has turned Unified is marked as above, the customer gets one
+  email in the same words, the owner one Telegram alert, and the purchases
+  list shows the message under the purchase's status (`exchange_key_error` on
+  purchase rows). The key is no longer verified afterwards, so it is not
+  checked again: one alert per key.
+* Settings says AutoBuy currently needs a Classic Bitget account.
+
 ## [0.7.5.1] — 2026-10-07: schedule anchor, no more drift (PR #68)
 
 ### Fixed

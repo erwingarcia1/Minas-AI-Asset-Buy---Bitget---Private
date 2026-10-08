@@ -71,6 +71,15 @@ describe("PurchaseList: parked purchases and withdrawal rows", () => {
     expect(screen.getAllByRole("button", { name: "Switch to withdraw" })).toHaveLength(1);   // the BTC row only
   });
 
+  it("shows the key's verification problem under the status when the key is no longer verified", () => {
+    const msg = "This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. Please contact support@minastech.ca and we'll let you know as soon as it's ready.";
+    render(<PurchaseList purchases={[{ ...base, id: "u1", status: "active", last_error: null, exchange_key_error: msg },
+      { ...base, id: "u2", status: "active", last_error: null, exchange_key_error: null }]} onChanged={() => {}} />);
+    const banners = screen.getAllByTestId("key-error-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]).toHaveTextContent(msg);
+  });
+
   it("shows the low-balance banner only while a warning is outstanding for the next run", () => {
     render(<PurchaseList purchases={[{ ...base, id: "a1", status: "active", last_error: null, next_execution: "2026-10-05T00:12:08Z", low_balance_for_next_run: true, low_balance_alerted_at: "2026-10-04T00:15:00Z" },
       { ...base, id: "a2", status: "active", last_error: null, next_execution: "2026-10-05T00:12:08Z", low_balance_for_next_run: false }]} onChanged={vi.fn()} onError={vi.fn()} />);

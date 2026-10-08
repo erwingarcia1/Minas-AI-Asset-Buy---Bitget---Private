@@ -30,6 +30,11 @@ const VERIFIED_WITHDRAW = { ...FAILED, id: "k2", exchange: "binance", verified: 
 describe("Settings: exchange keys", () => {
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(notificationAPI.preferences).mockResolvedValue(PREFS as never); });
 
+  it("says a Classic Bitget account is needed until Unified support ships", async () => {
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    expect(await screen.findByTestId("classic-account-line")).toHaveTextContent("AutoBuy currently needs a Classic Bitget account. Unified Trading accounts aren't supported yet; we're adding them now.");
+  });
+
   it("shows a failed key with its readable reason and a retry button, never 'pending' forever", async () => {
     vi.mocked(userAPI.exchangeKeys).mockResolvedValue([FAILED] as never);
     render(<MemoryRouter><Settings /></MemoryRouter>);
