@@ -165,6 +165,8 @@ async def create_purchase(
         raise HTTPException(status_code=404, detail={"error": "exchange_account_not_found",
                                                     "details": {"exchange_account_id": str(payload.exchange_account_id)}})
 
+    if payload.purchase_type == "autobuy":
+        withdraw_gate.require_key_can_withdraw(account)   # v0.8.0: no withdrawals from a Unified account yet
     await _validate_against_exchange(account, payload.crypto_symbol, payload.amount_usd,
                                      payload.blockchain_network if payload.wallet_address else None,
                                      withdraw=payload.purchase_type == "autobuy")
@@ -235,6 +237,7 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     if payload.purchase_type == "autobuy" and p.purchase_type != "autobuy":
         withdraw_gate.require_coin_withdrawable(p.crypto_symbol)   # accumulate-only coins: never
         withdraw_gate.require_allowed(current_user)   # private beta gate, before anything else
+        withdraw_gate.require_key_can_withdraw(p.exchange_account)   # v0.8.0: no withdrawals from a Unified account yet
         # switching ON withdraw-immediately: blocked outright during the wallet-change hold,
         # otherwise real address + network + typed confirmation, every time
         wallet_hold.check_action(current_user, "switch_to_autobuy")

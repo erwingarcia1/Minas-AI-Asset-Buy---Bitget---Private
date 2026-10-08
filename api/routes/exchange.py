@@ -94,6 +94,7 @@ class APIKeyResponse(UTCModel):
     withdrawal_enabled: Optional[bool] = None     # None = not reported by the exchange
     permissions: List[str] = []                   # codes the exchange reported at verification
     extra_permissions: List[str] = []             # recognised codes AutoBuy does not need (warn, non-blocking)
+    account_mode: str = "unknown"                 # classic (v2) | unified (v3) | unknown (treated as classic)
     created_at: datetime
     updated_at: datetime
 
@@ -122,6 +123,7 @@ def _to_response(key: APIKey) -> APIKeyResponse:
         withdrawal_enabled=key.withdrawal_enabled,
         permissions=key.permission_list,
         extra_permissions=_extra_permissions(key),
+        account_mode=getattr(key, "account_mode", "unknown") or "unknown",
         created_at=key.created_at,
         updated_at=key.updated_at,
     )

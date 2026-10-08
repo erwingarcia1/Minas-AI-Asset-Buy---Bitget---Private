@@ -82,3 +82,15 @@ def require_owner_allowed_for_admin(owner) -> None:
     """403 for admin re-arm/resolve paths: the OWNER must be allowed, not the admin."""
     if not withdrawals_allowed(owner):
         raise HTTPException(status_code=403, detail={"error": "withdrawals_disabled", "details": {"message": ADMIN_MESSAGE}})
+
+
+UNIFIED_WITHDRAW_MESSAGE = ("This Bitget account uses Unified Trading mode. AutoBuy can buy and hold on it, but sending "
+                            "coins to a wallet from a Unified account isn't supported yet. Choose accumulate (DCA) for now.")
+
+
+def require_key_can_withdraw(key) -> None:
+    """Withdraw-immediately purchases need the Classic withdrawal API (v0.8.0: v3 withdrawals are not built)."""
+    from fastapi import HTTPException
+    if key is not None and getattr(key, "exchange", "") == "bitget" and getattr(key, "account_mode", "unknown") == "unified":
+        raise HTTPException(status_code=403, detail={"error": "unified_account_withdraw",
+                                                     "details": {"message": UNIFIED_WITHDRAW_MESSAGE, "account_mode": "unified"}})
