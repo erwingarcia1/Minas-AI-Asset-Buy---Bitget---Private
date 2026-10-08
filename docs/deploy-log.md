@@ -67,7 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
-| **pending** | PR #77 head | #77 | **v0.7.7**: Unified Trading accounts refused at verification (40085 → `unified_account`); daily read-only `unified_account_check` (06:20 UTC, seventh job) with one email + one Telegram alert per key and a banner on the purchases list; Settings line. No migration, no `.env` lines, executor untouched. Checklist: 30-minute window; smoke = throwaway verifies with a stub venue raising 40085 → `unified_account` with the exact message, a stow key still verifies; seven jobs; one run of the daily check on the real keys reported (expect 2 keys already Unified → flagged once, 2 emails, 2 Telegram lines, their purchases show the banner). | pre-deploy dump | bundle from the merge commit |
+| 2026-10-08 16:20 | `ca5e849` | #77 | **v0.7.7**: Unified Trading accounts refused at verification (40085 → `unified_account`); daily read-only `unified_account_check` (cron 06:20 UTC, **seventh job**) with one email + one Telegram line per key; purchase rows carry `exchange_key_error` for the banner; Settings line. No migration (alembic 027), no `.env` lines, executor untouched. Pre-deploy dump size-checked. Verified: health and BUILD_INFO at ca5e849, seven jobs on four workers, purchase and withdrawal jobs ok, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (31 rows). Smoke (throwaway, stub venue, no Bitget call): 40085 → `unified_account` with the exact message and a failed row; `stow` → verified; teardown counts zero. The first real pass runs 2026-10-09 06:20 UTC and will flag the two keys already on Unified accounts (owner's SHIB key, one customer key) with one email and one Telegram line each. Earlier the same day: parked SHIB purchase `b6b26bf1` cancelled by admin resolve with a note; customer purchase `b8e64e66` paused through the normal update path, anchor kept. | `pre-v0.7.7-20261008T162016Z.sql.gz` (14410 B) | `~/web-v0.7.7` |
 | 2026-10-07 22:30 | `c36e695` | #68 | **v0.7.5.1**: schedule anchor, no more drift (executor change, approved). **Migration 027** at boot (alembic 026 → 027): `purchases.schedule_anchor` backfilled, 0 nulls; every active and paused row's next run identical before and after and its anchor equal to the pre-deploy next run (4 of 4), the 20 other rows anchored on their creation time. Also: Bitget icons for XLM, SHIB, PEPE, BONK, credits page lists ten logos with the trademark line. Pre-merge: branch already level with main (0 commits behind), spec and SDKs unchanged, CI green. Pre-migration dump size-checked before the restart. Verified: health and BUILD_INFO at c36e695, six jobs on four workers, purchase and withdrawal jobs ok, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (30 rows `7ce57f96…`). Live drift check on a throwaway (next-run maths only, no order, no Bitget call, 0 transaction rows created): a run 4 min late lands on anchor + 7 d, the next on anchor + 14 d, 16 idle days on anchor + 21 d; torn down with all counts zero. Credits page: ten logos loaded, no initial line, trademark line, 21 image requests all same-origin. Read-only verified keys still **1** (key `d4d2f70a…`, last verified 2026-10-06 05:39 UTC, no verify call since): the re-verify has not happened in the app. | `pre-v0.7.5.1-20261007T223030Z.sql.gz` (13951 B) | `~/web-v0.7.5.1` |
 | 2026-10-07 21:23 | `2dea29b` | #74 | **v0.7.6**: coin logos (frontend only; backend byte-identical to v0.7.5). Six logos from brand sources served from `/logos/` (BTC, ETH, SOL, XRP, USDC, DOGE), lettered circles in the coin colour for XLM, SHIB, PEPE, BONK, `/logo-credits` generated from `LOGO_SOURCES.md`, footer link. No migration (alembic 026), no `.env` lines. Deploy launched detached; bundle checksums `ad3f789a…` matched. Verified: health and BUILD_INFO (nginx + public) at 2dea29b, a logo and the credits route served publicly, six jobs on four workers, purchase and withdrawal jobs ok, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (30 rows `7ce57f96…`). Smoke (throwaway, no purchase, no Bitget call): landing shows six logos and four circles, every logo loaded from `/logos/`; credits page lists ten rows with the ETH credit; picker at 1280 and 360 px shows DOGE's logo beside three circles in the coin colours at 32 px, main tab four logos and the XLM circle; no image loaded from outside our domain; teardown counts zero. | `pre-v0.7.6-20261007T212309Z.sql.gz` (13950 B) | `~/web-v0.7.6` |
 | 2026-10-07 18:07 | `4228170` | #60 + #61 | **v0.7.5**: meme coins DOGE, SHIB, PEPE, BONK as accumulate-only; coin categories (main / stable / meme) in the picker, the landing page, market and public meta; withdraw gate refuses meme coins on every path, allowlisted owner included; number formatters (humans: separators, at least 4 significant digits for prices; CSV plain); low-balance email and Telegram line through the money formatter. No migration (alembic 026), no `.env` lines, executor untouched. Pre-merge: #60 conflicts in CHANGELOG, docs/API.md and the generated clients (both sides kept, clients regenerated: 9 schema additions); #61 one conflict in PurchaseList.test.tsx (both tests kept); BONK's colour `#334155` was missing from the asset colour map and was added. Deploy launched detached; bundle checksums `9c69c7ed…` matched. Verified: health and BUILD_INFO (nginx + public) at 4228170, six jobs on four workers, purchase and withdrawal jobs ok, public meta lists the three categories, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (30 rows `7ce57f96…`). Smoke (throwaway, no purchase created, no Bitget call): landing shows the meme group; at 1280 and 360 px the category tabs show, PEPE shows the risk line word for word and hides the withdraw toggle and wallet field, BTC shows no risk line; teardown counts zero. Owner's own one-time meme buy to follow. | `pre-v0.7.5-20261007T180701Z.sql.gz` (13951 B) | `~/web-v0.7.5` |
@@ -101,6 +101,7 @@ before/after files next to it), public HTTPS on 2026-09-21 (dump
 | `v0.7.5` | `4228170` | Meme coins and categories (#60 + #61); no migration: rollback = redeploy v0.7.4.1 with `~/web-v0.7.4.1` |
 | `v0.7.6` | `2dea29b` | Coin logos (#74); frontend only: rollback = redeploy v0.7.5 with `~/web-v0.7.5` |
 | `v0.7.5.1` | `c36e695` | Schedule anchor, migration 027 (#68); rollback = `alembic downgrade 026` in the container, then redeploy v0.7.6 with `~/web-v0.7.6` |
+| `v0.7.7` | `ca5e849` | Unified-account detection (#77); no migration: rollback = redeploy v0.7.5.1 with `~/web-v0.7.5.1` |
 
 To roll the code back: on the server, create a branch at the tag
 (`git branch rollback-v0.7.1 v0.7.1`) and deploy it with
@@ -162,9 +163,9 @@ update users set role = 'admin' where email = 'person@example.com';
 The owner account `support@minastech.ca` was promoted this way on 2026-09-22.
 Every admin action is written to the audit table.
 
-## Current known state (2026-10-07, after the v0.7.5.1 deploy)
+## Current known state (2026-10-08, after the v0.7.7 deploy)
 
-- Server at `c36e695` = `v0.7.5.1`, alembic `027`, six scheduler jobs, dry run off,
+- Server at `ca5e849` = `v0.7.7`, alembic `027`, seven scheduler jobs, dry run off,
   schedulers not paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
   the allowlisted owner can use withdraw mode.
 - Three active purchases, all XRP weekly accumulate: the original (10 USD, next
@@ -172,10 +173,15 @@ Every admin action is written to the audit table.
   **2026-10-12 18:16 UTC**) and a third created on 2026-10-06 (next run
   **2026-10-13 14:42 UTC**). The only withdraw-mode purchase in the table is
   the owner's own one-time BTC purchase from 2026-09-15, status failed.
-- Next: #71 (balance check on create and resume); then the single-scheduler
-  process as its own release. First live runs of the anchored scheduler:
-  12 Oct 00:16:57 UTC (then 19 Oct 00:16:57), 12 Oct 18:16:05 (then 19 Oct
-  18:16:05), 13 Oct 14:42:44 (then 20 Oct 14:42:44).
+- Two active purchases, both XRP weekly: next runs 12 Oct 00:16:57 UTC (then
+  19 Oct 00:16:57) and 13 Oct 14:42:44 UTC (then 20 Oct 14:42:44). The
+  customer purchase `b8e64e66` (next 12 Oct 18:16) is paused: its Bitget
+  account turned Unified. Bitget migrates Classic accounts to Unified Trading
+  mode in batches since 2026-09-15; two of five verified keys are Unified.
+- Next: `v0.8.0` = Unified (V3) support alongside Classic (branch
+  `feat/unified-v3-support`, migration 028 `api_keys.account_mode`, owner's go
+  needed before merge, live test on the owner's SHIB key); then #71; then the
+  single-scheduler process.
 - One verified key (`d4d2f70a…`) still records read-only codes; its owner has
   not re-verified in the app since 2026-10-06 05:39 UTC.
 - The 2026-10-06 USDC stop (Bitget 40014) was a Read-only key; the tester
