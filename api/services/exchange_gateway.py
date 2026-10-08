@@ -79,7 +79,7 @@ def _client_for(account: APIKey):
     return ExchangeClient(decrypt_value(account.encrypted_api_key),
                           decrypt_value(account.encrypted_api_secret),
                           decrypt_value(account.encrypted_passphrase) if account.encrypted_passphrase else "",
-                          exchange=account.exchange)
+                          exchange=account.exchange, account_mode=getattr(account, "account_mode", "unknown") or "unknown")
 
 
 def tag_requirement(purchase: Purchase, chain: str) -> Optional[str]:

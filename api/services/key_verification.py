@@ -43,6 +43,7 @@ TRANSPORT_CODES = {"NETWORK", "HTTP"}
 
 VENUE_NAMES = {"binance": "Binance", "bitget": "Bitget"}
 UNIFIED_CODES = {"bitget": {"40085"}}   # "You are in Unified Account mode, and the Classic Account API is not supported"
+CLASSIC_CODES = {"bitget": {"40084"}}   # "You are in Classic Account mode, and the Unified Account API is not supported"
 
 
 def unified_message() -> str:
@@ -84,13 +85,13 @@ def classify(exchange: str, exc: ExchangeClientError) -> tuple[str, str]:
     return "error", f"{venue} error {code}: {msg[:200]}"
 
 
-def _client_for(key: APIKey, client_factory=None) -> ExchangeClient:
+def _client_for(key: APIKey, client_factory=None, mode: str | None = None) -> ExchangeClient:
     """Venue client for a stored key; credentials are decrypted here and never logged."""
     from api.routes.exchange import decrypt_value
     factory = client_factory or ExchangeClient
     return factory(decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
                    passphrase=decrypt_value(key.encrypted_passphrase) if key.encrypted_passphrase else "",
-                   exchange=key.exchange)
+                   exchange=key.exchange, account_mode=mode or getattr(key, "account_mode", "unknown") or "unknown")
 
 
 def _check(client: ExchangeClient) -> dict:
@@ -100,16 +101,30 @@ def _check(client: ExchangeClient) -> dict:
 async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verification:
     """Run the check and persist the outcome on ``key``. Never raises for venue
     problems; only unexpected programming errors propagate."""
-    client = _client_for(key, client_factory)
+    mode = getattr(key, "account_mode", "unknown") or "unknown"
+    client = _client_for(key, client_factory, mode)
     now = datetime.now(timezone.utc)
     venue = VENUE_NAMES.get(key.exchange, key.exchange)
     log_ctx = {"user_id": str(key.user_id), "key_id": str(key.id), "exchange": key.exchange}
 
     try:
-        info = await asyncio.to_thread(_check, client)
+        try:
+            info = await asyncio.to_thread(_check, client)
+        except ExchangeClientError as exc:
+            # v0.8.0: the venue tells us which API family the account speaks; follow it and remember it.
+            if key.exchange == "bitget" and str(exc.code) in UNIFIED_CODES["bitget"] and mode != "unified":
+                mode = "unified"
+                info = await asyncio.to_thread(_check, _client_for(key, client_factory, mode))
+            elif key.exchange == "bitget" and str(exc.code) in CLASSIC_CODES["bitget"] and mode == "unified":
+                mode = "classic"
+                info = await asyncio.to_thread(_check, _client_for(key, client_factory, mode))
+            else:
+                raise
+        if key.exchange == "bitget":
+            key.account_mode = mode if mode != "unknown" else "classic"   # a v2 answer means Classic
     except ExchangeClientError as exc:
         if str(exc.code) in UNIFIED_CODES.get(key.exchange, set()):
-            result, detail = "unified_account", unified_message()   # v0.7.7: the account was migrated to Unified Trading mode
+            result, detail = "unified_account", unified_message()   # v0.7.7 text; only reachable if v3 also answered 40085
         else:
             result, detail = classify(key.exchange, exc)
         outcome = Verification(verified=False, result=result, detail=detail, error_code=str(exc.code))
