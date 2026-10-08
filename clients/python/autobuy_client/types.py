@@ -20,6 +20,7 @@ class APIKeyCreate(TypedDict):
 
 class APIKeyResponse(TypedDict):
     """APIKeyResponse."""
+    account_mode: NotRequired[str]
     api_key_masked: str
     created_at: str
     exchange: str

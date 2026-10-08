@@ -36,6 +36,11 @@
       },
       "APIKeyResponse": {
         "properties": {
+          "account_mode": {
+            "default": "unknown",
+            "title": "Account Mode",
+            "type": "string"
+          },
           "api_key_masked": {
             "title": "Api Key Masked",
             "type": "string"

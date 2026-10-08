@@ -10,6 +10,7 @@ export interface APIKeyCreate {
 }
 
 export interface APIKeyResponse {
+  account_mode?: string;
   api_key_masked: string;
   created_at: string;
   exchange: string;
