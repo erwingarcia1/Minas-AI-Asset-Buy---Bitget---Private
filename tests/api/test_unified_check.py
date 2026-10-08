@@ -71,12 +71,20 @@ async def test_a_key_that_turned_unified_is_flagged_once_and_a_classic_key_is_le
     for k in (classic, unified):
         k.verified, k.verification_status = True, "verified"
     p = await make_purchase(db, user, unified, crypto_symbol="XRP", status="active")
+    p2 = await make_purchase(db, user, unified, crypto_symbol="BTC", status="active")
+    done = await make_purchase(db, user, unified, crypto_symbol="SOL", status="completed")
+    on_classic = await make_purchase(db, user, classic, crypto_symbol="XRP", status="active")
     await db.commit()
     Venue.answers = {await plain(db, unified): UNIFIED}
     out = await uc.check_unified_accounts(db)
     # the shared test database may hold other verified keys; assert on ours and on what this pass produced
-    assert out["checked"] >= 2 and out["turned_unified"] == 1 and out["emails"] == 1
+    assert out["checked"] >= 2 and out["turned_unified"] == 1 and out["emails"] == 1 and out["paused"] == 2
     await db.refresh(unified); await db.refresh(classic)
+    for row in (p, p2, done, on_classic):
+        await db.refresh(row)
+    assert p.status == "paused" and p2.status == "paused" and p.failure_count == 0 and p.last_error is None   # the normal pause: status only
+    assert done.status == "completed" and on_classic.status == "active"   # a Classic key's purchases are untouched
+    assert "We've paused your purchases so nothing fails; nothing was bought." in mail.sent[0]["text"]
     assert unified.verified is False and unified.verification_status == "failed" and unified.verification_error == kv.unified_message()
     assert classic.verified is True and classic.verification_status == "verified"
     assert len(mail.sent) == 1 and mail.sent[0]["to"] == user.email and kv.unified_message() in mail.sent[0]["text"]
@@ -90,7 +98,7 @@ async def test_a_key_that_turned_unified_is_flagged_once_and_a_classic_key_is_le
     # next day: the flagged key is no longer verified, so it is not checked again: no second email or alert
     Venue.calls.clear()
     out2 = await uc.check_unified_accounts(db)
-    assert out2["turned_unified"] == 0 and out2["emails"] == 0
+    assert out2["turned_unified"] == 0 and out2["emails"] == 0 and out2["paused"] == 0
     assert (await plain(db, classic)) in Venue.calls and (await plain(db, unified)) not in Venue.calls
     assert len(mail.sent) == 1 and len(tg) == 1
 
@@ -101,7 +109,7 @@ async def test_other_venue_errors_count_as_unreadable_and_change_nothing(db, use
     await db.commit()
     Venue.answers = {await plain(db, key): ExchangeClientError("Bitget error 40018: Invalid IP", "40018")}
     out = await uc.check_unified_accounts(db)
-    assert out["unreadable"] >= 1 and out["turned_unified"] == 0 and out["emails"] == 0
+    assert out["unreadable"] >= 1 and out["turned_unified"] == 0 and out["emails"] == 0 and out["paused"] == 0
     await db.refresh(key)
     assert key.verified is True and key.verification_status == "verified" and mail.sent == [] and tg == []
 
