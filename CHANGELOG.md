@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7.1] — pending deploy: a flagged Unified key pauses its purchases (PR #79)
+
+### Changed
+
+* When the daily check flags a key as Unified, every active purchase on that
+  key is paused through the normal pause path (status only, nothing else), so
+  no attempt runs and fails on it. The customer email says "We've paused your
+  purchases so nothing fails; nothing was bought." Still one email per key; a
+  Classic key's purchases are untouched. No executor change.
+
 ## [0.7.7] — 2026-10-08: Unified Trading accounts detected before a buy fails (PR #77)
 
 ### Added
