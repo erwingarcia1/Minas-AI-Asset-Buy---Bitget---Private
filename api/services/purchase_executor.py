@@ -306,6 +306,32 @@ async def _reconcile_unresolved(db: AsyncSession, purchase: Purchase, account: A
     return None
 
 
+UNIFIED_REFUSAL_CODE = "40085"   # Bitget: "You are in Unified Account mode, and the Classic Account API is not supported"
+
+
+def _is_unified_refusal(exc: Exception) -> bool:
+    return str(getattr(exc, "code", "") or "") == UNIFIED_REFUSAL_CODE or f"{UNIFIED_REFUSAL_CODE}:" in str(exc)
+
+
+async def _place_following_account_mode(db: AsyncSession, gateway: ExchangeGateway, account: APIKey, purchase: Purchase,
+                                        client_oid: str, dry_run: bool) -> dict:
+    """gateway.place_buy, with one twist (v0.8.0): when a Classic-mode key is refused with 40085 the
+    account has been migrated to Unified Trading mode, so the key is switched to ``unified`` and the
+    SAME attempt (same client order id) is placed once more through the v3 client. No other error
+    switches anything; a Classic key on any other error raises exactly as before."""
+    try:
+        return await asyncio.to_thread(gateway.place_buy, account, purchase, client_oid, dry_run)
+    except Exception as exc:
+        if account.exchange != "bitget" or (getattr(account, "account_mode", "unknown") or "unknown") == "unified" \
+                or not _is_unified_refusal(exc):
+            raise
+        logger.warning("purchase %s: key %s refused with 40085 (Unified Trading mode); switching the key to unified "
+                       "and retrying client_oid=%s through v3", purchase.id, account.id, client_oid)
+        account.account_mode = "unified"
+        await db.commit()
+        return await asyncio.to_thread(gateway.place_buy, account, purchase, client_oid, dry_run)
+
+
 async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gateway: ExchangeGateway,
                       dry_run: bool) -> Optional[PurchaseTransaction]:
     """Execute a single due purchase. Returns the buy transaction, or None when skipped.
@@ -380,7 +406,7 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
     # 3. place the order
     reference_price = None
     try:
-        placed = await asyncio.to_thread(gateway.place_buy, account, purchase, tx.client_oid, dry_run)
+        placed = await _place_following_account_mode(db, gateway, account, purchase, tx.client_oid, dry_run)
         tx.order_id = placed.get("order_id")
         reference_price = placed.get("reference_price")
         await db.commit()
