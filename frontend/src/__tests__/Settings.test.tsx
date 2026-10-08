@@ -30,9 +30,9 @@ const VERIFIED_WITHDRAW = { ...FAILED, id: "k2", exchange: "binance", verified: 
 describe("Settings: exchange keys", () => {
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(notificationAPI.preferences).mockResolvedValue(PREFS as never); });
 
-  it("says a Classic Bitget account is needed until Unified support ships", async () => {
+  it("says both account types work for buying and holding", async () => {
     render(<MemoryRouter><Settings /></MemoryRouter>);
-    expect(await screen.findByTestId("classic-account-line")).toHaveTextContent("AutoBuy currently needs a Classic Bitget account. Unified Trading accounts aren't supported yet; we're adding them now.");
+    expect(await screen.findByTestId("classic-account-line")).toHaveTextContent("Classic and Unified Trading Bitget accounts both work for buying and holding. Sending coins to a wallet needs a Classic account for now.");
   });
 
   it("shows a failed key with its readable reason and a retry button, never 'pending' forever", async () => {

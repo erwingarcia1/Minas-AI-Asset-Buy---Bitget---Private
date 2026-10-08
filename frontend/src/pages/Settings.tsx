@@ -136,7 +136,7 @@ export default function Settings() {
                   ) : <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span>}</li>
             )}
             <li data-testid="fee-note">Fees: Bitget's trading fee applies, taken from the coin you receive. AutoBuy adds no fee of its own.</li>
-            <li data-testid="classic-account-line">AutoBuy currently needs a <b>Classic</b> Bitget account. Unified Trading accounts aren&apos;t supported yet; we&apos;re adding them now.</li>
+            <li data-testid="classic-account-line">Classic and Unified Trading Bitget accounts both work for buying and holding. Sending coins to a wallet needs a Classic account for now.</li>
             <li>Create the key as <b>Read-write</b>. A Read-only key won&apos;t work: AutoBuy will refuse it and ask you to change it. Bitget reports permissions as codes. Spot → Trade is required; Margin → Trade, Wallet → Transfer, Taxation → Search and P2P → Search are recognised as not needed (a warning, nothing blocked). Any code we have not confirmed yet is treated as "withdrawal possible": use such a key only where that is intended.</li>
           </ul>
           {!withdrawAllowed && (
@@ -149,7 +149,7 @@ export default function Settings() {
             {keys.data?.map((k) => (
               <li key={k.id} className="py-2" data-testid="exchange-key">
                 <div className="flex items-center justify-between gap-3">
-                  <span><span className="font-medium capitalize">{k.exchange}</span> <span className="text-slate-500">{String(k.api_key_masked ?? "")}</span> <StatusBadge status={k.verification_status ?? (k.verified ? "verified" : "pending")} /></span>
+                  <span><span className="font-medium capitalize">{k.exchange}</span> <span className="text-slate-500">{String(k.api_key_masked ?? "")}</span>{k.account_mode === "unified" && <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600" data-testid="account-mode">Unified</span>}{k.account_mode === "classic" && <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600" data-testid="account-mode">Classic</span>} <StatusBadge status={k.verification_status ?? (k.verified ? "verified" : "pending")} /></span>
                   <span className="space-x-2 whitespace-nowrap">
                     {k.verification_status !== "verified" && (
                       <button className="btn-secondary !py-1" disabled={verifying === k.id} onClick={() => void verifyKey(k.id)}>

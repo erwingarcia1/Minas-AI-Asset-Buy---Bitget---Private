@@ -164,6 +164,7 @@ export interface ApiKey {
   withdrawal_enabled?: boolean | null;    // null = the exchange does not report permissions
   permissions?: string[];                 // codes the exchange reported at verification
   extra_permissions?: string[];           // recognised codes AutoBuy does not need (non-blocking warning)
+  account_mode?: "classic" | "unified" | "unknown";   // which Bitget API family the account speaks (v0.8.0)
   created_at: string;
   [key: string]: unknown;
 }
