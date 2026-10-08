@@ -164,6 +164,7 @@ async def create_purchase(
     if account is None:
         raise HTTPException(status_code=404, detail={"error": "exchange_account_not_found",
                                                     "details": {"exchange_account_id": str(payload.exchange_account_id)}})
+    _require_verified_key(account)   # v0.7.7.2: refused here with the key's own message, not left to fail at buy time
 
     await _validate_against_exchange(account, payload.crypto_symbol, payload.amount_usd,
                                      payload.blockchain_network if payload.wallet_address else None,
@@ -276,6 +277,8 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
         raise HTTPException(status_code=409, detail={
             "error": "exchange_key_removed",
             "details": {"message": "Exchange key removed. This purchase cannot run again; add an exchange key and create a new purchase."}})
+    if payload.status == "active" and p.status != "active":
+        _require_verified_key(p.exchange_account)   # v0.7.7.2: a resume on an unverified or flagged key is refused with its message
     if payload.status == "active" and p.status == "paused":
         p.failure_count = 0
         p.last_error = None
@@ -296,6 +299,20 @@ async def update_purchase(purchase_id: UUID, payload: PurchaseUpdateRequest,
     await db.commit()
     await db.refresh(p)
     return _to_out(p)
+
+
+UNVERIFIED_KEY_MESSAGE = "This exchange key is not verified. Verify it under Settings before creating or resuming a purchase."
+
+
+def _require_verified_key(account: APIKey) -> None:
+    """A purchase can only be created or resumed on a verified key. A key that failed verification
+    (for example "This Bitget account uses Unified Trading mode…") answers with its own message."""
+    if account is None or account.verified:
+        return
+    message = account.verification_error if account.verification_status == "failed" and account.verification_error else UNVERIFIED_KEY_MESSAGE
+    raise HTTPException(status_code=409, detail={"error": "exchange_key_unverified",
+                                                 "details": {"message": message, "exchange_account_id": str(account.id),
+                                                             "verification_status": account.verification_status}})
 
 
 def _gateway():
