@@ -460,6 +460,7 @@ export interface PurchaseDetailOut {
   crypto_symbol: string;
   exchange?: string | null;
   exchange_account_id?: string | null;
+  exchange_key_error?: string | null;
   exchange_key_removed?: boolean;
   failure_count: number;
   frequency: string;
@@ -487,6 +488,7 @@ export interface PurchaseOut {
   crypto_symbol: string;
   exchange?: string | null;
   exchange_account_id?: string | null;
+  exchange_key_error?: string | null;
   exchange_key_removed?: boolean;
   failure_count: number;
   frequency: string;
