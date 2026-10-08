@@ -200,6 +200,41 @@ async def _check_low_balances_once() -> dict:
     return result
 
 
+UNIFIED_LOCK_KEY = 0x41425541  # "ABUA"
+
+
+async def _check_unified_once() -> dict:
+    from api.services.unified_check import check_unified_accounts
+    from api.services import telegram
+    if not await _claim_tick("unified_account_check", ttl=3600):
+        return {"skipped": "tick"}
+    engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
+    try:
+        async with engine.connect() as lock_conn:
+            got = (await lock_conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": UNIFIED_LOCK_KEY})).scalar()
+            if not got:
+                return {"skipped": "lock"}
+            try:
+                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    result = await check_unified_accounts(session)
+            finally:
+                await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": UNIFIED_LOCK_KEY})
+                await lock_conn.commit()
+    finally:
+        await engine.dispose()
+    await telegram.flush()
+    return result
+
+
+def check_unified_accounts_job() -> dict:
+    """APScheduler entry point (daily): read-only account-info call per verified Bitget key."""
+    try:
+        return asyncio.run(_check_unified_once())
+    except Exception:
+        logger.exception("unified-account check failed")
+        return {}
+
+
 def check_low_balances_job() -> dict:
     """APScheduler entry point (every 30 min): read-only pre-buy balance check;
     warns customers about a day and about two hours before an underfunded run.
@@ -240,6 +275,9 @@ def build_scheduler():
     from api.services.low_balance import JOB_INTERVAL_MINUTES
     sched.add_job(check_low_balances_job, "interval", minutes=JOB_INTERVAL_MINUTES, id="low_balance_check",
                   max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE_SECONDS)
+    from api.services.unified_check import JOB_HOUR_UTC, JOB_MINUTE_UTC
+    sched.add_job(check_unified_accounts_job, "cron", hour=JOB_HOUR_UTC, minute=JOB_MINUTE_UTC, id="unified_account_check",
+                  max_instances=1, coalesce=True, misfire_grace_time=3600)
     sched.add_job(send_weekly_digest, "cron", day_of_week="mon", hour=9, minute=0, id="weekly_digest",
                   max_instances=1, coalesce=True, misfire_grace_time=3600)
     sched.add_listener(job_event_listener, EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_ERROR)

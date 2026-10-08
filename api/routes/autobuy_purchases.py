@@ -60,6 +60,8 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
         exchange_account_id=p.exchange_account_id,
         exchange=p.exchange_account.exchange if p.exchange_account else None,
         exchange_key_removed=p.exchange_account is None,
+        exchange_key_error=(p.exchange_account.verification_error
+                            if p.exchange_account is not None and p.exchange_account.verification_status == "failed" else None),
         status=p.status, failure_count=p.failure_count, last_error=p.last_error,
         next_execution=p.next_execution, created_at=p.created_at, updated_at=p.updated_at,
         low_balance_for_next_run=low_balance_outstanding(p), low_balance_alerted_at=p.low_balance_alerted_at,
