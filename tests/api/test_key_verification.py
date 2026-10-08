@@ -180,8 +180,9 @@ async def test_unified_account_is_refused_with_the_fix_it_message(db, user, bina
     before = binance_key.updated_at
     body = (await verify(client, user, binance_key)).json()
     assert body["verified"] is False and body["result"] == "unified_account"
+    from api.config import settings
     assert body["detail"] == ("This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. "
-                              "Please contact support@minastech.ca and we'll let you know as soon as it's ready.")
+                              f"Please contact {settings.support_email or 'support'} and we'll let you know as soon as it's ready.")
     await assert_row(db, binance_key, verified=False, status="failed", error_contains="Unified Trading mode", withdrawal=None, before=before)
 
 

@@ -77,16 +77,16 @@ async def test_a_key_that_turned_unified_is_flagged_once_and_a_classic_key_is_le
     # the shared test database may hold other verified keys; assert on ours and on what this pass produced
     assert out["checked"] >= 2 and out["turned_unified"] == 1 and out["emails"] == 1
     await db.refresh(unified); await db.refresh(classic)
-    assert unified.verified is False and unified.verification_status == "failed" and unified.verification_error == kv.UNIFIED_MESSAGE
+    assert unified.verified is False and unified.verification_status == "failed" and unified.verification_error == kv.unified_message()
     assert classic.verified is True and classic.verification_status == "verified"
-    assert len(mail.sent) == 1 and mail.sent[0]["to"] == user.email and kv.UNIFIED_MESSAGE in mail.sent[0]["text"]
+    assert len(mail.sent) == 1 and mail.sent[0]["to"] == user.email and kv.unified_message() in mail.sent[0]["text"]
     assert mail.sent[0]["category"] == "failure"   # not an optional category: it goes out regardless of marketing preferences
     assert len(tg) == 1 and tg[0][1] == f"unified_account:{unified.id}" and user.email not in tg[0][0]
     # the purchases list carries the message for the banner
     from api.auth import create_access_token
     r = await client.get("/api/v2/purchases", headers={"Authorization": f"Bearer {create_access_token(str(user.id)).access_token}"})
     row = next(x for x in r.json() if x["id"] == str(p.id))
-    assert row["exchange_key_error"] == kv.UNIFIED_MESSAGE
+    assert row["exchange_key_error"] == kv.unified_message()
     # next day: the flagged key is no longer verified, so it is not checked again: no second email or alert
     Venue.calls.clear()
     out2 = await uc.check_unified_accounts(db)

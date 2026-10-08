@@ -35,7 +35,7 @@ JOB_MINUTE_UTC = 20
 async def _email(key: APIKey) -> bool:
     from api.utils.links import build_app_link
     user = key.user
-    html, text = render("unified_account", greeting="Hello,", message=kv.UNIFIED_MESSAGE,
+    html, text = render("unified_account", greeting="Hello,", message=kv.unified_message(),
                         settings_url=build_app_link("/settings"))
     return await email_service.queue(user.email, SUBJECT, html, text, template="unified_account",
                                      category="failure", user_id=user.id)
@@ -61,7 +61,7 @@ async def check_unified_accounts(db, client_factory=None) -> dict:
             logger.exception("unified check crashed on key %s: %s", key.id, type(exc).__name__)
             continue
         now = datetime.now(timezone.utc)
-        kv._record(key, kv.Verification(verified=False, result="unified_account", detail=kv.UNIFIED_MESSAGE,
+        kv._record(key, kv.Verification(verified=False, result="unified_account", detail=kv.unified_message(),
                                         error_code="40085", permissions=[p for p in (key.permissions or "").split(",") if p]), now)
         out["turned_unified"] += 1
         emailed = False
