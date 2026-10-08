@@ -56,6 +56,9 @@ class APIKey(Base):
     last_checked_at = Column(DateTime(timezone=True), nullable=True)
     withdrawal_enabled = Column(Boolean, nullable=True)   # None = the exchange does not report permissions
     permissions = Column(String(500), nullable=True)      # codes reported at verification, comma-separated
+    # Which Bitget API family the key's account speaks (migration 028): classic (v2) | unified (v3) | unknown.
+    # unknown is treated as classic by every caller; 40085 on a v2 call switches the key to unified.
+    account_mode = Column(String(10), nullable=False, default="unknown", server_default="unknown")
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     
