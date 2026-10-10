@@ -51,6 +51,8 @@ def unified_message() -> str:
     from api.config import settings
     return ("This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. "
             f"Please contact {settings.support_email or 'support'} and we'll let you know as soon as it's ready.")
+UNIFIED_MANAGEMENT_MESSAGE = ("Almost there! In Bitget, edit this key and also tick Unified Trading Account → Management → Read, "
+                              "then verify again. AutoBuy needs it to check your balance before each buy.")
 READ_ONLY_MESSAGE = ("This key is Read-only, so AutoBuy can't place buys. In Bitget, edit the key to Read-write "
                      "with only Spot → Trade ticked, then verify again.")
 
@@ -148,6 +150,13 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
     extra = list(info.get("extra") or [])
     if info.get("read_only"):
         outcome = Verification(verified=False, result="read_only_key", detail=READ_ONLY_MESSAGE,
+                               withdrawal_enabled=can_withdraw, permissions=permissions, extra_permissions=extra)
+        _record(key, outcome, now)
+        await db.commit()
+        logger.warning("api_key_verification_failed", extra={**log_ctx, "result": outcome.result, "permissions": permissions})
+        return outcome
+    if mode == "unified" and can_trade is True and info.get("management_read") is False:
+        outcome = Verification(verified=False, result="unified_management_missing", detail=UNIFIED_MANAGEMENT_MESSAGE,
                                withdrawal_enabled=can_withdraw, permissions=permissions, extra_permissions=extra)
         _record(key, outcome, now)
         await db.commit()

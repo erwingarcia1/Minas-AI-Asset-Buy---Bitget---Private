@@ -86,8 +86,9 @@ def test_unified_client_calls_v3_and_keeps_the_classic_shapes(monkeypatch):
 
 def test_unified_permissions_interpretation():
     f = interpret_unified_permissions
-    assert f(["uta_trade", "uta_mgt"], "read-and-write")["can_trade"] is True
-    assert f(["uta_trade"], "read-only") == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": True}
+    assert f(["uta_trade", "uta_mgt"], "read-and-write")["can_trade"] is True and f(["uta_trade", "uta_mgt"], "read-and-write")["management_read"] is True
+    assert f(["uta_trade"], "read-and-write")["management_read"] is False
+    assert f(["uta_trade"], "read-only") == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": True, "management_read": False}
     assert f(["uta_trade", "withdraw"], "read-and-write")["can_withdraw"] is True
     assert f([], "")["permissions_known"] is False
 
@@ -119,7 +120,8 @@ def venue(monkeypatch):
 
 
 OK_V2 = {"can_trade": True, "can_withdraw": False, "permissions": ["stow"], "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
-OK_V3 = {"can_trade": True, "can_withdraw": False, "permissions": ["uta_trade"], "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
+OK_V3 = {"can_trade": True, "can_withdraw": False, "permissions": ["uta_trade", "uta_mgt"], "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False, "management_read": True}
+TRADE_ONLY_V3 = {**OK_V3, "permissions": ["uta_trade"], "management_read": False}
 
 
 async def test_verification_follows_40085_to_v3_and_stores_unified(db, user):
@@ -144,6 +146,25 @@ async def test_verification_on_v2_success_stores_classic_and_a_unified_key_switc
     Venue.script = {"unified": CLASSIC, "classic": OK_V2}
     assert (await kv.verify_api_key(db, key)).verified is True
     await db.refresh(key); assert key.account_mode == "classic"
+
+
+async def test_unified_key_without_management_read_is_refused_with_the_almost_there_message(db, user):
+    """The two live Unified keys carry uta_trade only: they can order but cannot read a balance."""
+    key = await make_key(db, user, exchange="bitget"); key.account_mode = "unified"; await db.commit()
+    Venue.script = {"unified": TRADE_ONLY_V3}
+    out = await kv.verify_api_key(db, key)
+    assert out.verified is False and out.result == "unified_management_missing"
+    assert out.detail == ("Almost there! In Bitget, edit this key and also tick Unified Trading Account → Management → Read, "
+                          "then verify again. AutoBuy needs it to check your balance before each buy.")
+    await db.refresh(key)
+    assert key.verified is False and key.verification_status == "failed" and key.verification_error == out.detail and key.account_mode == "unified"
+
+
+async def test_unified_key_with_trade_and_management_read_verifies(db, user):
+    key = await make_key(db, user, exchange="bitget"); key.account_mode = "unified"; await db.commit()
+    Venue.script = {"unified": OK_V3}
+    out = await kv.verify_api_key(db, key)
+    assert out.verified is True and out.result == "ok"
 
 
 async def test_verification_read_only_unified_key_is_refused(db, user):

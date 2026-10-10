@@ -74,8 +74,10 @@ def interpret_unified_permissions(perms: list, perm_type) -> dict:
     withdraw = bool(tokens & UTA_WITHDRAW_TOKENS)
     unconfirmed = sorted(tokens - UTA_KNOWN_TOKENS)
     return {"can_trade": trade, "can_withdraw": withdraw, "permissions_known": bool(tokens) or bool(perm_type),
-            "unconfirmed": unconfirmed, "extra": sorted(tokens & {"uta_mgt", "copy_futures_position", "copy_futures_order"}),
-            "read_only": read_only}
+            "unconfirmed": unconfirmed, "extra": sorted(tokens & {"copy_futures_position", "copy_futures_order"}),
+            "read_only": read_only,
+            # Management -> Read (uta_mgt) is REQUIRED on a Unified key: the balance reads (/api/v3/account/assets) need it
+            "management_read": "uta_mgt" in tokens}
 
 
 def interpret_bitget_authorities(auths: list) -> dict:

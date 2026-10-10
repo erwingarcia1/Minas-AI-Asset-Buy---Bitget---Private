@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every key flagged by v0.7.7 through v3, stores its mode and emails the owner
   "Good news: AutoBuy now works with your Bitget account. Press Resume on your
   purchases whenever you're ready." Nothing is resumed automatically.
+* **A Unified key needs both Trade and Management → Read.** Verification of a
+  Unified key requires `uta_trade` and `uta_mgt`; with Trade only it is refused
+  with "Almost there! In Bitget, edit this key and also tick Unified Trading
+  Account → Management → Read, then verify again. AutoBuy needs it to check
+  your balance before each buy."
 * Withdraw-immediately purchases are refused on a Unified key for now
   (`unified_account_withdraw`): v3 withdrawals are not built. Settings shows
   each key's mode and says both account types work for buying and holding.
