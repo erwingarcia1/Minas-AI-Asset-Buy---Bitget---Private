@@ -67,7 +67,7 @@ running ok, unless a note says otherwise.
 | 2026-09-28 03:04 | `902533f` | #47 | Telegram alerts | `pre-v074-20260928T030314Z.sql.gz` | |
 | 2026-09-28 18:50 | `52ab2ab` | #48 | Landing page, invite-code signup gate, public meta | `pre-v075-20260928T184841Z.sql.gz` | |
 | 2026-09-28 19:52 | `ff3058a` | #49 | Refresh 429 no longer signs the user out | `pre-v076-20260928T194549Z.sql.gz` | |
-| **pending** | PR #81 head | #81 | **v0.8.0**: Unified (v3) support alongside Classic; **migration 028** `api_keys.account_mode` backfilled `unknown`; executor switch on 40085 only (approved executor change). Checklist: 30-minute window; pre-migration dump size-checked before the restart; alembic 027 → 028, every key `unknown`; seven jobs; smoke with stub venues: Classic key verifies as classic, 40085-then-v3 key verifies as unified, executor switch on a throwaway (dry run); then `python -m api.tasks.reverify_unified` in the container (expect 2 flagged keys verified as unified, 2 emails, Telegram summary); live test on the owner's SHIB key: dry run, then one 5 USDT buy on the owner's go, fill/fee/holdings checked against Bitget's order page. Rollback = `alembic downgrade 027`, redeploy v0.7.7.1 with `~/web-v0.7.7.1`. | pre-migration dump | bundle from the merge commit |
+| 2026-10-10 09:40 | `d686e46` | #81 | **v0.8.0**: Unified (v3) support alongside Classic; **migration 028** `api_keys.account_mode` at boot (027 → 028), all six Bitget keys `unknown`, verified/status untouched by the migration; executor switch on 40085 only (approved). Pre-migration dump size-checked before the restart. Verified: health and BUILD_INFO at d686e46, seven jobs on four workers, both jobs ok, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (32 rows). Stub smokes (no Bitget call): Classic dummy key → classic; 40085-then-v3 with Trade+Management → unified, verified; Trade only → refused with the 'Almost there' message; executor dry run switched the key on 40085 and retried the same client order id through v3; the deployed Classic client makes the same five v2 calls and carries no v3 path. Real read-only re-verification of the three Classic keys: all `ok`, mode classic, `stow`. Owner's SHIB key re-verified through v3: mode unified, permissions `uta_trade` only → refused with the Management → Read message (the box was not yet reflected by Bitget); dry run therefore not run; no order placed. Customer emails held (`reverify_unified` without `--send-emails`). Rollback = `alembic downgrade 027`, redeploy v0.7.7.2 with `~/web-v0.7.7.2`. | `pre-v0.8.0-20261010T094029Z.sql.gz` (15429 B) | `~/web-v0.8.0` |
 | 2026-10-08 22:37 | `45992c2` | #82 | **v0.7.7.2**: create and resume refused on an unverified or flagged key with the key's own message (`409 exchange_key_unverified`); disabled Resume in the list. No migration (alembic 027), no `.env` lines, executor untouched. Verified: health and BUILD_INFO at 45992c2, seven jobs on four workers, both jobs ok, log scan clean, token absent, Redis untouched, digest identical (32 rows). Smoke (throwaway): create on a flagged key → 409 with the Unified message, resume on it → 409, create on a verified dummy key → 201 (row paused and torn down); counts zero. Same day, before this deploy: the daily Unified check was run by hand at 22:04 UTC on the owner's instruction (flagged 2 keys, 2 emails, 2 Telegram lines, nothing to pause); a second parked SHIB purchase of the owner's (`5431348e`, attempted 22:01, before the check) was cancelled by admin resolve. | `pre-v0.7.7.2-20261008T223657Z.sql.gz` (15426 B) | `~/web-v0.7.7.2` |
 | 2026-10-08 17:51 | `73a8b45` | #79 | **v0.7.7.1**: the daily check pauses a flagged key's active purchases through the normal pause path (status only) and the email says so. No migration (alembic 027), no `.env` lines, executor untouched, frontend unchanged. Verified: health and BUILD_INFO at 73a8b45, seven jobs on four workers, both jobs ok, log scan clean, token absent, Redis untouched, digest identical (31 rows). Smoke (throwaway with a verified dummy key and two active purchases; keyed stub venue answering 40085 only for the dummy key, a plain ok for every real key, so no Bitget call and no change to real keys): one key flagged, two purchases paused, one email queued, verified keys 6 → 5; teardown counts zero. | `pre-v0.7.7.1-20261008T175055Z.sql.gz` (14410 B) | `~/web-v0.7.7.1` |
 | 2026-10-08 16:20 | `ca5e849` | #77 | **v0.7.7**: Unified Trading accounts refused at verification (40085 → `unified_account`); daily read-only `unified_account_check` (cron 06:20 UTC, **seventh job**) with one email + one Telegram line per key; purchase rows carry `exchange_key_error` for the banner; Settings line. No migration (alembic 027), no `.env` lines, executor untouched. Pre-deploy dump size-checked. Verified: health and BUILD_INFO at ca5e849, seven jobs on four workers, purchase and withdrawal jobs ok, unfiltered log scan clean, token absent, Redis untouched, rows and digest identical (31 rows). Smoke (throwaway, stub venue, no Bitget call): 40085 → `unified_account` with the exact message and a failed row; `stow` → verified; teardown counts zero. The first real pass runs 2026-10-09 06:20 UTC and will flag the two keys already on Unified accounts (owner's SHIB key, one customer key) with one email and one Telegram line each. Earlier the same day: parked SHIB purchase `b6b26bf1` cancelled by admin resolve with a note; customer purchase `b8e64e66` paused through the normal update path, anchor kept. | `pre-v0.7.7-20261008T162016Z.sql.gz` (14410 B) | `~/web-v0.7.7` |
@@ -107,6 +107,7 @@ before/after files next to it), public HTTPS on 2026-09-21 (dump
 | `v0.7.7` | `ca5e849` | Unified-account detection (#77); no migration: rollback = redeploy v0.7.5.1 with `~/web-v0.7.5.1` |
 | `v0.7.7.1` | `73a8b45` | Flagged key pauses its purchases (#79); no migration: rollback = redeploy v0.7.7 with `~/web-v0.7.7` |
 | `v0.7.7.2` | `45992c2` | No purchase on an unverified key (#82); no migration: rollback = redeploy v0.7.7.1 with `~/web-v0.7.7.1` |
+| `v0.8.0` | `d686e46` | Unified support, migration 028 (#81); rollback = `alembic downgrade 027` in the container, then redeploy v0.7.7.2 with `~/web-v0.7.7.2` |
 
 To roll the code back: on the server, create a branch at the tag
 (`git branch rollback-v0.7.1 v0.7.1`) and deploy it with
@@ -168,9 +169,9 @@ update users set role = 'admin' where email = 'person@example.com';
 The owner account `support@minastech.ca` was promoted this way on 2026-09-22.
 Every admin action is written to the audit table.
 
-## Current known state (2026-10-08, after the v0.7.7.2 deploy)
+## Current known state (2026-10-10, after the v0.8.0 deploy)
 
-- Server at `45992c2` = `v0.7.7.2`, alembic `027`, seven scheduler jobs, dry run off,
+- Server at `d686e46` = `v0.8.0`, alembic `028`, seven scheduler jobs, dry run off,
   schedulers not paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
   the allowlisted owner can use withdraw mode.
 - Three active purchases, all XRP weekly accumulate: the original (10 USD, next
@@ -183,10 +184,10 @@ Every admin action is written to the audit table.
   customer purchase `b8e64e66` (next 12 Oct 18:16) is paused: its Bitget
   account turned Unified. Bitget migrates Classic accounts to Unified Trading
   mode in batches since 2026-09-15; two of five verified keys are Unified.
-- Next: `v0.8.0` = Unified (V3) support alongside Classic (branch
-  `feat/unified-v3-support`, migration 028 `api_keys.account_mode`, owner's go
-  needed before merge, live test on the owner's SHIB key); then #71; then the
-  single-scheduler process.
+- Next: the v0.8.0 live test on the owner's SHIB key (needs Management → Read on
+  the key; then dry run, then one 5 USDT buy on the owner's go, by Sat 11 Oct);
+  then the held customer emails (`reverify_unified --send-emails`); then #71;
+  then the single-scheduler process.
 - One verified key (`d4d2f70a…`) still records read-only codes; its owner has
   not re-verified in the app since 2026-10-06 05:39 UTC.
 - The 2026-10-06 USDC stop (Bitget 40014) was a Read-only key; the tester
