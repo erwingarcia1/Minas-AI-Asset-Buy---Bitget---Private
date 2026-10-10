@@ -51,39 +51,63 @@ async def _email(key: APIKey, paused: int) -> bool:
 
 
 READY_SUBJECT = "Good news: AutoBuy now works with your Bitget account"
+STEP_SUBJECT = "Good news: AutoBuy now works with Unified Bitget accounts (one small step)"
+# Texts agreed with the owner on 2026-10-10. "ready": the key verified through v3. "step": the key trades but
+# lacks Management -> Read, so the customer must tick it and press Verify before resuming.
+READY_TEXT = "Good news: AutoBuy now works with your Bitget account. Press Resume on your purchases whenever you're ready."
+STEP_TEXT = ("Good news: AutoBuy now works with Unified Bitget accounts. One small step: in Bitget, edit your API key and tick "
+             "Unified Trading Account → Management → Read. Then in AutoBuy, open Settings → Exchange API keys and press Verify. "
+             "After that, you can resume your purchases.")
 
 
-async def _email_ready(key: APIKey) -> bool:
+async def _email_outcome(key: APIKey, kind: str) -> bool:
     from api.utils.links import build_app_link
-    html, text = render("unified_ready", greeting="Hello,", purchases_url=build_app_link("/purchases"))
-    return await email_service.queue(key.user.email, READY_SUBJECT, html, text, template="unified_ready",
-                                     category="confirmation", user_id=key.user.id)
+    template = "unified_ready" if kind == "ready" else "unified_step"
+    html, text = render(template, greeting="Hello,", message=READY_TEXT if kind == "ready" else STEP_TEXT,
+                        purchases_url=build_app_link("/purchases"), settings_url=build_app_link("/settings"))
+    return await email_service.queue(key.user.email, READY_SUBJECT if kind == "ready" else STEP_SUBJECT, html, text,
+                                     template=template, category="confirmation", user_id=key.user.id)
 
 
-async def reverify_flagged(db, client_factory=None) -> dict:
-    """One-off after the v0.8.0 deploy: every key flagged as Unified by v0.7.7 is verified again (now through
-    v3), its mode stored, and its owner emailed "Good news…". Nothing is resumed: the customer presses Resume."""
-    out = {"flagged": 0, "verified": 0, "still_failed": 0, "emails": 0}
+# Re-verify scope: keys the v0.7.7 flagging or a Unified refusal left unverified
+FLAGGED_PATTERNS = ("%Unified Trading mode%", "%Management → Read%")
+
+
+async def reverify_flagged(db, client_factory=None, send_emails: bool = False) -> dict:
+    """One-off after the v0.8.0 deploy: every key flagged as Unified is verified again (now through v3) and its
+    mode stored. Emails go out only with ``send_emails`` (owner's call, after the live test): "ready" to keys that
+    verified, "step" to keys that trade but lack Management -> Read. Nothing is resumed: the customer presses Resume."""
+    out = {"flagged": 0, "verified": 0, "needs_management_read": 0, "still_failed": 0, "emails": 0, "emails_held": 0}
+    from sqlalchemy import or_
     keys = (await db.execute(select(APIKey).options(selectinload(APIKey.user))
                              .where(APIKey.exchange == "bitget", APIKey.verified.is_(False),
-                                    APIKey.verification_error.like("%Unified Trading mode%")))).scalars().all()
+                                    or_(*[APIKey.verification_error.like(p) for p in FLAGGED_PATTERNS])))).scalars().all()
     for key in keys:
         out["flagged"] += 1
         outcome = await kv.verify_api_key(db, key, client_factory=client_factory)
-        if not outcome.verified:
+        if outcome.verified:
+            out["verified"] += 1
+            kind = "ready"
+        elif outcome.result == "unified_management_missing":
+            out["needs_management_read"] += 1
+            kind = "step"
+        else:
             out["still_failed"] += 1
             logger.warning("reverify after v0.8.0: key %s still fails: %s", key.id, outcome.result)
             continue
-        out["verified"] += 1
+        if not send_emails:
+            out["emails_held"] += 1
+            continue
         try:
-            if await _email_ready(key):
+            if await _email_outcome(key, kind):
                 out["emails"] += 1
         except Exception as exc:   # noqa: BLE001
-            logger.error("ready email not queued for key %s: %s", key.id, exc)
+            logger.error("%s email not queued for key %s: %s", kind, key.id, exc)
     await db.commit()
     if out["flagged"]:
         await telegram.send(f"✅ v0.8.0 re-verify: {out['flagged']} flagged key(s), {out['verified']} verified as Unified, "
-                            f"{out['still_failed']} still failing, {out['emails']} email(s) queued", "unified_reverify")
+                            f"{out['needs_management_read']} need Management → Read, {out['still_failed']} still failing, "
+                            f"{out['emails']} email(s) queued, {out['emails_held']} held", "unified_reverify")
     logger.info("reverify flagged keys: %s", out)
     return out
 

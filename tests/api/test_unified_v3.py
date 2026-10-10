@@ -222,7 +222,7 @@ async def test_daily_check_still_flags_when_v3_also_refuses(db, user, mail, tg):
 
 # ---------------------------------------------------------------- re-verify after the deploy
 
-async def test_reverify_flagged_keys_verifies_through_v3_stores_the_mode_emails_and_resumes_nothing(db, user, mail, tg):
+async def test_reverify_holds_emails_by_default_stores_modes_and_resumes_nothing(db, user, mail, tg):
     from api.routes.exchange import encrypt_value
     key = await make_key(db, user, exchange="bitget")
     key.encrypted_api_key = encrypt_value("flagged-key"); key.verified, key.verification_status = False, "failed"
@@ -231,12 +231,34 @@ async def test_reverify_flagged_keys_verifies_through_v3_stores_the_mode_emails_
     await db.commit()
     Venue.script = {("flagged-key", "unknown"): UNIFIED, ("flagged-key", "unified"): OK_V3}
     out = await uc.reverify_flagged(db)
-    assert out["flagged"] >= 1 and out["verified"] >= 1 and out["emails"] >= 1
+    assert out["verified"] >= 1 and out["emails"] == 0 and out["emails_held"] >= 1
     await db.refresh(key); await db.refresh(p)
     assert key.verified is True and key.account_mode == "unified" and key.verification_error is None
-    assert p.status == "paused"   # nothing is resumed: the customer presses Resume
+    assert p.status == "paused" and [m for m in mail if m["to"] == user.email] == []
+
+
+async def test_reverify_with_emails_sends_ready_or_step_by_outcome(db, user, mail, tg):
+    from api.routes.exchange import encrypt_value
+    ready = await make_key(db, user, exchange="bitget"); step = await make_key(db, user, exchange="bitget")
+    ready.encrypted_api_key, step.encrypted_api_key = encrypt_value("ready-key"), encrypt_value("step-key")
+    for k in (ready, step):
+        k.verified, k.verification_status, k.verification_error, k.account_mode = False, "failed", kv.unified_message(), "unknown"
+    await db.commit()
+    Venue.script = {("ready-key", "unknown"): UNIFIED, ("ready-key", "unified"): OK_V3,
+                    ("step-key", "unknown"): UNIFIED, ("step-key", "unified"): TRADE_ONLY_V3}
+    out = await uc.reverify_flagged(db, send_emails=True)
+    assert out["verified"] >= 1 and out["needs_management_read"] >= 1 and out["emails"] >= 2
+    await db.refresh(ready); await db.refresh(step)
+    assert ready.verified is True and ready.account_mode == "unified"
+    assert step.verified is False and step.account_mode == "unified" and step.verification_error == kv.UNIFIED_MANAGEMENT_MESSAGE
     ours = [m for m in mail if m["to"] == user.email]
-    assert len(ours) == 1 and "Good news: AutoBuy now works with your Bitget account. Press Resume on your purchases whenever you're ready." in ours[0]["text"]
+    texts = [m["text"] for m in ours]
+    assert any(uc.READY_TEXT in t for t in texts) and any(uc.STEP_TEXT in t for t in texts)
+    assert {m["template"] for m in ours} == {"unified_ready", "unified_step"}
+    # a second pass with emails sends the step email again only for keys still missing the box, and nothing for verified keys
+    Venue.script = {("step-key", "unified"): TRADE_ONLY_V3}
+    out2 = await uc.reverify_flagged(db, send_emails=True)
+    assert out2["needs_management_read"] >= 1 and all(uc.READY_TEXT not in m["text"] for m in [m for m in mail if m["to"] == user.email][len(ours):])
 
 
 # ---------------------------------------------------------------- the executor switches on 40085 only, same client order id
