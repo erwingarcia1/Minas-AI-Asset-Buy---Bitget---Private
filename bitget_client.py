@@ -303,7 +303,7 @@ class BitgetClient:
 # Field names from Bitget's UTA docs, read 2026-10-08:
 #   POST /api/v3/trade/place-order    {category, symbol, side, orderType, qty, clientOid}; qty of a
 #                                     market buy is in the QUOTE coin (USDT), like v2 size
-#   GET  /api/v3/trade/order-details  orderId | clientOid -> orderStatus (live|new|partially_filled|
+#   GET  /api/v3/trade/order-info  orderId | clientOid -> orderStatus (live|new|partially_filled|
 #                                     filled|cancelled), cumExecQty (base), cumExecValue (quote),
 #                                     avgPrice, feeDetail [{feeCoin, fee}]
 #   GET  /api/v3/trade/fills          category, orderId -> execPrice, execQty, execValue, feeDetail
@@ -360,7 +360,7 @@ class BitgetUnifiedClient(BitgetClient):
         """Same keys as the Classic client: {status, orderId, clientOid, baseVolume, quoteVolume, priceAvg,
         fee, feeCoin, feeDetail}, or None when Bitget has no such order."""
         params = {"orderId": str(order_id)} if order_id else {"clientOid": str(client_oid)}
-        data = self._request("GET", "/api/v3/trade/order-details", params=params)
+        data = self._request("GET", "/api/v3/trade/order-info", params=params)
         order = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) and data else None)
         if not order:
             return None
@@ -391,8 +391,33 @@ class BitgetUnifiedClient(BitgetClient):
         return [{"tradeId": r.get("execId"), "priceAvg": r.get("execPrice"), "size": r.get("execQty"),
                  "amount": r.get("execValue"), "feeDetail": r.get("feeDetail")} for r in rows or []]
 
+    # Every v3 path this client calls, with a harmless read-only request for each (place-order excluded):
+    # a made-up order id must get Bitget's normal "no such order" answer, never 40404 (unknown URL).
+    PROBE_PATHS = (
+        ("GET", "/api/v3/account/info", {}),
+        ("GET", "/api/v3/account/assets", {"coin": "USDT"}),
+        ("GET", "/api/v3/trade/order-info", {"clientOid": "ab-probe-000000000000000000"}),
+        ("GET", "/api/v3/trade/fills", {"category": "SPOT", "orderId": "1"}),
+    )
+    URL_NOT_FOUND = "40404"
+
+    def probe_endpoints(self):
+        """[(path, ok, note)]: ok is False only when Bitget answers 40404 (the path does not exist).
+        A normal answer, an empty list or a 'not found'/'parameter' error all mean the path is live."""
+        out = []
+        for method, path, params in self.PROBE_PATHS:
+            try:
+                data = self._request(method, path, params=params or None)
+                out.append((path, True, "ok" if data else "empty"))
+            except BitgetAPIError as exc:
+                code = str(getattr(exc, "code", ""))
+                out.append((path, code != self.URL_NOT_FOUND, f"error {code}: {str(exc)[:60]}"))
+            except Exception as exc:   # noqa: BLE001
+                out.append((path, False, f"{type(exc).__name__}: {str(exc)[:60]}"))
+        return out
+
     def withdraw(self, *a, **k):
-        raise BitgetAPIError("withdrawals from a Unified Trading Account are not supported by AutoBuy yet", "UTA_WITHDRAW")
+        raise BitgetAPIError("UTA_WITHDRAW", "withdrawals from a Unified Trading Account are not supported by AutoBuy yet")
 
     def get_withdrawal_records(self, *a, **k):
-        raise BitgetAPIError("withdrawal records of a Unified Trading Account are not supported by AutoBuy yet", "UTA_WITHDRAW")
+        raise BitgetAPIError("UTA_WITHDRAW", "withdrawal records of a Unified Trading Account are not supported by AutoBuy yet")

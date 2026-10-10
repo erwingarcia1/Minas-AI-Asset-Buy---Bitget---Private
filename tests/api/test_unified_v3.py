@@ -61,7 +61,7 @@ def test_unified_client_calls_v3_and_keeps_the_classic_shapes(monkeypatch):
         "/api/v3/account/assets": {"accountEquity": "999", "assets": [{"coin": "USDT", "available": "40.5", "locked": "1", "balance": "41.5", "equity": "41.5", "debt": "0.5"},
                                                                        {"coin": "BTC", "available": "0.01", "debt": "0"}]},
         "/api/v3/trade/place-order": {"orderId": "u1", "clientOid": "ab-2"},
-        "/api/v3/trade/order-details": [{"orderId": "u1", "clientOid": "ab-2", "orderStatus": "filled", "cumExecQty": "2.5", "cumExecValue": "10",
+        "/api/v3/trade/order-info": [{"orderId": "u1", "clientOid": "ab-2", "orderStatus": "filled", "cumExecQty": "2.5", "cumExecValue": "10",
                                          "avgPrice": "4", "feeDetail": [{"feeCoin": "XRP", "fee": "-0.0025"}]}],
         "/api/v3/trade/fills": {"list": [{"execId": "f1", "orderId": "u1", "execPrice": "4", "execQty": "2.5", "execValue": "10", "feeDetail": [{"feeCoin": "XRP", "fee": "-0.0025"}]}]},
     })
@@ -82,6 +82,27 @@ def test_unified_client_calls_v3_and_keeps_the_classic_shapes(monkeypatch):
     assert all(p.startswith("/api/v3/") for _, p, *_ in rec.calls)
     with pytest.raises(Exception):
         c.withdraw("XRP", "r...", 1.0)
+
+
+def test_probe_endpoints_fails_only_on_40404(monkeypatch):
+    from bitget_client import BitgetAPIError
+    answers = {"/api/v3/account/info": {"userId": "1"}, "/api/v3/account/assets": {"assets": []},
+               "/api/v3/trade/order-info": BitgetAPIError("43001", "order not found"),
+               "/api/v3/trade/fills": {"list": []}}
+    class Rec:
+        def __call__(self, method, path, params=None, body=None, auth=True):
+            a = answers[path]
+            if isinstance(a, Exception):
+                raise a
+            return a
+    monkeypatch.setattr(BitgetClient, "_request", Rec())
+    c = BitgetUnifiedClient("k", "s", "p")
+    assert all(ok for _, ok, _ in c.probe_endpoints())
+    assert [p for p, *_ in c.probe_endpoints()] == ["/api/v3/account/info", "/api/v3/account/assets", "/api/v3/trade/order-info", "/api/v3/trade/fills"]
+    answers["/api/v3/trade/order-info"] = BitgetAPIError("40404", "Request URL NOT FOUND")
+    bad = [p for p, ok, _ in c.probe_endpoints() if not ok]
+    assert bad == ["/api/v3/trade/order-info"]
+    assert all(p != "/api/v3/trade/place-order" for p, *_ in c.PROBE_PATHS)
 
 
 def test_unified_permissions_interpretation():
