@@ -303,7 +303,7 @@ class BitgetClient:
 # Field names from Bitget's UTA docs, read 2026-10-08:
 #   POST /api/v3/trade/place-order    {category, symbol, side, orderType, qty, clientOid}; qty of a
 #                                     market buy is in the QUOTE coin (USDT), like v2 size
-#   GET  /api/v3/trade/order-details  orderId | clientOid -> orderStatus (live|new|partially_filled|
+#   GET  /api/v3/trade/order-info  orderId | clientOid -> orderStatus (live|new|partially_filled|
 #                                     filled|cancelled), cumExecQty (base), cumExecValue (quote),
 #                                     avgPrice, feeDetail [{feeCoin, fee}]
 #   GET  /api/v3/trade/fills          category, orderId -> execPrice, execQty, execValue, feeDetail
@@ -360,7 +360,7 @@ class BitgetUnifiedClient(BitgetClient):
         """Same keys as the Classic client: {status, orderId, clientOid, baseVolume, quoteVolume, priceAvg,
         fee, feeCoin, feeDetail}, or None when Bitget has no such order."""
         params = {"orderId": str(order_id)} if order_id else {"clientOid": str(client_oid)}
-        data = self._request("GET", "/api/v3/trade/order-details", params=params)
+        data = self._request("GET", "/api/v3/trade/order-info", params=params)
         order = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) and data else None)
         if not order:
             return None

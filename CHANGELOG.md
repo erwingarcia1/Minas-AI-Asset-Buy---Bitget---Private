@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0.1] — pending deploy: v3 order lookup path (PR #85)
+
+### Fixed
+
+* The Unified client read an order back from `GET /api/v3/trade/order-details`,
+  which Bitget answers with 40404 "Request URL NOT FOUND"; the real path behind
+  the docs page titled "Get Order Details" is `GET /api/v3/trade/order-info`.
+  In the first live Unified buy (2026-10-10 11:05 UTC) the order was placed and
+  filled, but the read-back failed, so the attempt was parked for review with
+  nothing recorded and the fill left to the admin to record. `history-orders`,
+  `fills`, `assets`, `settings` and `place-order` were right.
+
 ## [0.8.0] — 2026-10-10: Unified Trading Account (Bitget v3) support alongside Classic (PR #81)
 
 ### Added
