@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Good news: AutoBuy now works with your Bitget account{% endblock %}
+{% block body %}
+<p>{{ greeting }}</p>
+<p>{{ message }}</p>
+<p><a href="{{ purchases_url }}">Your purchases</a> · <a href="{{ settings_url }}">Your settings</a></p>
+{% if support_email %}<p style="color:#5a6763;font-size:13px;">Questions? {{ support_email }}</p>{% endif %}
+{% endblock %}

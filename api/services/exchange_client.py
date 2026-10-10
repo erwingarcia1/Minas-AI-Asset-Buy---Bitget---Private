@@ -58,6 +58,28 @@ BITGET_EXTRA_LABELS = {"smow": "Margin trade", "taxw": "Taxation search", "p2pw"
 BITGET_KNOWN_TOKENS = BITGET_TRADE_TOKENS | BITGET_READ_ONLY_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_EXTRA_TOKENS | {"readonly", "read"}
 
 
+# Unified Trading Account (v3) key permissions, from /api/v3/account/info (docs read 2026-10-08):
+#   permType   read-only | read-and-write
+#   permissions uta_trade (trade), uta_mgt (account management/read), withdraw, copy_futures_*
+UTA_TRADE_TOKENS = {"uta_trade"}
+UTA_WITHDRAW_TOKENS = {"withdraw"}
+UTA_KNOWN_TOKENS = UTA_TRADE_TOKENS | UTA_WITHDRAW_TOKENS | {"uta_mgt", "copy_futures_position", "copy_futures_order"}
+
+
+def interpret_unified_permissions(perms: list, perm_type) -> dict:
+    """{can_trade, can_withdraw, permissions_known, unconfirmed, extra, read_only} for a Unified key."""
+    tokens = {p.strip().lower() for p in perms if p}
+    read_only = str(perm_type or "").lower() in ("read-only", "readonly", "read_only")
+    trade = bool(tokens & UTA_TRADE_TOKENS) and not read_only
+    withdraw = bool(tokens & UTA_WITHDRAW_TOKENS)
+    unconfirmed = sorted(tokens - UTA_KNOWN_TOKENS)
+    return {"can_trade": trade, "can_withdraw": withdraw, "permissions_known": bool(tokens) or bool(perm_type),
+            "unconfirmed": unconfirmed, "extra": sorted(tokens & {"copy_futures_position", "copy_futures_order"}),
+            "read_only": read_only,
+            # Management -> Read (uta_mgt) is REQUIRED on a Unified key: the balance reads (/api/v3/account/assets) need it
+            "management_read": "uta_mgt" in tokens}
+
+
 def interpret_bitget_authorities(auths: list) -> dict:
     """{can_trade, can_withdraw, permissions_known, unconfirmed, extra} from
     Bitget's authorities list.
@@ -102,11 +124,15 @@ class ExchangeClient:
     signs the calls and which symbol format applies."""
 
     def __init__(self, api_key: str, api_secret: str, passphrase: str = "",
-                 exchange: str = "binance"):
+                 exchange: str = "binance", account_mode: str = "unknown"):
         self.exchange = exchange
+        self.account_mode = account_mode if account_mode in ("classic", "unified", "unknown") else "unknown"
         if exchange == "binance":
             self._client = _LegacyClient(api_key=api_key, api_secret=api_secret)
-        else:
+        elif exchange == "bitget" and self.account_mode == "unified":   # v0.8.0: Unified Trading Account, v3
+            from bitget_client import BitgetUnifiedClient
+            self._client = BitgetUnifiedClient(api_key=api_key, api_secret=api_secret, passphrase=passphrase)
+        else:   # classic and unknown: the Classic (v2) client, unchanged
             legacy = LEGACY_CLIENTS[exchange]
             self._client = legacy(api_key=api_key, api_secret=api_secret,
                                   passphrase=passphrase)
@@ -142,6 +168,8 @@ class ExchangeClient:
                 }
             info = self._client.get_account_info()
             auths = [a.lower() for a in info.get("authorities") or []]
+            if self.account_mode == "unified":
+                return {**interpret_unified_permissions(auths, info.get("perm_type")), "permissions": auths}
             return {**interpret_bitget_authorities(auths), "permissions": auths}
         except ExchangeAPIError as exc:
             raise ExchangeClientError(exc.message if hasattr(exc, "message") else str(exc),

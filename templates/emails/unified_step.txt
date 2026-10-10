@@ -1,0 +1,8 @@
+{{ greeting }}
+
+{{ message }}
+
+Your purchases: {{ purchases_url }}
+Your settings: {{ settings_url }}
+
+{% if support_email %}Questions? {{ support_email }}{% endif %}

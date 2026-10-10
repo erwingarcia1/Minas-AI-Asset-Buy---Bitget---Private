@@ -294,3 +294,105 @@ class BitgetClient:
         if order_id:
             params["orderId"] = str(order_id)
         return self._request("GET", "/api/v2/spot/wallet/withdrawal-records", params=params) or []
+
+
+# ---------------------------------------------------------------------------
+# Unified Trading Account (UTA) client, Bitget API v3 (v0.8.0). The Classic client
+# above is untouched: this subclass overrides only the calls whose path or shape
+# changed. Signing and transport are identical (same headers, same prehash).
+# Field names from Bitget's UTA docs, read 2026-10-08:
+#   POST /api/v3/trade/place-order    {category, symbol, side, orderType, qty, clientOid}; qty of a
+#                                     market buy is in the QUOTE coin (USDT), like v2 size
+#   GET  /api/v3/trade/order-details  orderId | clientOid -> orderStatus (live|new|partially_filled|
+#                                     filled|cancelled), cumExecQty (base), cumExecValue (quote),
+#                                     avgPrice, feeDetail [{feeCoin, fee}]
+#   GET  /api/v3/trade/fills          category, orderId -> execPrice, execQty, execValue, feeDetail
+#   GET  /api/v3/account/assets       per coin: available ("Transferable amount"), locked, balance,
+#                                     equity, debt; account totals are never used
+#   GET  /api/v3/account/info         permType (read-only | read-and-write), permissions []
+#   Classic account on a v3 call -> error 40084; Unified account on a v2 call -> 40085.
+# ---------------------------------------------------------------------------
+UTA_CLASSIC_ONLY_CODE = "40085"   # the Classic (v2) API refused: the account is Unified
+UTA_UNIFIED_ONLY_CODE = "40084"   # the Unified (v3) API refused: the account is Classic
+UTA_ORDER_STATUS = {"filled": "filled", "cancelled": "cancelled", "partially_filled": "partially_filled",
+                    "live": "live", "new": "new"}
+
+
+class BitgetUnifiedClient(BitgetClient):
+    """Same credentials, same signing; Unified (v3) endpoints for account, order and fills."""
+    account_mode = "unified"
+
+    def get_account_info(self):
+        """{"user_id", "ips", "authorities", "perm_type", "permissions"}: v3 account info.
+        ``authorities`` carries the v3 permission list so callers can keep one shape."""
+        data = self._request("GET", "/api/v3/account/info") or {}
+        perms = [str(p) for p in (data.get("permissions") or [])]
+        return {"user_id": str(data.get("userId") or ""), "ips": str(data.get("ips") or ""),
+                "authorities": perms, "perm_type": str(data.get("permType") or ""), "permissions": perms,
+                "parent_id": str(data.get("parentId") or "")}
+
+    def get_spot_available(self, coin):
+        """Available (transferable) `coin` in the unified account minus any debt in that coin.
+        Never equity or account totals (owner's decision, 2026-10-08)."""
+        data = self._request("GET", "/api/v3/account/assets", params={"coin": coin}) or {}
+        rows = data.get("assets") if isinstance(data, dict) else data
+        for row in rows or []:
+            if str(row.get("coin", "")).upper() == coin.upper():
+                available = float(row.get("available") or 0)
+                debt = float(row.get("debt") or 0)
+                return max(available - debt, 0.0)
+        return 0.0
+
+    def place_market_buy(self, symbol, quote_amount, client_oid=None):
+        """Market-buy `symbol` spending `quote_amount` USDT (v3: qty is the quote amount for a market buy).
+        Returns the order as get_order_info shapes it, so the caller sees the same keys as v2."""
+        body = {"category": "SPOT", "symbol": symbol, "side": "buy", "orderType": "market", "qty": str(quote_amount)}
+        if client_oid:
+            body["clientOid"] = client_oid
+        placed = self._request("POST", "/api/v3/trade/place-order", body=body) or {}
+        order_id = placed.get("orderId")
+        info = self.get_order_info(symbol, order_id=order_id, client_oid=client_oid) or {}
+        return {"orderId": order_id, "clientOid": placed.get("clientOid") or client_oid,
+                "executedQty": info.get("baseVolume") or "0", "cummulativeQuoteQty": info.get("quoteVolume") or "0",
+                "status": info.get("status"), "priceAvg": info.get("priceAvg"), "fee": info.get("fee"), "feeCoin": info.get("feeCoin")}
+
+    def get_order_info(self, symbol, order_id=None, client_oid=None):
+        """Same keys as the Classic client: {status, orderId, clientOid, baseVolume, quoteVolume, priceAvg,
+        fee, feeCoin, feeDetail}, or None when Bitget has no such order."""
+        params = {"orderId": str(order_id)} if order_id else {"clientOid": str(client_oid)}
+        data = self._request("GET", "/api/v3/trade/order-details", params=params)
+        order = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) and data else None)
+        if not order:
+            return None
+        fee, fee_coin = self._parse_fee_list(order.get("feeDetail"))
+        return {"status": UTA_ORDER_STATUS.get(str(order.get("orderStatus") or "").lower(), str(order.get("orderStatus") or "")),
+                "orderId": str(order.get("orderId") or ""), "clientOid": order.get("clientOid"),
+                "baseVolume": order.get("cumExecQty"), "quoteVolume": order.get("cumExecValue"), "priceAvg": order.get("avgPrice"),
+                "fee": fee, "feeCoin": fee_coin, "feeDetail": order.get("feeDetail")}
+
+    @staticmethod
+    def _parse_fee_list(raw):
+        """(total fee as a positive float, fee coin) from the v3 feeDetail list [{feeCoin, fee}]; fees may be negative."""
+        if not raw:
+            return None, None
+        total, coin = 0.0, None
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                total += abs(float(item.get("fee") or 0))
+            except (TypeError, ValueError):
+                continue
+            coin = coin or item.get("feeCoin")
+        return (total if coin else None), coin
+
+    def get_fills(self, symbol, order_id):
+        """Trade fills for an order, Classic shape: list of {"tradeId", "priceAvg", "size", "amount", "feeDetail"}."""
+        data = self._request("GET", "/api/v3/trade/fills", params={"category": "SPOT", "orderId": str(order_id)}) or {}
+        rows = data.get("list") if isinstance(data, dict) else data
+        return [{"tradeId": r.get("execId"), "priceAvg": r.get("execPrice"), "size": r.get("execQty"),
+                 "amount": r.get("execValue"), "feeDetail": r.get("feeDetail")} for r in rows or []]
+
+    def withdraw(self, *a, **k):
+        raise BitgetAPIError("withdrawals from a Unified Trading Account are not supported by AutoBuy yet", "UTA_WITHDRAW")
+
+    def get_withdrawal_records(self, *a, **k):
+        raise BitgetAPIError("withdrawal records of a Unified Trading Account are not supported by AutoBuy yet", "UTA_WITHDRAW")

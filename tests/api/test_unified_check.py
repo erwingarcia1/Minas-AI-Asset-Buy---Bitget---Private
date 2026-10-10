@@ -15,7 +15,7 @@ class Venue:
     answers: dict = {}
     calls: list = []
 
-    def __init__(self, api_key, api_secret, passphrase="", exchange="bitget"):
+    def __init__(self, api_key, api_secret, passphrase="", exchange="bitget", account_mode="unknown"):
         self.api_key = api_key
 
     def get_account_info(self):

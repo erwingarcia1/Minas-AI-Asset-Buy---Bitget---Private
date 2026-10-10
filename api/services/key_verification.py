@@ -43,6 +43,7 @@ TRANSPORT_CODES = {"NETWORK", "HTTP"}
 
 VENUE_NAMES = {"binance": "Binance", "bitget": "Bitget"}
 UNIFIED_CODES = {"bitget": {"40085"}}   # "You are in Unified Account mode, and the Classic Account API is not supported"
+CLASSIC_CODES = {"bitget": {"40084"}}   # "You are in Classic Account mode, and the Unified Account API is not supported"
 
 
 def unified_message() -> str:
@@ -50,6 +51,8 @@ def unified_message() -> str:
     from api.config import settings
     return ("This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. "
             f"Please contact {settings.support_email or 'support'} and we'll let you know as soon as it's ready.")
+UNIFIED_MANAGEMENT_MESSAGE = ("Almost there! In Bitget, edit this key and also tick Unified Trading Account → Management → Read, "
+                              "then verify again. AutoBuy needs it to check your balance before each buy.")
 READ_ONLY_MESSAGE = ("This key is Read-only, so AutoBuy can't place buys. In Bitget, edit the key to Read-write "
                      "with only Spot → Trade ticked, then verify again.")
 
@@ -84,13 +87,13 @@ def classify(exchange: str, exc: ExchangeClientError) -> tuple[str, str]:
     return "error", f"{venue} error {code}: {msg[:200]}"
 
 
-def _client_for(key: APIKey, client_factory=None) -> ExchangeClient:
+def _client_for(key: APIKey, client_factory=None, mode: str | None = None) -> ExchangeClient:
     """Venue client for a stored key; credentials are decrypted here and never logged."""
     from api.routes.exchange import decrypt_value
     factory = client_factory or ExchangeClient
     return factory(decrypt_value(key.encrypted_api_key), decrypt_value(key.encrypted_api_secret),
                    passphrase=decrypt_value(key.encrypted_passphrase) if key.encrypted_passphrase else "",
-                   exchange=key.exchange)
+                   exchange=key.exchange, account_mode=mode or getattr(key, "account_mode", "unknown") or "unknown")
 
 
 def _check(client: ExchangeClient) -> dict:
@@ -100,16 +103,30 @@ def _check(client: ExchangeClient) -> dict:
 async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verification:
     """Run the check and persist the outcome on ``key``. Never raises for venue
     problems; only unexpected programming errors propagate."""
-    client = _client_for(key, client_factory)
+    mode = getattr(key, "account_mode", "unknown") or "unknown"
+    client = _client_for(key, client_factory, mode)
     now = datetime.now(timezone.utc)
     venue = VENUE_NAMES.get(key.exchange, key.exchange)
     log_ctx = {"user_id": str(key.user_id), "key_id": str(key.id), "exchange": key.exchange}
 
     try:
-        info = await asyncio.to_thread(_check, client)
+        try:
+            info = await asyncio.to_thread(_check, client)
+        except ExchangeClientError as exc:
+            # v0.8.0: the venue tells us which API family the account speaks; follow it and remember it.
+            if key.exchange == "bitget" and str(exc.code) in UNIFIED_CODES["bitget"] and mode != "unified":
+                mode = "unified"
+                info = await asyncio.to_thread(_check, _client_for(key, client_factory, mode))
+            elif key.exchange == "bitget" and str(exc.code) in CLASSIC_CODES["bitget"] and mode == "unified":
+                mode = "classic"
+                info = await asyncio.to_thread(_check, _client_for(key, client_factory, mode))
+            else:
+                raise
+        if key.exchange == "bitget":
+            key.account_mode = mode if mode != "unknown" else "classic"   # a v2 answer means Classic
     except ExchangeClientError as exc:
         if str(exc.code) in UNIFIED_CODES.get(key.exchange, set()):
-            result, detail = "unified_account", unified_message()   # v0.7.7: the account was migrated to Unified Trading mode
+            result, detail = "unified_account", unified_message()   # v0.7.7 text; only reachable if v3 also answered 40085
         else:
             result, detail = classify(key.exchange, exc)
         outcome = Verification(verified=False, result=result, detail=detail, error_code=str(exc.code))
@@ -133,6 +150,13 @@ async def verify_api_key(db, key: APIKey, *, client_factory=None) -> Verificatio
     extra = list(info.get("extra") or [])
     if info.get("read_only"):
         outcome = Verification(verified=False, result="read_only_key", detail=READ_ONLY_MESSAGE,
+                               withdrawal_enabled=can_withdraw, permissions=permissions, extra_permissions=extra)
+        _record(key, outcome, now)
+        await db.commit()
+        logger.warning("api_key_verification_failed", extra={**log_ctx, "result": outcome.result, "permissions": permissions})
+        return outcome
+    if mode == "unified" and can_trade is True and info.get("management_read") is False:
+        outcome = Verification(verified=False, result="unified_management_missing", detail=UNIFIED_MANAGEMENT_MESSAGE,
                                withdrawal_enabled=can_withdraw, permissions=permissions, extra_permissions=extra)
         _record(key, outcome, now)
         await db.commit()

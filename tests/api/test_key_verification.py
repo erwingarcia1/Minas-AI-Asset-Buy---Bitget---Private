@@ -19,7 +19,7 @@ class Venue:
     info = {"can_trade": True, "can_withdraw": False, "permissions": ["readonly", "trade"], "permissions_known": True}
     error = None
 
-    def __init__(self, api_key, api_secret, passphrase="", exchange="binance"):
+    def __init__(self, api_key, api_secret, passphrase="", exchange="binance", account_mode="unknown"):
         Venue.built.append((exchange, api_key, api_secret, passphrase))
         self.exchange = exchange
 

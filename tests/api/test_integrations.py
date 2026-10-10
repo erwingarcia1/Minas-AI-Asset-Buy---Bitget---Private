@@ -21,7 +21,7 @@ class VenueRecorder:
     """Fake ExchangeClient capturing which venue and symbol were used."""
     calls = []
 
-    def __init__(self, api_key, api_secret, passphrase="", exchange="binance"):
+    def __init__(self, api_key, api_secret, passphrase="", exchange="binance", account_mode="unknown"):
         self.exchange = exchange
         self.passphrase = passphrase
 

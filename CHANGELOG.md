@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — pending deploy: Unified Trading Account (Bitget v3) support alongside Classic (PR #81)
+
+### Added
+
+* **Unified Trading Accounts work.** Bitget is migrating Classic accounts to
+  Unified Trading mode in batches; such an account refuses every Classic (v2)
+  call with 40085. AutoBuy now carries a second Bitget client for the Unified
+  (v3) API: `POST /api/v3/trade/place-order` (category SPOT, qty in USDT, same
+  client order id), `GET /api/v3/trade/order-details`, `GET /api/v3/trade/fills`,
+  `GET /api/v3/account/assets`, `GET /api/v3/account/info`. Fills, fees and
+  holdings use the same shapes as before: fee in the base coin is still
+  subtracted from the gross fill.
+* **Mode per key**, `api_keys.account_mode` (migration 028, every key
+  backfilled `unknown`): verification stores the real mode (a v2 answer means
+  Classic; 40085 followed by a v3 answer means Unified; a Unified key answered
+  40084 means it switched back to Classic). The executor treats `unknown` as
+  Classic; on 40085 only, it switches the key to `unified` and retries the
+  same attempt through v3 with the same client order id. No other error
+  switches anything. Classic request paths and bodies are byte-for-byte
+  unchanged, proven by test.
+* **Balance** on a Unified account: the USDT row's `available` minus any USDT
+  `debt`, never equity or account totals, for the low-balance check and the
+  pre-buy read alike.
+* **Daily check**: a key that turns Unified switches mode (re-verified through
+  v3) instead of being flagged; only when v3 also refuses does the v0.7.7
+  flagging run.
+* **After the deploy**, `python -m api.tasks.reverify_unified` re-verifies
+  every key flagged by v0.7.7 through v3, stores its mode and emails the owner
+  "Good news: AutoBuy now works with your Bitget account. Press Resume on your
+  purchases whenever you're ready." Nothing is resumed automatically.
+* **A Unified key needs both Trade and Management → Read.** Verification of a
+  Unified key requires `uta_trade` and `uta_mgt`; with Trade only it is refused
+  with "Almost there! In Bitget, edit this key and also tick Unified Trading
+  Account → Management → Read, then verify again. AutoBuy needs it to check
+  your balance before each buy."
+* Withdraw-immediately purchases are refused on a Unified key for now
+  (`unified_account_withdraw`): v3 withdrawals are not built. Settings shows
+  each key's mode and says both account types work for buying and holding.
 ## [0.7.7.2] — 2026-10-08: no purchase on an unverified or flagged key (PR #82)
 
 ### Fixed
