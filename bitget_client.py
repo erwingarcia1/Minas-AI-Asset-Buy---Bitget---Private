@@ -316,6 +316,7 @@ UTA_CLASSIC_ONLY_CODE = "40085"   # the Classic (v2) API refused: the account is
 UTA_UNIFIED_ONLY_CODE = "40084"   # the Unified (v3) API refused: the account is Classic
 UTA_ORDER_STATUS = {"filled": "filled", "cancelled": "cancelled", "partially_filled": "partially_filled",
                     "live": "live", "new": "new"}
+UTA_ORDER_NOT_EXIST_CODE = "25204"   # v3 "Order does not exist": the honest "not found", like the v2 43001 family
 
 
 class BitgetUnifiedClient(BitgetClient):
@@ -360,7 +361,14 @@ class BitgetUnifiedClient(BitgetClient):
         """Same keys as the Classic client: {status, orderId, clientOid, baseVolume, quoteVolume, priceAvg,
         fee, feeCoin, feeDetail}, or None when Bitget has no such order."""
         params = {"orderId": str(order_id)} if order_id else {"clientOid": str(client_oid)}
-        data = self._request("GET", "/api/v3/trade/order-info", params=params)
+        try:
+            data = self._request("GET", "/api/v3/trade/order-info", params=params)
+        except BitgetAPIError as exc:
+            # 25204 "Order does not exist": an honest "not found" is not a transport error,
+            # exactly like the Classic client's 43001 family (seen live on the 2026-10-10 PEPE park)
+            if str(exc.code) == UTA_ORDER_NOT_EXIST_CODE or "not exist" in str(exc.message).lower():
+                return None
+            raise
         order = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) and data else None)
         if not order:
             return None

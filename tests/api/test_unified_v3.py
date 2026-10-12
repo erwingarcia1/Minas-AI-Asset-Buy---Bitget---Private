@@ -341,3 +341,53 @@ async def test_withdraw_mode_purchase_is_refused_on_a_unified_key(db, user, clie
     assert r.status_code == 403 and r.json()["detail"]["error"] == "unified_account_withdraw"
     r2 = await client.post("/api/v2/purchases", json={**body, "purchase_type": "dca", "wallet_address": None, "blockchain_network": None}, headers=H)
     assert r2.status_code == 201, r2.text
+
+
+# ---------------------------------------------------------------- v3 "order does not exist" is an honest not-found
+
+class _OneAnswer:
+    def __init__(self, answer):
+        self.answer = answer
+
+    def __call__(self, method, path, params=None, body=None, auth=True):
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+def test_unified_order_info_maps_25204_to_none(monkeypatch):
+    """25204 "Order does not exist" is v3's honest "not found" (seen live on the
+    2026-10-10 PEPE park) — None, exactly like the Classic 43001 family."""
+    from bitget_client import BitgetAPIError
+    monkeypatch.setattr(BitgetClient, "_request", _OneAnswer(BitgetAPIError("25204", "Order does not exist")))
+    c = BitgetUnifiedClient("k", "s", "p")
+    assert c.get_order_info("PEPEUSDT", client_oid="ab-x") is None
+
+
+def test_unified_order_info_maps_not_exist_messages_to_none(monkeypatch):
+    from bitget_client import BitgetAPIError
+    monkeypatch.setattr(BitgetClient, "_request", _OneAnswer(BitgetAPIError("25299", "order does not exist (new wording)")))
+    c = BitgetUnifiedClient("k", "s", "p")
+    assert c.get_order_info("PEPEUSDT", order_id="1") is None
+
+
+def test_unified_order_info_still_raises_real_errors(monkeypatch):
+    from bitget_client import BitgetAPIError
+    monkeypatch.setattr(BitgetClient, "_request", _OneAnswer(BitgetAPIError("40404", "Request URL NOT FOUND")))
+    c = BitgetUnifiedClient("k", "s", "p")
+    with pytest.raises(BitgetAPIError):
+        c.get_order_info("PEPEUSDT", client_oid="ab-x")
+
+
+def test_unified_lookup_order_answers_not_found(monkeypatch):
+    from bitget_client import BitgetAPIError
+    monkeypatch.setattr(BitgetClient, "_request", _OneAnswer(BitgetAPIError("25204", "Order does not exist")))
+    c = ExchangeClient("k", "s", "p", exchange="bitget", account_mode="unified")
+    assert c.lookup_order("PEPEUSDT", "ab-x") == {"state": "not_found", "fill": None}
+
+
+def test_classic_client_order_not_found_mapping_is_untouched(monkeypatch):
+    from bitget_client import BitgetAPIError
+    monkeypatch.setattr(BitgetClient, "_request", _OneAnswer(BitgetAPIError("43001", "The order does not exist")))
+    c = BitgetClient("k", "s", "p")
+    assert c.get_order_info("PEPEUSDT", client_oid="ab-x") is None
