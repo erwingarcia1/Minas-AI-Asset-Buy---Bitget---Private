@@ -36,8 +36,12 @@ class FakeGateway:
     def __init__(self, *, fail_buy=False, place_raises_after_sending=False, fill_unavailable=False,
                  lookup_raises=False, lookup_state=None, fail_withdrawal=False, withdrawal_needs_info=False,
                  withdrawal_state="pending", status_raises=False, fill_factor=1.0, fill_override=None,
-                 unfilled=False, reference_price=None):
+                 unfilled=False, reference_price=None, fail_buy_error=None, lookup_states=None,
+                 lookup_error=None):
         self.fail_buy = fail_buy
+        self.fail_buy_error = fail_buy_error    # ExecutionError place_buy raises (order never sent)
+        self.lookup_states = list(lookup_states) if lookup_states else None  # consumed one per lookup
+        self.lookup_error = lookup_error        # exception every lookup raises (custom code)
         self.place_raises_after_sending = place_raises_after_sending
         self.fill_unavailable = fill_unavailable
         self.lookup_raises = lookup_raises
@@ -73,6 +77,8 @@ class FakeGateway:
 
     # -- gateway interface --------------------------------------------------
     def place_buy(self, account, purchase, client_oid, dry_run):
+        if self.fail_buy_error is not None:
+            raise self.fail_buy_error
         if self.fail_buy:
             raise ps.ExecutionError("MIN_NOTIONAL: too small", stage="buy", code="MIN_NOTIONAL")
         self.n += 1
@@ -91,8 +97,14 @@ class FakeGateway:
 
     def lookup_order(self, account, purchase, client_oid):
         self.lookups.append(client_oid)
+        if self.lookup_error is not None:
+            raise self.lookup_error
         if self.lookup_raises:
             raise ps.ExecutionError("NETWORK: exchange unreachable", stage="lookup", code="NETWORK")
+        if self.lookup_states is not None and self.lookup_states:
+            state = self.lookup_states.pop(0)
+            fill = self._fill_for(purchase, f"ORD-{client_oid[-4:]}") if state == "filled" else None
+            return {"state": state, "fill": fill}
         if self.lookup_state is not None:
             state = self.lookup_state
             fill = self._fill_for(purchase, f"ORD-{client_oid[-4:]}") if state == "filled" else None
