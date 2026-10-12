@@ -309,6 +309,35 @@ async def _reconcile_unresolved(db: AsyncSession, purchase: Purchase, account: A
 UNIFIED_REFUSAL_CODE = "40085"   # Bitget: "You are in Unified Account mode, and the Classic Account API is not supported"
 
 
+# Rejection codes that are DEFINITE refusals of a buy: the venue (or our own pre-send
+# check) examined the request and refused it, so no order can exist under our client
+# id. The attempt fails outright — same outcome as the Classic path's equivalents,
+# same customer emails — with no lookup and never needs_review. The v3 meanings are
+# from Bitget's UTA error reference (read 2026-10-12); 25202 and 25204 were also
+# observed live on the 2026-10-10 PEPE park. Codes NOT in this set keep the
+# ask-the-exchange-first path below.
+DEFINITE_REFUSAL_CODES = {
+    "SYMBOL",         # our pre-send check: pair offline / not trading (any venue)
+    "MIN_NOTIONAL",   # our pre-send check: below the venue minimum (any venue)
+    "25202",          # v3 Insufficient balance                        (Classic twin: 43012)
+    "25207",          # v3 trading quantity cannot be less than {n}    (below minimum order size)
+    "25611",          # v3 order quantity must be greater than the minimum order amount
+    "25100",          # v3 trading pair does not exist                 (Classic twin: the pre-send symbol check)
+    "25101",          # v3 trading pair not open for trading
+    "25102",          # v3 trading pair temporarily closed for maintenance
+    "25013",          # v3 "{coin} not support API trade"              (Classic twin: 40014 permission family)
+    "25620",          # v3 permission denied
+}
+
+# A just-placed order can lag the venue's order-info read. When a lookup after a send
+# error answers "not found", wait this long and ask once more before failing the attempt.
+LOOKUP_RECHECK_SECONDS = 5.0
+
+
+def _is_definite_refusal(exc: Exception) -> bool:
+    return str(getattr(exc, "code", "") or "") in DEFINITE_REFUSAL_CODES
+
+
 def _is_unified_refusal(exc: Exception) -> bool:
     return str(getattr(exc, "code", "") or "") == UNIFIED_REFUSAL_CODE or f"{UNIFIED_REFUSAL_CODE}:" in str(exc)
 
@@ -411,9 +440,22 @@ async def execute_one(db: AsyncSession, purchase: Purchase, now: datetime, gatew
         reference_price = placed.get("reference_price")
         await db.commit()
     except Exception as exc:
+        if _is_definite_refusal(exc):
+            # The venue refused the request outright: no order can exist, nothing to look up.
+            logger.warning("purchase %s: buy refused outright (%s); failing the attempt without a lookup",
+                           purchase.id, exc)
+            fail_info.update(_fail_attempt(purchase, tx, str(exc), now))
+            await db.commit()
+            events.append(("buy_failed", str(exc), tx))
+            await emit_all()
+            return tx
         # The order may or may not have reached the exchange: ask before deciding.
         try:
             found = await asyncio.to_thread(gateway.lookup_order, account, purchase, tx.client_oid)
+            if found.get("state") == "not_found":
+                # the order-info read can lag a just-placed order: one re-check before giving up
+                await asyncio.sleep(LOOKUP_RECHECK_SECONDS)
+                found = await asyncio.to_thread(gateway.lookup_order, account, purchase, tx.client_oid)
         except Exception as lookup_exc:
             _needs_review(purchase, tx, f"buy raised ({exc}) and the order could not be looked up: {lookup_exc}", now)
             await db.commit()
