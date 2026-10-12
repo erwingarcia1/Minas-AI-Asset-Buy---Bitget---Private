@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-10-12: Unified definite refusals (PR #89)
+
+### Fixed
+
+* The Unified (v3) client answered a lookup of a never-placed order by raising
+  25204 "Order does not exist"; it now returns None, exactly like the Classic
+  client's 43001 family, so executor lookups, reconciliation and the admin
+  review/resolve see "not found" again (the 2026-10-10 PEPE park).
+
+### Changed
+
+* A buy rejection that is a definite refusal — insufficient balance (25202),
+  below minimum order size (25207, 25611), pair not tradeable (25100/25101/
+  25102), key lacks trade permission (25013, 25620), and our own pre-send
+  SYMBOL / MIN_NOTIONAL checks — fails the attempt outright with the venue's
+  message, the same outcome and customer emails as the Classic equivalents
+  (43012 etc.). Never needs_review.
+* An unknown placement error still asks the exchange first; a "not found"
+  answer is re-checked once after 5 s (v3 order-info can lag a just-placed
+  order) before the attempt is failed. A lookup error still parks for review.
+
 ## [0.8.0.1] — 2026-10-10: v3 order lookup path (PR #85)
 
 ### Fixed
