@@ -69,14 +69,21 @@ def backoff_for(attempt: int) -> int:
     return BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS)) - 1]
 
 
+def _message(to: str, subject: str, html: str, text: str, template: str, category: str,
+             user_id: Optional[str], now: float) -> dict:
+    """The queued shape. One builder for both entry points, so the drain never
+    meets two layouts."""
+    category = category if category in CATEGORIES else "confirmation"
+    return {"id": uuid.uuid4().hex, "to": to, "subject": subject, "html": html, "text": text, "template": template,
+            "category": category, "user_id": user_id, "queued_at": now, "attempts": 0, "last_error": None}
+
+
 async def enqueue(to: str, subject: str, html: str, text: str, template: str = "generic", *,
                   category: str = "confirmation", user_id: Optional[str] = None,
                   now: Optional[float] = None) -> bool:
     """Queue one message, due immediately. Returns False (after an ERROR log) when Redis is unavailable."""
     now = time.time() if now is None else now
-    category = category if category in CATEGORIES else "confirmation"
-    msg = {"id": uuid.uuid4().hex, "to": to, "subject": subject, "html": html, "text": text, "template": template,
-           "category": category, "user_id": user_id, "queued_at": now, "attempts": 0, "last_error": None}
+    msg = _message(to, subject, html, text, template, category, user_id, now)
     try:
         r = _redis()
         await r.zadd(OUTBOX_KEY, {json.dumps(msg): now})
@@ -85,6 +92,35 @@ async def enqueue(to: str, subject: str, html: str, text: str, template: str = "
             dropped = await r.zremrangebyrank(OUTBOX_KEY, 0, size - MAX_QUEUE_LENGTH - 1)
             logger.error("email outbox over its cap of %d messages: %d earliest-due message(s) dropped (newest kept: to=%s template=%s)",
                          MAX_QUEUE_LENGTH, dropped, to, template)
+        return True
+    except Exception as exc:
+        logger.error("email outbox unavailable, message not queued: to=%s template=%s subject=%r reason=%s",
+                     to, template, subject, exc)
+        return False
+
+
+def enqueue_sync(to: str, subject: str, html: str, text: str, template: str = "generic", *,
+                 category: str = "confirmation", user_id: Optional[str] = None,
+                 now: Optional[float] = None) -> bool:
+    """`enqueue` for a process without an event loop: the Guardian worker
+    (v0.9.1). Same key, same message shape, same cap; the API's scheduler
+    drains it within the minute. Returns False after an ERROR log when Redis
+    is unavailable, never raises."""
+    import redis as redis_sync
+    now = time.time() if now is None else now
+    msg = _message(to, subject, html, text, template, category, user_id, now)
+    try:
+        r = redis_sync.Redis.from_url(settings.redis_url, decode_responses=True, socket_timeout=5.0,
+                                      socket_connect_timeout=5.0)
+        try:
+            r.zadd(OUTBOX_KEY, {json.dumps(msg): now})
+            size = r.zcard(OUTBOX_KEY)
+            if size > MAX_QUEUE_LENGTH:
+                dropped = r.zremrangebyrank(OUTBOX_KEY, 0, size - MAX_QUEUE_LENGTH - 1)
+                logger.error("email outbox over its cap of %d messages: %d earliest-due message(s) dropped (newest kept: to=%s template=%s)",
+                             MAX_QUEUE_LENGTH, dropped, to, template)
+        finally:
+            r.close()
         return True
     except Exception as exc:
         logger.error("email outbox unavailable, message not queued: to=%s template=%s subject=%r reason=%s",

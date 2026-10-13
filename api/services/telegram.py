@@ -159,10 +159,11 @@ def _limit() -> int:
 
 # ------------------------------------------------------------------ sending
 
-async def _post(text: str) -> SendResult:
-    """One sendMessage call with a single retry on a transport error."""
+async def _post(text: str, chat_id: Optional[str] = None) -> SendResult:
+    """One sendMessage call with a single retry on a transport error.
+    `chat_id` overrides TELEGRAM_CHAT_ID (the Guardian team group); the bot token is always the one."""
     url = f"{API_BASE}/bot{(settings.telegram_bot_token or '').strip()}/sendMessage"
-    body = {"chat_id": (settings.telegram_chat_id or "").strip(), "text": text[:MAX_TEXT],
+    body = {"chat_id": (chat_id or settings.telegram_chat_id or "").strip(), "text": text[:MAX_TEXT],
             "disable_web_page_preview": True}
     for attempt in (1, 2):
         try:
@@ -187,9 +188,11 @@ async def _post(text: str) -> SendResult:
     return SendResult(False, "unreachable")   # pragma: no cover
 
 
-async def send_detailed(text: str, key: Optional[str] = None, *, force: bool = False) -> SendResult:
+async def send_detailed(text: str, key: Optional[str] = None, *, force: bool = False,
+                        chat_id: Optional[str] = None) -> SendResult:
     """Send one message. ``key`` enables burst collapsing; ``force`` bypasses
-    collapsing (not the rate limit). Never raises."""
+    collapsing (not the rate limit); ``chat_id`` sends to another chat of the
+    same bot (the Guardian team group). Never raises."""
     global dropped_total
     try:
         if not configured():
@@ -211,7 +214,7 @@ async def send_detailed(text: str, key: Optional[str] = None, *, force: bool = F
             dropped_total += 1
             logger.warning("telegram: rate limit of %d/min reached; message dropped (%d dropped so far)", _limit(), dropped_total)
             return SendResult(False, "rate limited", suppressed=True)
-        result = await _post(text)
+        result = await _post(text, chat_id)
         if result.ok:
             _sent_at.append(now)
         return result
@@ -220,8 +223,20 @@ async def send_detailed(text: str, key: Optional[str] = None, *, force: bool = F
         return SendResult(False, f"error: {type(exc).__name__}")
 
 
-async def send(text: str, key: Optional[str] = None) -> bool:
-    return (await send_detailed(text, key)).ok
+async def send(text: str, key: Optional[str] = None, *, chat_id: Optional[str] = None) -> bool:
+    return (await send_detailed(text, key, chat_id=chat_id)).ok
+
+
+def send_sync(text: str, key: Optional[str] = None, *, chat_id: Optional[str] = None) -> SendResult:
+    """`send_detailed` for a thread without an event loop: the Guardian worker
+    (v0.9.1). The worker is one process, so the in-process rate limit and
+    burst collapse are correct there. Never raises."""
+    import asyncio
+    try:
+        return asyncio.run(send_detailed(text, key, chat_id=chat_id))
+    except Exception as exc:   # a loop or client problem must not reach the caller
+        logger.warning("telegram: sync send failed: %s", type(exc).__name__)
+        return SendResult(False, f"error: {type(exc).__name__}")
 
 
 async def flush() -> int:
