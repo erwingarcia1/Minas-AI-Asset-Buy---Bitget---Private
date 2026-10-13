@@ -45,6 +45,12 @@ with scp, and pass it with `--web`. The deploy refuses a bundle whose
 8. Any browser check against the live site uses a throwaway account that is
    deleted afterwards with proof, and signs out at the end.
 9. `docker compose config` is only ever printed with `--no-interpolate`.
+10. From the Guardian engine deploy (v0.9.1) onwards: `autobuy_guardian` is
+    recreated on the same image as `autobuy_api`, `/health.guardian.running` is
+    true and its heartbeat is younger than 120 s, whether `GUARDIAN_ENABLED` is
+    on or off. Guardian's loops are not scheduler jobs and do not change the
+    job list in rule 7. After the cutover, `guardian_accounts` and
+    `guardian_alerts` row counts join the before/after digest.
 
 ## Deploys
 
