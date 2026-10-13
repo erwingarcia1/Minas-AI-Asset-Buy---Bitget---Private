@@ -115,10 +115,14 @@ async def history(
     db: AsyncSession = Depends(get_db),
 ):
     """Audit log of the caller's notifications across all channels."""
+    # The customer feed shows what actually reached them. Skipped/covered/failed
+    # channel attempts stay in the table for the admin audit only.
     total = (await db.execute(select(func.count(Notification.id)).where(
-        Notification.user_id == current_user.id))).scalar_one()
+        Notification.user_id == current_user.id,
+        Notification.status == "sent"))).scalar_one()
     rows = (await db.execute(
-        select(Notification).where(Notification.user_id == current_user.id)
+        select(Notification).where(Notification.user_id == current_user.id,
+                                   Notification.status == "sent")
         .order_by(Notification.created_at.desc()).limit(limit).offset(offset)
     )).scalars().all()
     return HistoryResponse(items=[NotificationRow.model_validate(r) for r in rows],
