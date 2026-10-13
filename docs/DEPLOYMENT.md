@@ -299,6 +299,48 @@ testing steps: `docs/API.md` → "Email (Resend)".
   forgets every "sign out everywhere" revocation; rotate `SECRET_KEY` first if a
   revoked session must stay dead.
 
+## Guardian worker (v0.9.1)
+
+The read-only exchange monitor runs as its own container, `autobuy_guardian`,
+on the API image with the command `python -m guardian.worker`. It publishes
+no port; its Prometheus exposition is on the compose network only
+(`guardian:9109`). It is part of the `prod` profile, so `scripts/deploy.sh
+platform` builds, recreates and verifies it with the API:
+
+- the container must be recreated and run the **same image id** as `autobuy_api`;
+- `/health` must report `guardian.running: true` — a heartbeat in Redis
+  (`autobuy:guardian:heartbeat`) younger than 180 s — within two minutes,
+  **whether `GUARDIAN_ENABLED` is on or off**. Off, the worker only heartbeats.
+- Its loops are not scheduler jobs: the job list in the deploy checklist stays
+  seven.
+
+Settings (all in `.env.example`, both compose blocks and `api/config.py`):
+`GUARDIAN_ENABLED` (0/1, the owner's switch), `GUARDIAN_ALLOWED_EMAILS`
+(internal test phase: only these users see Guardian), `GUARDIAN_RULES_PATH`
+(empty = the file baked into the image), `GUARDIAN_METRICS_HOST/PORT`,
+`GUARDIAN_TELEGRAM_CHAT_ID` (optional team chat), `CLICKSEND_*` and
+`TWILIO_TO_NUMBERS` (SMS; empty = none). `scripts/lib/platform_env_checks.sh`
+refuses a `GUARDIAN_ENABLED` that is not `0`, `1` or unset.
+
+Operations:
+
+```bash
+sudo docker compose -p autobuy-platform --profile prod logs --tail 100 guardian   # the worker's JSON log
+curl -s http://127.0.0.1:8000/health | python3 -c 'import json,sys; print(json.load(sys.stdin)["guardian"])'
+sudo docker compose -p autobuy-platform --profile prod exec guardian python -m guardian.validate_config   # the rules file
+```
+
+Pause and resume (admin API, PR5) write `autobuy:guardian:paused`; the worker
+reads it every pass and fails closed when Redis is unreadable. The daily
+MEDIUM/LOW digest goes out from the worker after `alerting.digest_hour_utc`
+(08:00 UTC by default), once per day, tracked in Redis.
+
+Resources: the worker is capped at 1 GB and holds about ten Postgres
+connections (the engine's pool plus the scheduler). Check `SHOW
+max_connections;` on the server before the first deploy of this service.
+See `docs/GUARDIAN-ARCHITECTURE.md`, `docs/GUARDIAN-SECURITY.md`,
+`docs/GUARDIAN-THREAT-MODEL.md` and `docs/GUARDIAN-RETENTION.md`.
+
 ## Monitoring
 
 Prometheus scrapes `/metrics` (keep it private — `deployment/nginx.web.conf` already denies
