@@ -1,0 +1,156 @@
+# Sentinel detection thresholds. Hot-reloaded on file mtime change - no deploy needed to tune.
+# All thresholds are strings so they load as Decimal, never float (see sentinel/config.py).
+
+polling:
+  fast_loop_seconds: "45"      # withdrawals / deposits / transfers - no WS coverage exists, REST only
+  slow_loop_seconds: "600"     # balance snapshot + permission snapshot
+  jitter_seconds: "10"
+
+workers:
+  pool_size: 8                 # worker threads consuming the per-account task queue
+
+# Verified numbers from docs/phase0-capability-audit.md section 4. Buckets are
+# set below the documented ceilings to leave burst/retry headroom.
+rate_limits:
+  per_account_rps: "5"         # Bitget per-UID budget is 10 rps on the endpoints we poll
+  per_account_burst: "10"
+  egress_ip_rps: "60"          # Bitget global ceiling is 100 rps/IP (6000/min); 60% leaves headroom
+  egress_ip_burst: "100"
+
+circuit_breaker:
+  failure_threshold: 3         # consecutive failures before the breaker opens
+  base_backoff_seconds: "60"   # open duration doubles each consecutive trip
+  max_backoff_seconds: "3600"
+
+detectors:
+  quantity_drop:
+    tolerance_pct: "0.5"
+    tolerance_absolute: "0.00000001"
+    # Only activity at or after the previous balance snapshot can explain a
+    # drop measured from it. This grace widens that window backwards to cover
+    # settlement lag - a sale executing just before the snapshot whose balance
+    # effect lands just after it. Every second of grace is a second a real
+    # theft can hide in, so keep it tight; "near miss" warnings in the log show
+    # when it is too tight to tune from evidence rather than guesswork.
+    explanation_grace_seconds: "60"
+
+  tamper:
+    consecutive_auth_failures_threshold: 2
+
+  heartbeat:
+    consecutive_failures_threshold: 5
+
+  withdrawal_burst:
+    window_minutes: 60
+    min_count: 3
+
+  off_market:
+    max_deviation_pct: "10"
+
+  fee_anomaly:
+    multiplier: "5"
+    min_fee_floor: "1"         # in fee-coin units; suppresses noise on near-zero baselines
+    ema_alpha: "0.2"
+
+  transfers:
+    max_coins_per_cycle: 5     # fetch_transfers is per-coin on Bitget; cap calls per cycle
+
+alerting:
+  # Which channels each severity routes to. Channels not configured via env
+  # are skipped with a warning at startup.
+  # telegram = your personal chat; telegram_team = the VA/team group (bot must
+  # be a member; set TELEGRAM_TEAM_CHAT_ID). Unconfigured channels are skipped.
+  routing:
+    CRITICAL: [telegram, telegram_team, sms, email]
+    HIGH: [telegram, telegram_team, email]
+    MEDIUM: [digest]
+    LOW: [digest]
+  cooldown_minutes:
+    CRITICAL: "15"
+    HIGH: "30"
+    MEDIUM: "720"
+    LOW: "1440"
+  # Longest a customer may silence one alert, per severity (G-26, decision 8).
+  # Acknowledging already stops escalation and already says "I have seen this";
+  # a snooze only suppresses repeats. The only legitimate reason to suppress
+  # repeats of a CRITICAL is that you are dealing with it right now, which is a
+  # short window by definition - and a drain unfolds over minutes to hours, so
+  # a day-long CRITICAL snooze is long enough for the rest of one to finish in
+  # silence. Re-snoozing costs one tap and forces a fresh decision.
+  # 0 for a severity means it cannot be snoozed at all.
+  snooze_cap_hours:
+    CRITICAL: "1"
+    HIGH: "4"
+    MEDIUM: "24"
+    LOW: "24"
+  escalation_unacknowledged_minutes: "15"
+  # How often "your account is not being watched" repeats while it stays
+  # unresolved (G-6). Daily: at HIGH's 30-minute cooldown a broken key would
+  # page twice an hour until fixed, and with no repeat an unwatched account
+  # looks fine forever.
+  unreachable_repeat_minutes: "1440"
+  # Duplicate-SMS protection for per-account (member) texts: at most one SMS
+  # per rule + account within this window. Wider than the dispatch dedup key
+  # on purpose - a burst of distinct withdrawals pages the member once, with
+  # the full detail on Telegram/email.
+  sms_cooldown_minutes: "30"
+  # Business rule: a CRITICAL alert still pages a member who opted out of
+  # SMS (sms_alerts_enabled = 0). Set false to make the opt-out absolute.
+  sms_critical_overrides_optout: true
+
+# Paging scoped to Minas, not to a customer (G-49). Kept separate from
+# `alerting` above on purpose: "our product is broken" and "this customer may
+# be being robbed" are different kinds of urgency. An operator page never
+# reaches a customer, even when it names the account it is about.
+operator_alerting:
+  routing:
+    CRITICAL: [telegram, telegram_team, sms, email]
+    HIGH: [telegram, telegram_team, email]
+    MEDIUM: [telegram_team]
+    LOW: [telegram_team]
+  # Wider than the customer cooldowns above, deliberately. Those are tuned for
+  # a flapping detection on one account, where re-firing quickly matters. An
+  # operator page reports a condition that persists until someone fixes it, so
+  # re-sending every 15 minutes produces noise rather than urgency.
+  cooldown_minutes:
+    CRITICAL: "30"
+    HIGH: "60"
+    MEDIUM: "240"
+    LOW: "720"
+  # G-48: page when an exchange stops stamping times on records. The counter's
+  # resting value is exactly zero, so there is no sensitivity dial - any rise is
+  # anomalous. These two only decide how long it must persist before it counts
+  # as a format change rather than a blip. Tune from the first week of real
+  # data rather than from this comment.
+  untimestamped_window_seconds: "900"
+  untimestamped_consecutive_windows: "2"
+
+# How long each growing table is kept. Interim engineering defaults - the legal
+# retention decision (#47 / DECISIONS-NEEDED decision 6) sets the real numbers,
+# and because they live here that is a config change rather than a deploy.
+#
+# `dedup_days` is different in kind from the rest. seen_withdrawals /
+# seen_transfers / seen_fills are not history, they are the answer to "have I
+# already alerted on this" - prune one while the exchange still returns that
+# record and it re-alerts on a months-old movement. Its floor is set by the
+# longest history any exchange returns on a since=None fetch, which we do not
+# control, so it is deliberately far longer than it looks like it needs to be.
+# Legal cannot shorten this one below that floor without causing re-alerts.
+#
+# 0 on any of these means "keep forever".
+retention:
+  events_days: "730"                  # forensic log; #29's incident timeline reads it
+  alerts_days: "730"
+  operator_pages_days: "730"
+  sms_deliveries_days: "730"
+  expected_activity_days: "730"  # "that was me" (#28); same window as the alert it judges
+  dedup_days: "365"                   # see above - bounded below by correctness
+  balance_snapshots_days: "7"         # only "what changed since the last poll" needs these
+  permission_snapshots_days: "730"
+  prune_interval_minutes: "60"        # full-table deletes do not belong on the 45s loop
+
+triage:
+  enabled: false               # AI triage narrative on incidents; additive only,
+                               # deterministic rules remain authoritative
+  model: claude-opus-4-8
+  max_events: 50
