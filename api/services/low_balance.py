@@ -66,6 +66,43 @@ def read_usdt_balance(account: APIKey) -> float:
     return float(_client_for(account).get_account_balance("USDT"))
 
 
+def read_funding_usdt(account: APIKey):
+    """USDT sitting in a Unified account's FUNDING balance (read-only, #91 hint).
+    None when the account is not Unified or the read fails — the email then
+    simply gives the plain top-up instructions."""
+    if (getattr(account, "account_mode", "") or "") != "unified":
+        return None
+    try:
+        from api.services.exchange_gateway import _client_for
+        return float(_client_for(account).get_funding_available("USDT"))
+    except Exception:   # noqa: BLE001 — a hint, never a blocker
+        logger.info("low-balance check: funding balance unreadable for account %s", account.id)
+        return None
+
+
+def top_up_text(account: APIKey, shortfall: float, funding) -> str:
+    """The owner-approved 'how to top up' paragraph, per account mode, with the
+    Funding hint when USDT is sitting there (#91)."""
+    from api.services.failure_text import BITGET_LABELS as L
+    unified = (getattr(account, "account_mode", "") or "") == "unified"
+    if not unified:
+        return (f"How to top up: in Bitget, go to {L['transfer_path']} and move USDT into the "
+                f"{L['spot_account']} of the sub-account AutoBuy uses. "
+                "Money in Funding, Earn or Futures can't be used for the buy.")
+    if funding is not None and funding > 0:
+        move = (f"In Bitget, go to {L['transfer_path']} for the sub-account AutoBuy uses, "
+                f"choose From: {L['funding_account']} and To: {L['unified_account']}, "
+                "and move it across.")
+        if funding >= shortfall:
+            return (f"You already have {fmt_usdt(funding)} USDT in your Bitget {L['funding_account']} — "
+                    f"enough to cover this. {move} That's all you need to do.")
+        return (f"You have {fmt_usdt(funding)} USDT in your Bitget {L['funding_account']}. {move} "
+                f"Then add about {fmt_usdt(shortfall - funding)} USDT more.")
+    return (f"How to top up: in Bitget, go to {L['transfer_path']} and move USDT into the "
+            f"{L['unified_account']} of the sub-account AutoBuy uses. "
+            f"Money in the {L['funding_account']} can't be used for the buy.")
+
+
 BalanceReader = Callable[[APIKey], float]
 
 
@@ -102,7 +139,8 @@ def _exchange_name(account: APIKey) -> str:
     return {"bitget": "Bitget", "binance": "Binance"}.get((account.exchange or "").lower(), account.exchange or "your exchange")
 
 
-async def _email(user: User, account: APIKey, purchases: list, balance: float, needed: float) -> bool:
+async def _email(user: User, account: APIKey, purchases: list, balance: float, needed: float,
+                 funding=None) -> bool:
     """One email per exchange account per pass, listing every purchase in a check window on it."""
     from api.utils.links import build_app_link
     from api.services.purchase_executor import MAX_ATTEMPTS, MAX_MISSED_CYCLES
@@ -114,6 +152,7 @@ async def _email(user: User, account: APIKey, purchases: list, balance: float, n
                     "run_at": fmt_run_time(p.next_execution)} for p in purchases],
         count=len(purchases), count_words=_count_words(len(purchases)), needed_usdt=fmt_usdt(needed), balance_usdt=fmt_usdt(balance),
         shortfall_usdt=fmt_usdt(max(needed - balance, 0.0)), exchange=_exchange_name(account),
+        top_up_text=top_up_text(account, max(needed - balance, 0.0), funding),
         purchases_url=build_app_link("/purchases"),
         unsubscribe_url=build_app_link("/settings/notifications"),
     )
@@ -121,7 +160,8 @@ async def _email(user: User, account: APIKey, purchases: list, balance: float, n
                                      category="confirmation", user_id=user.id)
 
 
-async def check_low_balances(db, now: Optional[datetime] = None, balance_reader: Optional[BalanceReader] = None) -> dict:
+async def check_low_balances(db, now: Optional[datetime] = None, balance_reader: Optional[BalanceReader] = None,
+                             funding_reader: Optional[BalanceReader] = None) -> dict:
     """One pass over the active purchases whose next run is in a check window.
     Purchases are grouped by exchange account: the account's available USDT is
     read once and compared with the SUM of what every in-window purchase on it
@@ -132,6 +172,7 @@ async def check_low_balances(db, now: Optional[datetime] = None, balance_reader:
     and reported, the pass continues."""
     now = now or utcnow()
     reader = balance_reader or read_usdt_balance
+    funding_read = funding_reader or read_funding_usdt
     out = Outcome()
     rows = (await db.execute(
         select(Purchase)
@@ -181,8 +222,9 @@ async def check_low_balances(db, now: Optional[datetime] = None, balance_reader:
         out.alerted += len(fresh)
         emailed = False
         if Preferences.for_user(user).wants_email("email_low_balance"):
+            funding = await asyncio.to_thread(funding_read, account)
             try:
-                emailed = await _email(user, account, purchases, balance, needed)
+                emailed = await _email(user, account, purchases, balance, needed, funding=funding)
             except Exception as exc:   # noqa: BLE001
                 logger.error("low-balance email not queued for account %s: %s", account.id, exc)
         if emailed:

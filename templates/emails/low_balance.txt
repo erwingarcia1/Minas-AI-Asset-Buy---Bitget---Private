@@ -8,7 +8,7 @@
 Available now:  {{ balance_usdt }} USDT
 Shortfall:      {{ shortfall_usdt }} USDT
 
-How to top up: in {{ exchange }}, move USDT into the spot wallet of the sub-account {{ app_name }} uses (Assets -> Transfer -> to Spot, choose the sub-account). Funds parked in funding, earn or futures are not seen by the buy.
+{{ top_up_text }}
 
 If the balance is still short when a buy runs, {{ app_name }} tries {{ attempts }} times a few minutes apart, then skips that cycle and waits for the next scheduled one. After {{ missed_cycles }} skipped buys in a row the purchase is stopped and you are emailed. Nothing is ever bought twice. Your purchases: {{ purchases_url }}
 

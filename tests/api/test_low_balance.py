@@ -246,3 +246,65 @@ def test_run_time_is_eastern_first_with_utc_in_brackets():
     assert lb.fmt_run_time(datetime(2026, 10, 26, 0, 16, tzinfo=timezone.utc)) == "Sunday, Oct 25 at 8:16 PM ET (00:16 UTC)"
     assert lb.fmt_run_time(datetime(2026, 11, 2, 0, 16, tzinfo=timezone.utc)) == "Sunday, Nov 1 at 7:16 PM ET (00:16 UTC)"
     assert lb.DISPLAY_TZ == "America/New_York"
+
+
+# --------------------------------------------------------------- #91: the Funding hint
+
+def test_top_up_text_per_mode_and_funding():
+    classic = make_account("classic")
+    unified = make_account("unified")
+    t = lb.top_up_text(classic, shortfall=6.60, funding=None)
+    assert "Spot account" in t and "sub-account AutoBuy uses" in t
+    assert "Funding, Earn or Futures" in t
+    t = lb.top_up_text(unified, shortfall=6.60, funding=None)
+    assert "Unified Trading account" in t and "sub-account AutoBuy uses" in t
+    assert "Funding account can't be used" in t
+    covers = lb.top_up_text(unified, shortfall=6.60, funding=10.0)
+    assert "10.00 USDT in your Bitget Funding account — enough to cover this" in covers
+    assert "From: Funding account" in covers and "To: Unified Trading account" in covers
+    assert "That's all you need to do." in covers
+    partial = lb.top_up_text(unified, shortfall=6.60, funding=4.0)
+    assert "4.00 USDT in your Bitget Funding account" in partial
+    assert "Then add about 2.60 USDT more." in partial
+    assert "enough to cover this" not in partial
+    assert "enough to cover this" not in lb.top_up_text(unified, shortfall=6.60, funding=0.0)
+
+
+def make_account(mode):
+    class A:
+        account_mode = mode
+        id = "k"
+    return A()
+
+
+async def test_unified_warning_email_carries_the_funding_hint(db, user, bitget_key, mail, tg, no_order_path):
+    bitget_key.account_mode = "unified"
+    await db.commit()
+    p = await make_purchase(db, user, bitget_key, crypto_symbol="XRP", amount_usd=10,
+                            purchase_type="dca", next_execution=RUN)
+    def funding_read(account):
+        funding_read.calls.append(account.id)
+        return 50.0
+    funding_read.calls = []
+    out = await lb.check_low_balances(db, now=NOW, balance_reader=reader(3.50),
+                                      funding_reader=funding_read)
+    assert out["alerted"] == 1 and funding_read.calls == [bitget_key.id]
+    (m,) = mail.sent
+    assert "50.00 USDT in your Bitget Funding account — enough to cover this" in m["text"]
+    assert "From: Funding account" in m["text"] and "To: Unified Trading account" in m["text"]
+    assert "spot wallet" not in m["text"].lower(), "no Classic wording on a Unified account"
+
+
+async def test_funding_read_failure_degrades_to_plain_unified_wording(db, user, bitget_key, mail, tg, no_order_path):
+    bitget_key.account_mode = "unified"
+    await db.commit()
+    p = await make_purchase(db, user, bitget_key, crypto_symbol="XRP", amount_usd=10,
+                            purchase_type="dca", next_execution=RUN)
+    def broken(account):
+        raise RuntimeError("funding endpoint down")
+    out = await lb.check_low_balances(db, now=NOW, balance_reader=reader(3.50),
+                                      funding_reader=lambda a: None)
+    assert out["alerted"] == 1
+    (m,) = mail.sent
+    assert "Unified Trading account" in m["text"]
+    assert "Funding account can't be used" in m["text"]

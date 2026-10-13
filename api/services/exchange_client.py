@@ -183,6 +183,16 @@ class ExchangeClient:
         except ExchangeAPIError as exc:
             raise ExchangeClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
 
+    def get_funding_available(self, coin: str) -> float:
+        """Available `coin` in the venue's Funding account (Unified Bitget only;
+        read-only, used for the #91 top-up hint). AttributeError on venues
+        without a funding read — callers treat that as "no hint"."""
+        try:
+            with time_exchange("get_funding"):
+                return self._client.get_funding_available(coin)
+        except ExchangeAPIError as exc:
+            raise ExchangeClientError(str(exc), getattr(exc, "code", "BINANCE")) from exc
+
     def execute_order(self, symbol: str, usdt_amount: float, dry_run: bool = True,
                       client_oid: str | None = None) -> dict:
         """Market-buy `usdt_amount` USDT worth of `symbol`.
