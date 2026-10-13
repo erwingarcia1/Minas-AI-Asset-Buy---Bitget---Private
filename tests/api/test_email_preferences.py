@@ -78,7 +78,7 @@ async def test_purchase_confirmations_can_be_switched_off_but_failures_cannot(db
     for i in range(3):   # attempts 1 and 2 send nothing; the exhausted cycle (here: the stop) always emails
         await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     failures = [m for m in capture.sent if m["template"] == "purchase"]
-    assert len(failures) == 1 and "has been stopped" in failures[0]["subject"], "failure emails are never optional"
+    assert len(failures) == 1 and "We've paused your" in failures[0]["subject"], "failure emails are never optional"
     assert ok.id != bad.id
 
 

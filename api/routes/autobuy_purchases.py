@@ -41,11 +41,17 @@ router = APIRouter()
 # --------------------------------------------------------------------------- helpers
 
 def _tx_out(t: PurchaseTransaction) -> TransactionOut:
-    """API view of a row (executor vocabulary): a dry-run withdrawal shows "simulated"."""
+    """API view of a row (executor vocabulary): a dry-run withdrawal shows "simulated";
+    a buy error of a KNOWN class shows its plain-English line (#90) — the raw
+    string stays on the row and in the admin views."""
+    from api.services.failure_text import customer_error_line
     from api.services.history import is_simulated
     out = TransactionOut.model_validate(t)
     if is_simulated(t):
         out.status = "simulated"
+    if t.tx_type == "buy" and out.error_message:
+        out.error_message = customer_error_line(out.error_message, t.purchase.crypto_symbol
+                                                if t.purchase else "")
     return out
 
 
@@ -62,7 +68,8 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
         exchange_key_removed=p.exchange_account is None,
         exchange_key_error=(p.exchange_account.verification_error
                             if p.exchange_account is not None and p.exchange_account.verification_status == "failed" else None),
-        status=p.status, failure_count=p.failure_count, last_error=p.last_error,
+        status=p.status, failure_count=p.failure_count,
+        last_error=_customer_last_error(p),
         next_execution=p.next_execution, created_at=p.created_at, updated_at=p.updated_at,
         low_balance_for_next_run=low_balance_outstanding(p), low_balance_alerted_at=p.low_balance_alerted_at,
         latest_transaction=_tx_out(txs[0]) if txs else None,
@@ -71,6 +78,13 @@ def _to_out(p: Purchase, detail: bool = False) -> PurchaseOut:
     if detail:
         return PurchaseDetailOut(**base, transactions=[_tx_out(t) for t in txs])
     return PurchaseOut(**base)
+
+
+def _customer_last_error(p: Purchase) -> Optional[str]:
+    """Plain line for a known buy-failure class; anything unclassified (e.g.
+    withdrawal wording) passes through unchanged. Admin routes keep the raw."""
+    from api.services.failure_text import customer_error_line
+    return customer_error_line(p.last_error, p.crypto_symbol)
 
 
 async def _owned_purchase(db: AsyncSession, purchase_id: UUID, user: User) -> Purchase:
