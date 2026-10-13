@@ -107,3 +107,5 @@ class WebhookEndpoint(Base):
 from .purchase import Purchase, PurchaseTransaction, Wallet  # noqa: E402,F401
 # Two-factor authentication tables (migration 029).
 from .security import UserTotp, UserTotpRecoveryCode  # noqa: E402,F401
+# Guardian read-only monitoring tables (migration 030).
+from . import guardian  # noqa: E402,F401
