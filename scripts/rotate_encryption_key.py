@@ -1,4 +1,4 @@
-"""Re-encrypt every stored secret (exchange API keys, TOTP secrets) under a new ENCRYPTION_KEY.
+"""Re-encrypt every stored secret (exchange API keys, TOTP secrets, Guardian monitoring keys) under a new ENCRYPTION_KEY.
 
 Usage:
     OLD_ENCRYPTION_KEY=<previous key material> ENCRYPTION_KEY=<new key material> \
@@ -54,6 +54,15 @@ def main() -> None:
             conn.execute(text("UPDATE user_totp SET encrypted_secret=:s WHERE user_id=:id"),
                          {"id": row.user_id, "s": new_f.encrypt(old_f.decrypt(row.encrypted_secret.encode())).decode()})
         print(f"re-encrypted {len(totp_rows)} user_totp row(s)")
+        guardian_rows = conn.execute(text("SELECT id, encrypted_api_key, encrypted_secret, encrypted_passphrase FROM guardian_accounts")).all()
+        for row in guardian_rows:
+            conn.execute(
+                text("UPDATE guardian_accounts SET encrypted_api_key=:k, encrypted_secret=:s, encrypted_passphrase=:p WHERE id=:id"),
+                {"id": row.id,
+                 "k": new_f.encrypt(old_f.decrypt(row.encrypted_api_key.encode())).decode(),
+                 "s": new_f.encrypt(old_f.decrypt(row.encrypted_secret.encode())).decode(),
+                 "p": new_f.encrypt(old_f.decrypt(row.encrypted_passphrase.encode())).decode()})
+        print(f"re-encrypted {len(guardian_rows)} guardian_accounts row(s)")
 
 
 if __name__ == "__main__":

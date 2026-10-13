@@ -35,6 +35,20 @@ def test_deploy_script_asserts_the_container_was_recreated_and_the_commit_matche
     assert '"commit": *"' in text and "is not running the deployed code" in text
 
 
+def test_deploy_script_proves_the_guardian_worker_moved_and_is_alive():
+    """v0.9.1: the worker container is recreated on the API's image and its heartbeat is fresh
+    before the deploy is called done, whether GUARDIAN_ENABLED is on or off."""
+    text = SCRIPT.read_text()
+    assert "docker inspect --format '{{.Id}}' autobuy_guardian" in text
+    assert "the worker is not on the deployed build" in text
+    assert "wait_for_guardian_heartbeat" in text and '"guardian": *{' in text
+    compose = (ROOT / "docker-compose.yml").read_text()
+    guardian_block = compose[compose.index("\n  guardian:"):compose.index("\n  # Web frontend")]
+    assert "container_name: autobuy_guardian" in guardian_block and "image: autobuy-api:latest" in guardian_block
+    assert "ports:" not in guardian_block, "the worker publishes nothing"
+    assert '"python", "-m", "guardian.worker"' in guardian_block
+
+
 def test_image_is_stamped_with_the_commit_and_health_reports_it(monkeypatch, tmp_path):
     dockerfile = (ROOT / "Dockerfile.api").read_text()
     assert "ARG GIT_COMMIT" in dockerfile and "/app/GIT_COMMIT" in dockerfile

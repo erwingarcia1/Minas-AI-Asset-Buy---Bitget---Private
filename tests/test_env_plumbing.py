@@ -30,15 +30,27 @@ def env_example_keys() -> set:
     return set(re.findall(r"^([A-Z0-9_]+)=", (ROOT / ".env.example").read_text(), re.M))
 
 
-def compose_api_env_keys() -> set:
+def compose_service_env_keys(service: str) -> set:
     compose = (ROOT / "docker-compose.yml").read_text()
-    start = compose.index("\n  api:")
-    end = compose.find("\n  ", compose.index("\n    environment:", start) + 1)
-    # the api service block runs until the next top-level service (two-space indent)
+    start = compose.index(f"\n  {service}:")
+    # the service block runs until the next top-level service (two-space indent)
     block = compose[start:]
     nxt = re.search(r"\n  [a-z_-]+:\n", block[6:])
     block = block[: nxt.start() + 6] if nxt else block
     return set(re.findall(r"^\s{6}([A-Z0-9_]+):", block, re.M))
+
+
+def compose_api_env_keys() -> set:
+    return compose_service_env_keys("api")
+
+
+def test_guardian_worker_carries_every_api_setting():
+    """The worker imports api/config.py, so a variable missing from its block silently means the
+    code default — the same failure this file exists to prevent for the api container."""
+    api_keys = compose_api_env_keys()
+    guardian_keys = compose_service_env_keys("guardian")
+    assert api_keys - guardian_keys == set(), f"in the api block but not the guardian block: {sorted(api_keys - guardian_keys)}"
+    assert guardian_keys - api_keys == {"SKIP_MIGRATIONS"}, "the worker adds only SKIP_MIGRATIONS (the api container migrates)"
 
 
 def test_every_setting_the_code_reads_is_documented_in_env_example():

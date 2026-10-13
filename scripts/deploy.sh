@@ -182,9 +182,10 @@ deploy_platform() {
         exit 1
     fi
 
-    local before_id before_created expected_commit expected_tree
+    local before_id before_created expected_commit expected_tree guardian_before_id
     before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_api 2>/dev/null || echo none)"
     before_created="$($SUDO docker inspect --format '{{.Created}}' autobuy_api 2>/dev/null || echo none)"
+    guardian_before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_guardian 2>/dev/null || echo none)"
     expected_commit="$(git rev-parse HEAD)"
 
     # 0. the web bundle: shipped from --web, or already on disk and built from this checkout.
@@ -234,6 +235,26 @@ deploy_platform() {
     fi
     echo "==> [platform] api container recreated: ${before_id:0:12} -> ${after_id:0:12} (created $after_created)"
 
+    # 1b. the Guardian worker (v0.9.1) must have been recreated on the SAME image as the API:
+    #     it imports api/config.py, so an old worker next to a new API is a half-deployed box.
+    local guardian_after_id api_image guardian_image
+    guardian_after_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_guardian 2>/dev/null || echo none)"
+    if [ "$guardian_after_id" = "none" ]; then
+        echo "ERROR: no autobuy_guardian container after 'up -d' — the Guardian worker did not start." >&2
+        exit 1
+    fi
+    if [ "$guardian_after_id" = "$guardian_before_id" ]; then
+        echo "ERROR: the autobuy_guardian container was not recreated (same id ${guardian_after_id:0:12})." >&2
+        exit 1
+    fi
+    api_image="$($SUDO docker inspect --format '{{.Image}}' autobuy_api 2>/dev/null || echo api)"
+    guardian_image="$($SUDO docker inspect --format '{{.Image}}' autobuy_guardian 2>/dev/null || echo guardian)"
+    if [ "$api_image" != "$guardian_image" ]; then
+        echo "ERROR: autobuy_guardian runs image ${guardian_image:0:19} but autobuy_api runs ${api_image:0:19} — the worker is not on the deployed build." >&2
+        exit 1
+    fi
+    echo "==> [platform] guardian container recreated: ${guardian_before_id:0:12} -> ${guardian_after_id:0:12} (same image as the API)"
+
     echo "==> [platform] Waiting for the API to pass /health (migrations run at boot) ..."
     local _try health
     for _try in $(seq 1 30); do
@@ -261,6 +282,9 @@ deploy_platform() {
                 exit 1
             fi
             echo "==> [platform] Web app on :8080 serves the bundle built from this checkout (frontend tree ${served_tree:0:7})"
+            # 4. the Guardian worker (v0.9.1) must be alive: /health.guardian.running is true once its
+            #    heartbeat is younger than 180 s, whether GUARDIAN_ENABLED is on or off.
+            wait_for_guardian_heartbeat || exit 1
             return 0
         fi
         sleep 4
@@ -268,6 +292,23 @@ deploy_platform() {
     echo "ERROR: API did not become healthy within 2 minutes. Recent logs:" >&2
     compose -p autobuy-platform --profile "$PLATFORM_PROFILE" logs --tail 40 api >&2 || true
     exit 1
+}
+
+wait_for_guardian_heartbeat() {
+    local _try health running
+    echo "==> [platform] Waiting for the Guardian worker's heartbeat (/health.guardian.running) ..."
+    for _try in $(seq 1 24); do
+        health="$(curl -fsS --max-time 3 http://127.0.0.1:8000/health 2>/dev/null || true)"
+        running="$(printf '%s' "$health" | sed -n 's/.*"guardian": *{[^}]*"running": *\([a-z]*\).*/\1/p')"
+        if [ "$running" = "true" ]; then
+            echo "==> [platform] Guardian worker is alive (heartbeat fresh)"
+            return 0
+        fi
+        sleep 5
+    done
+    echo "ERROR: the Guardian worker did not report a fresh heartbeat within 2 minutes (/health.guardian.running stayed '${running:-<none>}'). Recent logs:" >&2
+    compose -p autobuy-platform --profile "$PLATFORM_PROFILE" logs --tail 40 guardian >&2 || true
+    return 1
 }
 
 deploy_platform
