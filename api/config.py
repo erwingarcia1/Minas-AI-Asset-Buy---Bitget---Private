@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     # Private beta: registration needs this code (constant-time compared). Empty = open in
     # development; in production an empty value closes registration entirely.
     signup_invite_code: str = os.getenv("SIGNUP_INVITE_CODE", "")
+    # Admins must have two-factor authentication on before any admin route answers (403 with
+    # mfa_required_for_admin until they enrol). Off while the admins enrol; the owner switches it
+    # on afterwards. Compose passes "" when unset: only "1"/"true"/"yes" turns it on.
+    admin_mfa_required: bool = (os.getenv("ADMIN_MFA_REQUIRED") or "0").strip().lower() in ("1", "true", "yes")
     # Telegram ops alerts (api/services/telegram.py): both unset = no-op. The token is never logged or echoed.
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")

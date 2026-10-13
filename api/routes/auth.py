@@ -1,22 +1,23 @@
-"""Authentication routes: register, login, verify, refresh."""
+"""Authentication routes: register, login (with the optional second factor), verify, refresh, logout."""
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.auth import Token, create_access_token, hash_password, verify_password, verify_token
+from api.auth import MFA_PENDING_TTL, Token, create_access_token, hash_password, token_cutoff, verify_password, verify_token
 from api.config import settings
 from api.database import get_db
 from api.models import User
 from api.routes.user import UTCModel, get_current_user
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from api.services.rate_limit import limiter, is_locked_out, register_failed_login, clear_failed_logins
+from api.services.rate_limit import limiter, is_locked_out, register_failed_login, clear_failed_logins, user_or_ip_key
+from api.services import twofactor
 
 import hashlib
 import json
@@ -125,6 +126,27 @@ class VerifyRequest(BaseModel):
 class VerifyResponse(BaseModel):
     valid: bool
     user_id: Optional[str] = None
+
+
+class MfaRequiredResponse(BaseModel):
+    """The password was accepted but the account has two-factor authentication
+    on. No session is issued and no cookie is set: exchange `mfa_token` plus a
+    code at /login/mfa within `expires_in` seconds."""
+    mfa_required: bool = True
+    mfa_token: str
+    expires_in: int
+
+
+class MfaLoginRequest(BaseModel):
+    mfa_token: str = Field(min_length=20, max_length=2048)
+    code: Optional[str] = Field(default=None, max_length=16)
+    recovery_code: Optional[str] = Field(default=None, max_length=32)
+
+    @model_validator(mode="after")
+    def _exactly_one_factor(self):
+        if bool((self.code or "").strip()) == bool((self.recovery_code or "").strip()):
+            raise ValueError("send either code or recovery_code")
+        return self
 
 
 # --------------------------------------------------------------------------
@@ -399,12 +421,17 @@ async def register(request: Request, response: Response, payload: RegisterReques
     return user
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse,
+             responses={202: {"model": MfaRequiredResponse,
+                              "description": "Password accepted; the account has two-factor authentication on. "
+                                             "No session yet and no cookies: finish at /login/mfa."}})
 @limiter.limit("5/minute")
 async def login(request: Request, response: Response, payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate with email/password. The body carries the short-lived access
     token (keep it in memory) and a CSRF token; the refresh token is set as an
-    httpOnly cookie scoped to /api/auth."""
+    httpOnly cookie scoped to /api/auth. An account with two-factor
+    authentication on gets **202** `{mfa_required, mfa_token, expires_in}`
+    instead, and finishes at /login/mfa."""
     locked_for = await is_locked_out(payload.email)
     if locked_for:
         raise HTTPException(
@@ -423,7 +450,153 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
             headers={"WWW-Authenticate": "Bearer"},
         )
     await clear_failed_logins(payload.email)
+    if await twofactor.is_enabled(db, user.id):
+        logger.info("login awaiting second factor", extra={"user_id": str(user.id)})
+        return JSONResponse(status_code=status.HTTP_202_ACCEPTED,
+                            content=MfaRequiredResponse(mfa_token=make_mfa_token(user),
+                                                        expires_in=int(MFA_PENDING_TTL.total_seconds())).model_dump())
     return _start_session(response, str(user.id))
+
+
+# --------------------------------------------------------------------------
+# Second factor (v0.9.0)
+# --------------------------------------------------------------------------
+# A sign-in that passed the password but owes a code holds a short-lived
+# `mfa_pending` token. It is not a credential: the bearer guard and /verify
+# refuse it, it is redeemable once, it allows a handful of attempts, and it
+# dies with the password it was issued against (the `pv` fingerprint).
+
+MFA_USED_PREFIX = "mfa-used:"
+MFA_ATTEMPTS_PREFIX = "mfa-attempts:"
+MFA_MAX_ATTEMPTS = 5
+
+
+def make_mfa_token(user: User) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode({"sub": str(user.id), "type": "mfa_pending", "jti": uuid4().hex,
+                       "pv": _password_version(user.password_hash),
+                       "iat": now, "exp": now + MFA_PENDING_TTL},
+                      settings.secret_key, algorithm=settings.algorithm)
+
+
+async def _mfa_token_spent(jti: str) -> bool:
+    from api.services.redis_client import get_redis
+    try:
+        return bool(await get_redis().exists(MFA_USED_PREFIX + jti))
+    except Exception:
+        logger.warning("mfa token replay check unavailable (Redis down); allowing")
+        return False
+
+
+async def _mfa_attempt_allowed(jti: str) -> bool:
+    """At most MFA_MAX_ATTEMPTS codes per pending token, whatever the lockout state."""
+    from api.services.redis_client import get_redis
+    try:
+        r = get_redis()
+        count = await r.incr(MFA_ATTEMPTS_PREFIX + jti)
+        if count == 1:
+            await r.expire(MFA_ATTEMPTS_PREFIX + jti, int(MFA_PENDING_TTL.total_seconds()))
+        return count <= MFA_MAX_ATTEMPTS
+    except Exception:
+        logger.warning("mfa attempt counter unavailable (Redis down); allowing")
+        return True
+
+
+async def _mark_mfa_token_spent(jti: str, exp_ts: int) -> None:
+    from api.services.redis_client import get_redis
+    import time as _time
+    try:
+        await get_redis().setex(MFA_USED_PREFIX + jti, max(int(exp_ts - _time.time()), 1), "1")
+    except Exception:
+        logger.warning("could not record spent mfa token (Redis down)")
+
+
+@router.post("/login/mfa", response_model=TokenResponse)
+@limiter.limit("5/minute")
+async def login_mfa(request: Request, response: Response, payload: MfaLoginRequest,
+                    background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Second step of sign-in for an account with two-factor authentication on:
+    the `mfa_token` from the 202 answer of /login plus either a six-digit
+    authenticator `code` or one of the account's `recovery_code`s. Answers the
+    same body and cookies as /login. The token is single-use, lives five
+    minutes, allows five attempts and dies if the password changes; a wrong
+    code counts towards the account lockout exactly like a wrong password."""
+    start_again = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Invalid or expired sign-in. Start again from the login page.",
+                                headers={"WWW-Authenticate": "Bearer"})
+    try:
+        decoded = jwt.decode(payload.mfa_token, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
+        raise start_again
+    if decoded.get("type") != "mfa_pending" or not decoded.get("sub") or not decoded.get("jti"):
+        raise start_again
+    try:
+        user_id = UUID(decoded["sub"])
+    except (ValueError, TypeError):
+        raise start_again
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or decoded.get("pv") != _password_version(user.password_hash):
+        raise start_again
+    if user.suspended:
+        raise HTTPException(status_code=403, detail="Account suspended — contact support")
+    if not await twofactor.is_enabled(db, user.id):
+        raise start_again
+    locked_for = await is_locked_out(user.email)
+    if locked_for:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Account locked after repeated failed logins. Try again in {locked_for // 60 + 1} minutes.",
+            headers={"Retry-After": str(locked_for)},
+        )
+    jti = decoded["jti"]
+    if await _mfa_token_spent(jti) or not await _mfa_attempt_allowed(jti):
+        raise start_again
+    verdict = await twofactor.check_second_factor(db, user, code=payload.code, recovery_code=payload.recovery_code)
+    if not verdict.ok:
+        logger.warning("mfa_code_rejected", extra={"user_id": str(user.id)})
+        await register_failed_login(user.email)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="That code was not accepted. Check the time on your phone and enter the current code.",
+                            headers={"WWW-Authenticate": "Bearer"})
+    await clear_failed_logins(user.email)
+    await _mark_mfa_token_spent(jti, int(decoded.get("exp", 0)))
+    if verdict.used_recovery_code:
+        logger.info("mfa_recovery_code_used", extra={"user_id": str(user.id),
+                                                     "remaining": verdict.recovery_codes_remaining})
+        from api.routes.twofactor import send_two_factor_notice
+        background.add_task(send_two_factor_notice, user.email, "recovery_code_used",
+                            when=datetime.now(timezone.utc), ip=_client_ip(request),
+                            remaining=verdict.recovery_codes_remaining)
+    return _start_session(response, str(user.id))
+
+
+@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+@limiter.limit("5/minute", key_func=user_or_ip_key)
+async def logout_all(request: Request, response: Response, current_user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    """Sign out everywhere: every access and refresh token issued before now
+    stops working, including the one making this request, and the session
+    cookies are cleared. Needs a valid bearer token and no CSRF header: a
+    cross-site page cannot forge the Authorization header."""
+    current_user.sessions_revoked_at = datetime.now(timezone.utc)
+    await db.commit()
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if raw:
+        try:
+            claims = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
+        except JWTError:
+            claims = None
+        if claims and claims.get("type") == "refresh" and claims.get("jti"):
+            try:
+                await _revoke(claims["jti"], int(claims.get("exp", 0)))
+            except Exception:
+                logger.warning("refresh token not revoked in Redis (down); sessions_revoked_at still refuses it")
+            await _drop_grace(claims.get("prv"))
+            await _drop_grace(claims["jti"])
+    logger.info("sessions_revoked", extra={"user_id": str(current_user.id)})
+    out = Response(status_code=status.HTTP_204_NO_CONTENT)
+    clear_session_cookies(out)
+    return out
 
 
 @router.post("/verify", response_model=VerifyResponse)
@@ -486,9 +659,10 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
     user = result.scalar_one_or_none()
     if user is None:
         return dead("user no longer exists")
-    if user.password_changed_at is not None and decoded.get("iat") is not None:
+    cutoff = token_cutoff(user)   # the last password change or "sign out everywhere", whichever is later
+    if cutoff is not None and decoded.get("iat") is not None:
         issued = datetime.fromtimestamp(decoded["iat"], tz=timezone.utc)
-        if issued < user.password_changed_at:
+        if issued < cutoff:
             await _drop_grace(jti)   # nothing minted for this token may survive the change either
             return dead("refresh token issued before the password was changed")
 
@@ -501,7 +675,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         cached = await _load_grace(decoded.get("prv")) if decoded.get("prv") else None
         if (cached and cached.get("prev_csrf") and secrets.compare_digest(cached["prev_csrf"], header)
                 and cached.get("refresh_jti") == jti
-                and not (user.password_changed_at is not None and cached["issued_at"] < user.password_changed_at.timestamp())):
+                and not (cutoff is not None and cached["issued_at"] < cutoff.timestamp())):
             logger.info("refresh served from the rotation grace window (previous CSRF value)")
             return _resume_session(response, cached)
         raise _csrf_failed(request, csrf_reason)
@@ -512,7 +686,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
             cached = await _wait_for_grace(jti)
             if cached is None:
                 return dead("refresh token revoked (logout or rotation)")
-            if user.password_changed_at is not None and cached["issued_at"] < user.password_changed_at.timestamp():
+            if cutoff is not None and cached["issued_at"] < cutoff.timestamp():
                 await _drop_grace(jti)
                 return dead("refresh token issued before the password was changed")
             if cached.get("refresh_jti") and await _is_revoked(cached["refresh_jti"]):

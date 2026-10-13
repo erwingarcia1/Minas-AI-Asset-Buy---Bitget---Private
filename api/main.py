@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 OPENAPI_TAGS = [
     {"name": "auth", "description": "Registration, login, JWT lifecycle (refresh, logout, password change)."},
+    {"name": "security", "description": "Two-factor authentication (TOTP with recovery codes) and sign out everywhere."},
     {"name": "user", "description": "Profile management. `kyc_status` is read-only here — it is owned by the KYC flow."},
     {"name": "kyc", "description": "Sumsub identity verification: widget token, status sync, review webhook."},
     {"name": "exchange", "description": "Exchange API keys: encrypted at rest, masked on read, verified against Binance."},
@@ -190,6 +191,9 @@ from api.routes import auth, dashboard, exchange, transactions, user, public
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(public.router, prefix="/api/public", tags=["public"])
+from api.routes import twofactor
+# Before the user router: its GET /api/user/{user_id} would otherwise capture /api/user/2fa.
+app.include_router(twofactor.router, prefix="/api/user/2fa", tags=["security"])
 app.include_router(user.router, prefix="/api/user", tags=["user"])
 app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])

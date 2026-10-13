@@ -14,6 +14,9 @@ pwd_context = CryptContext(
     argon2__parallelism=1,
 )
 
+# A sign-in that passed the password but still owes a second factor lives this long.
+MFA_PENDING_TTL = timedelta(minutes=5)
+
 # Token schemas
 class Token(BaseModel):
     access_token: str
@@ -66,8 +69,17 @@ def verify_token(token: str) -> Optional[TokenData]:
             algorithms=[settings.algorithm]
         )
         user_id: str = payload.get("sub")
-        if user_id is None:
-            return None
+        if user_id is None or payload.get("type") == "mfa_pending":
+            return None   # a sign-in that still owes its second factor identifies nobody yet
         return TokenData(user_id=user_id)
     except JWTError:
         return None
+
+
+def token_cutoff(user) -> Optional[datetime]:
+    """Tokens issued before this instant are dead: the later of the last
+    password change and the last "sign out everywhere" (sessions_revoked_at,
+    migration 029). None when neither has happened."""
+    stamps = [t for t in (getattr(user, "password_changed_at", None), getattr(user, "sessions_revoked_at", None))
+              if t is not None]
+    return max(stamps) if stamps else None

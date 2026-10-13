@@ -1,4 +1,4 @@
-"""Re-encrypt all stored exchange API keys under a new ENCRYPTION_KEY.
+"""Re-encrypt every stored secret (exchange API keys, TOTP secrets) under a new ENCRYPTION_KEY.
 
 Usage:
     OLD_ENCRYPTION_KEY=<previous key material> ENCRYPTION_KEY=<new key material> \
@@ -44,6 +44,11 @@ def main() -> None:
                  "k": new_f.encrypt(old_f.decrypt(row.encrypted_api_key.encode())).decode(),
                  "s": new_f.encrypt(old_f.decrypt(row.encrypted_api_secret.encode())).decode()})
         print(f"re-encrypted {len(rows)} api_keys row(s)")
+        totp_rows = conn.execute(text("SELECT user_id, encrypted_secret FROM user_totp")).all()
+        for row in totp_rows:
+            conn.execute(text("UPDATE user_totp SET encrypted_secret=:s WHERE user_id=:id"),
+                         {"id": row.user_id, "s": new_f.encrypt(old_f.decrypt(row.encrypted_secret.encode())).decode()})
+        print(f"re-encrypted {len(totp_rows)} user_totp row(s)")
 
 
 if __name__ == "__main__":

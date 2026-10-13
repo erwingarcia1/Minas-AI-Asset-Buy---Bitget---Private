@@ -26,6 +26,9 @@ class User(Base):
     device_token = Column(String(255), nullable=True)         # FCM registration token
     notification_preferences = Column(String(500), nullable=True)  # JSON blob
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    # "Sign out everywhere": tokens issued before this are refused (migration 029).
+    # Kept apart from password_changed_at, whose email and wallet hold are tied to a password change.
+    sessions_revoked_at = Column(DateTime(timezone=True), nullable=True)
     # 24h hold on new withdrawal destinations after a password reset/change (migration 022)
     wallet_hold_until = Column(DateTime(timezone=True), nullable=True)
     wallet_hold_reason = Column(String(40), nullable=True)   # password_reset | password_change
@@ -102,3 +105,5 @@ class WebhookEndpoint(Base):
 # Auto-Buy purchases (wallets, purchases, purchase_transactions) live in their
 # own module; importing them here registers the tables on Base.metadata.
 from .purchase import Purchase, PurchaseTransaction, Wallet  # noqa: E402,F401
+# Two-factor authentication tables (migration 029).
+from .security import UserTotp, UserTotpRecoveryCode  # noqa: E402,F401

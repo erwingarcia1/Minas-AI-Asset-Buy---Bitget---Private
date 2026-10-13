@@ -37,6 +37,7 @@ ADMIN_ROUTES = [
     ("delete", "/api/admin/users/{uid}?confirm=x@example.com"),
     ("post", "/api/admin/users/{uid}/kyc-override"),
     ("post", "/api/admin/users/{uid}/lift-wallet-hold"),
+    ("post", "/api/admin/users/{uid}/2fa/reset"),
     ("get", "/api/admin/transactions"),
     ("post", "/api/admin/purchases/{uid}/force-retry"),
     ("get", "/api/admin/alerts"),
