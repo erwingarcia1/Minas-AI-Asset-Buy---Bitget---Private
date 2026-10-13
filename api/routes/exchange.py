@@ -1,11 +1,8 @@
 """Exchange API key management with Fernet encryption at rest."""
-import base64
-import hashlib
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
@@ -27,37 +24,23 @@ SUPPORTED_EXCHANGES = {"binance", "bitget"}   # Bybit/OKX removed 2026-09-22 (au
 
 
 # --------------------------------------------------------------------------
-# Encryption helpers
+# Encryption helpers: the cipher lives in api/services/crypto.py (v0.9.0) so
+# services and the Guardian worker can use it without importing this router.
+# The names stay importable from here; only decrypt_value differs, turning a
+# wrong key into an HTTP 500 instead of cryptography's InvalidToken.
 # --------------------------------------------------------------------------
-
-def _fernet() -> Fernet:
-    """Fernet keyed off ENCRYPTION_KEY (falling back to SECRET_KEY in dev),
-    sha256-derived to a urlsafe-b64 32-byte key."""
-    material = settings.encryption_key or settings.secret_key
-    digest = hashlib.sha256(material.encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(digest))
-
-
-def encrypt_value(value: str) -> str:
-    """Encrypt a secret for storage."""
-    return _fernet().encrypt(value.encode()).decode()
+from api.services.crypto import InvalidToken, _fernet, encrypt_value, mask_api_key  # noqa: E402,F401
+from api.services.crypto import decrypt_value as _decrypt_raw  # noqa: E402
 
 
 def decrypt_value(token: str) -> str:
     """Decrypt a stored secret."""
     try:
-        return _fernet().decrypt(token.encode()).decode()
+        return _decrypt_raw(token)
     except InvalidToken:
         raise HTTPException(
             status_code=500, detail="Stored API key cannot be decrypted"
         )
-
-
-def mask_api_key(value: str) -> str:
-    """Show only the first 4 and last 4 characters of a key."""
-    if len(value) <= 8:
-        return "*" * len(value)
-    return f"{value[:4]}...{value[-4:]}"
 
 
 # --------------------------------------------------------------------------
