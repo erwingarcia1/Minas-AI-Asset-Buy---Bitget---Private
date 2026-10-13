@@ -16,12 +16,16 @@ from .types import (
     ChangePasswordRequest,
     CoinMarketOut,
     ComparisonResponse,
+    ConfirmRequest,
     CreateApplicantRequest,
     CreateApplicantResponse,
     DashboardResponse,
     DestinationCheckOut,
+    DisableRequest,
     EmailOutboxView,
     EmailSentResponse,
+    EnrolRequest,
+    EnrolResponse,
     FillDeviation,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -32,6 +36,7 @@ from .types import (
     KycOverride,
     LiftWalletHold,
     LoginRequest,
+    MfaLoginRequest,
     PerformanceResponse,
     PlatformStats,
     PortfolioSeriesResponse,
@@ -46,7 +51,9 @@ from .types import (
     PurchaseReview,
     PurchaseUpdateRequest,
     QuickStats,
+    RecoveryCodesResponse,
     RecurringResponse,
+    RegenerateRequest,
     RegisterRequest,
     ResetPasswordRequest,
     ResetTokenRequest,
@@ -63,6 +70,7 @@ from .types import (
     TransactionOut,
     TransactionResponse,
     TransactionStats,
+    TwoFactorStatus,
     UnsuspendPayload,
     UserOut,
     UserProfile,
@@ -84,13 +92,13 @@ class SystemApi:
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
 
-    def root(self) -> Any:
-        """Root — ``GET /``."""
-        return self._http.request("GET", "/", auth=False)
-
     def health_check(self) -> Any:
         """Health Check — ``GET /health``."""
         return self._http.request("GET", "/health", auth=False)
+
+    def root(self) -> Any:
+        """Root — ``GET /``."""
+        return self._http.request("GET", "/", auth=False)
 
 
 class AsyncSystemApi:
@@ -99,217 +107,13 @@ class AsyncSystemApi:
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
-    async def root(self) -> Any:
-        """Root — ``GET /``."""
-        return await self._http.request("GET", "/", auth=False)
-
     async def health_check(self) -> Any:
         """Health Check — ``GET /health``."""
         return await self._http.request("GET", "/health", auth=False)
 
-
-class AdminApi:
-    """`admin` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def alerts(self) -> List[AlertItem]:
-        """Alerts — ``GET /api/admin/alerts``."""
-        return self._http.request("GET", "/api/admin/alerts", auth=True)
-
-    def undelivered_emails(self, *, limit: Optional[int] = None) -> EmailOutboxView:
-        """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
-        return self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
-
-    def fill_deviations(self, *, limit: Optional[int] = None) -> List[FillDeviation]:
-        """Fill Deviations — ``GET /api/admin/fills/deviations``."""
-        return self._http.request("GET", "/api/admin/fills/deviations", auth=True, query={"limit": limit})
-
-    def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
-        """List Purchases — ``GET /api/admin/purchases``."""
-        return self._http.request("GET", "/api/admin/purchases", auth=True, query={"status": status, "limit": limit, "offset": offset})
-
-    def force_retry(self, purchase_id: str) -> Any:
-        """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
-        return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
-
-    def resolve_purchase(self, purchase_id: str, body: ResolvePurchase) -> AdminPurchaseRow:
-        """Resolve Purchase — ``POST /api/admin/purchases/{purchase_id}/resolve``."""
-        return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/resolve", auth=True, body=body)
-
-    def review_purchase(self, purchase_id: str) -> PurchaseReview:
-        """Review Purchase — ``GET /api/admin/purchases/{purchase_id}/review``."""
-        return self._http.request("GET", "/api/admin/purchases/" + _q(purchase_id) + "/review", auth=True)
-
-    def pause_scheduler(self) -> Any:
-        """Pause Scheduler — ``POST /api/admin/scheduler/pause``."""
-        return self._http.request("POST", "/api/admin/scheduler/pause", auth=True)
-
-    def resume_scheduler(self) -> Any:
-        """Resume Scheduler — ``POST /api/admin/scheduler/resume``."""
-        return self._http.request("POST", "/api/admin/scheduler/resume", auth=True)
-
-    def platform_stats(self) -> PlatformStats:
-        """Platform Stats — ``GET /api/admin/stats``."""
-        return self._http.request("GET", "/api/admin/stats", auth=True)
-
-    def telegram_test(self) -> TelegramTestResult:
-        """Telegram Test — ``POST /api/admin/telegram/test``."""
-        return self._http.request("POST", "/api/admin/telegram/test", auth=True)
-
-    def all_transactions(self, *, status_filter: Optional[str] = None, user_id: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminTransactionList:
-        """All Transactions — ``GET /api/admin/transactions``."""
-        return self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
-
-    def list_users(self, *, q: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminUserList:
-        """List Users — ``GET /api/admin/users``."""
-        return self._http.request("GET", "/api/admin/users", auth=True, query={"q": q, "limit": limit, "offset": offset})
-
-    def delete_user(self, user_id: str, *, confirm: str) -> Any:
-        """Delete User — ``DELETE /api/admin/users/{user_id}``."""
-        return self._http.request("DELETE", "/api/admin/users/" + _q(user_id), auth=True, query={"confirm": confirm})
-
-    def kyc_override(self, user_id: str, body: KycOverride) -> Any:
-        """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
-        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
-
-    def lift_wallet_hold(self, user_id: str, body: LiftWalletHold) -> Any:
-        """Lift Wallet Hold — ``POST /api/admin/users/{user_id}/lift-wallet-hold``."""
-        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/lift-wallet-hold", auth=True, body=body)
-
-    def suspend_user(self, user_id: str) -> Any:
-        """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""
-        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/suspend", auth=True)
-
-    def unsuspend_user(self, user_id: str, body: Optional[UnsuspendPayload] = None) -> Any:
-        """Unsuspend User — ``POST /api/admin/users/{user_id}/unsuspend``."""
-        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True, body=body)
-
-
-class AsyncAdminApi:
-    """`admin` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def alerts(self) -> List[AlertItem]:
-        """Alerts — ``GET /api/admin/alerts``."""
-        return await self._http.request("GET", "/api/admin/alerts", auth=True)
-
-    async def undelivered_emails(self, *, limit: Optional[int] = None) -> EmailOutboxView:
-        """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
-        return await self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
-
-    async def fill_deviations(self, *, limit: Optional[int] = None) -> List[FillDeviation]:
-        """Fill Deviations — ``GET /api/admin/fills/deviations``."""
-        return await self._http.request("GET", "/api/admin/fills/deviations", auth=True, query={"limit": limit})
-
-    async def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
-        """List Purchases — ``GET /api/admin/purchases``."""
-        return await self._http.request("GET", "/api/admin/purchases", auth=True, query={"status": status, "limit": limit, "offset": offset})
-
-    async def force_retry(self, purchase_id: str) -> Any:
-        """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
-        return await self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
-
-    async def resolve_purchase(self, purchase_id: str, body: ResolvePurchase) -> AdminPurchaseRow:
-        """Resolve Purchase — ``POST /api/admin/purchases/{purchase_id}/resolve``."""
-        return await self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/resolve", auth=True, body=body)
-
-    async def review_purchase(self, purchase_id: str) -> PurchaseReview:
-        """Review Purchase — ``GET /api/admin/purchases/{purchase_id}/review``."""
-        return await self._http.request("GET", "/api/admin/purchases/" + _q(purchase_id) + "/review", auth=True)
-
-    async def pause_scheduler(self) -> Any:
-        """Pause Scheduler — ``POST /api/admin/scheduler/pause``."""
-        return await self._http.request("POST", "/api/admin/scheduler/pause", auth=True)
-
-    async def resume_scheduler(self) -> Any:
-        """Resume Scheduler — ``POST /api/admin/scheduler/resume``."""
-        return await self._http.request("POST", "/api/admin/scheduler/resume", auth=True)
-
-    async def platform_stats(self) -> PlatformStats:
-        """Platform Stats — ``GET /api/admin/stats``."""
-        return await self._http.request("GET", "/api/admin/stats", auth=True)
-
-    async def telegram_test(self) -> TelegramTestResult:
-        """Telegram Test — ``POST /api/admin/telegram/test``."""
-        return await self._http.request("POST", "/api/admin/telegram/test", auth=True)
-
-    async def all_transactions(self, *, status_filter: Optional[str] = None, user_id: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminTransactionList:
-        """All Transactions — ``GET /api/admin/transactions``."""
-        return await self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
-
-    async def list_users(self, *, q: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminUserList:
-        """List Users — ``GET /api/admin/users``."""
-        return await self._http.request("GET", "/api/admin/users", auth=True, query={"q": q, "limit": limit, "offset": offset})
-
-    async def delete_user(self, user_id: str, *, confirm: str) -> Any:
-        """Delete User — ``DELETE /api/admin/users/{user_id}``."""
-        return await self._http.request("DELETE", "/api/admin/users/" + _q(user_id), auth=True, query={"confirm": confirm})
-
-    async def kyc_override(self, user_id: str, body: KycOverride) -> Any:
-        """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
-        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
-
-    async def lift_wallet_hold(self, user_id: str, body: LiftWalletHold) -> Any:
-        """Lift Wallet Hold — ``POST /api/admin/users/{user_id}/lift-wallet-hold``."""
-        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/lift-wallet-hold", auth=True, body=body)
-
-    async def suspend_user(self, user_id: str) -> Any:
-        """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""
-        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/suspend", auth=True)
-
-    async def unsuspend_user(self, user_id: str, body: Optional[UnsuspendPayload] = None) -> Any:
-        """Unsuspend User — ``POST /api/admin/users/{user_id}/unsuspend``."""
-        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True, body=body)
-
-
-class AnalyticsApi:
-    """`analytics` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def comparison(self) -> ComparisonResponse:
-        """Comparison — ``GET /api/analytics/comparison``."""
-        return self._http.request("GET", "/api/analytics/comparison", auth=True)
-
-    def performance(self) -> PerformanceResponse:
-        """Performance — ``GET /api/analytics/performance``."""
-        return self._http.request("GET", "/api/analytics/performance", auth=True)
-
-    def recurring(self) -> RecurringResponse:
-        """Recurring — ``GET /api/analytics/recurring``."""
-        return self._http.request("GET", "/api/analytics/recurring", auth=True)
-
-    def volatility(self) -> VolatilityResponse:
-        """Volatility — ``GET /api/analytics/volatility``."""
-        return self._http.request("GET", "/api/analytics/volatility", auth=True)
-
-
-class AsyncAnalyticsApi:
-    """`analytics` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def comparison(self) -> ComparisonResponse:
-        """Comparison — ``GET /api/analytics/comparison``."""
-        return await self._http.request("GET", "/api/analytics/comparison", auth=True)
-
-    async def performance(self) -> PerformanceResponse:
-        """Performance — ``GET /api/analytics/performance``."""
-        return await self._http.request("GET", "/api/analytics/performance", auth=True)
-
-    async def recurring(self) -> RecurringResponse:
-        """Recurring — ``GET /api/analytics/recurring``."""
-        return await self._http.request("GET", "/api/analytics/recurring", auth=True)
-
-    async def volatility(self) -> VolatilityResponse:
-        """Volatility — ``GET /api/analytics/volatility``."""
-        return await self._http.request("GET", "/api/analytics/volatility", auth=True)
+    async def root(self) -> Any:
+        """Root — ``GET /``."""
+        return await self._http.request("GET", "/", auth=False)
 
 
 class AuthApi:
@@ -317,6 +121,34 @@ class AuthApi:
 
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
+
+    def register(self, body: RegisterRequest) -> UserOut:
+        """Register — ``POST /api/auth/register``."""
+        return self._http.request("POST", "/api/auth/register", auth=False, body=body)
+
+    def login(self, body: LoginRequest) -> TokenResponse:
+        """Login — ``POST /api/auth/login``."""
+        return self._http.request("POST", "/api/auth/login", auth=False, body=body)
+
+    def login_mfa(self, body: MfaLoginRequest) -> TokenResponse:
+        """Login Mfa — ``POST /api/auth/login/mfa``."""
+        return self._http.request("POST", "/api/auth/login/mfa", auth=False, body=body)
+
+    def logout_all(self) -> Any:
+        """Logout All — ``POST /api/auth/logout-all``."""
+        return self._http.request("POST", "/api/auth/logout-all", auth=True)
+
+    def verify(self, body: VerifyRequest) -> VerifyResponse:
+        """Verify — ``POST /api/auth/verify``."""
+        return self._http.request("POST", "/api/auth/verify", auth=False, body=body)
+
+    def refresh(self) -> TokenResponse:
+        """Refresh — ``POST /api/auth/refresh``."""
+        return self._http.request("POST", "/api/auth/refresh", auth=False)
+
+    def logout(self) -> Any:
+        """Logout — ``POST /api/auth/logout``."""
+        return self._http.request("POST", "/api/auth/logout", auth=False)
 
     def change_password(self, body: ChangePasswordRequest) -> Any:
         """Change Password — ``POST /api/auth/change-password``."""
@@ -326,33 +158,13 @@ class AuthApi:
         """Forgot Password — ``POST /api/auth/forgot-password``."""
         return self._http.request("POST", "/api/auth/forgot-password", auth=False, body=body)
 
-    def login(self, body: LoginRequest) -> TokenResponse:
-        """Login — ``POST /api/auth/login``."""
-        return self._http.request("POST", "/api/auth/login", auth=False, body=body)
-
-    def logout(self) -> Any:
-        """Logout — ``POST /api/auth/logout``."""
-        return self._http.request("POST", "/api/auth/logout", auth=False)
-
-    def refresh(self) -> TokenResponse:
-        """Refresh — ``POST /api/auth/refresh``."""
-        return self._http.request("POST", "/api/auth/refresh", auth=False)
-
-    def register(self, body: RegisterRequest) -> UserOut:
-        """Register — ``POST /api/auth/register``."""
-        return self._http.request("POST", "/api/auth/register", auth=False, body=body)
-
-    def reset_password(self, body: ResetPasswordRequest) -> Any:
-        """Reset Password — ``POST /api/auth/reset-password``."""
-        return self._http.request("POST", "/api/auth/reset-password", auth=False, body=body)
-
     def validate_reset_token(self, body: ResetTokenRequest) -> ResetTokenValidity:
         """Validate Reset Token — ``POST /api/auth/reset-password/validate``."""
         return self._http.request("POST", "/api/auth/reset-password/validate", auth=False, body=body)
 
-    def verify(self, body: VerifyRequest) -> VerifyResponse:
-        """Verify — ``POST /api/auth/verify``."""
-        return self._http.request("POST", "/api/auth/verify", auth=False, body=body)
+    def reset_password(self, body: ResetPasswordRequest) -> Any:
+        """Reset Password — ``POST /api/auth/reset-password``."""
+        return self._http.request("POST", "/api/auth/reset-password", auth=False, body=body)
 
 
 class AsyncAuthApi:
@@ -360,6 +172,34 @@ class AsyncAuthApi:
 
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
+
+    async def register(self, body: RegisterRequest) -> UserOut:
+        """Register — ``POST /api/auth/register``."""
+        return await self._http.request("POST", "/api/auth/register", auth=False, body=body)
+
+    async def login(self, body: LoginRequest) -> TokenResponse:
+        """Login — ``POST /api/auth/login``."""
+        return await self._http.request("POST", "/api/auth/login", auth=False, body=body)
+
+    async def login_mfa(self, body: MfaLoginRequest) -> TokenResponse:
+        """Login Mfa — ``POST /api/auth/login/mfa``."""
+        return await self._http.request("POST", "/api/auth/login/mfa", auth=False, body=body)
+
+    async def logout_all(self) -> Any:
+        """Logout All — ``POST /api/auth/logout-all``."""
+        return await self._http.request("POST", "/api/auth/logout-all", auth=True)
+
+    async def verify(self, body: VerifyRequest) -> VerifyResponse:
+        """Verify — ``POST /api/auth/verify``."""
+        return await self._http.request("POST", "/api/auth/verify", auth=False, body=body)
+
+    async def refresh(self) -> TokenResponse:
+        """Refresh — ``POST /api/auth/refresh``."""
+        return await self._http.request("POST", "/api/auth/refresh", auth=False)
+
+    async def logout(self) -> Any:
+        """Logout — ``POST /api/auth/logout``."""
+        return await self._http.request("POST", "/api/auth/logout", auth=False)
 
     async def change_password(self, body: ChangePasswordRequest) -> Any:
         """Change Password — ``POST /api/auth/change-password``."""
@@ -369,317 +209,13 @@ class AsyncAuthApi:
         """Forgot Password — ``POST /api/auth/forgot-password``."""
         return await self._http.request("POST", "/api/auth/forgot-password", auth=False, body=body)
 
-    async def login(self, body: LoginRequest) -> TokenResponse:
-        """Login — ``POST /api/auth/login``."""
-        return await self._http.request("POST", "/api/auth/login", auth=False, body=body)
-
-    async def logout(self) -> Any:
-        """Logout — ``POST /api/auth/logout``."""
-        return await self._http.request("POST", "/api/auth/logout", auth=False)
-
-    async def refresh(self) -> TokenResponse:
-        """Refresh — ``POST /api/auth/refresh``."""
-        return await self._http.request("POST", "/api/auth/refresh", auth=False)
-
-    async def register(self, body: RegisterRequest) -> UserOut:
-        """Register — ``POST /api/auth/register``."""
-        return await self._http.request("POST", "/api/auth/register", auth=False, body=body)
-
-    async def reset_password(self, body: ResetPasswordRequest) -> Any:
-        """Reset Password — ``POST /api/auth/reset-password``."""
-        return await self._http.request("POST", "/api/auth/reset-password", auth=False, body=body)
-
     async def validate_reset_token(self, body: ResetTokenRequest) -> ResetTokenValidity:
         """Validate Reset Token — ``POST /api/auth/reset-password/validate``."""
         return await self._http.request("POST", "/api/auth/reset-password/validate", auth=False, body=body)
 
-    async def verify(self, body: VerifyRequest) -> VerifyResponse:
-        """Verify — ``POST /api/auth/verify``."""
-        return await self._http.request("POST", "/api/auth/verify", auth=False, body=body)
-
-
-class DashboardApi:
-    """`dashboard` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def dashboard(self) -> DashboardResponse:
-        """Dashboard — ``GET /api/dashboard/``."""
-        return self._http.request("GET", "/api/dashboard/", auth=True)
-
-    def analytics_timeline(self, *, days: Optional[int] = None) -> TimelineResponse:
-        """Analytics Timeline — ``GET /api/dashboard/analytics/timeline``."""
-        return self._http.request("GET", "/api/dashboard/analytics/timeline", auth=True, query={"days": days})
-
-    def portfolio_series(self, *, range: Optional[str] = None) -> PortfolioSeriesResponse:
-        """Portfolio Series — ``GET /api/dashboard/portfolio/series``."""
-        return self._http.request("GET", "/api/dashboard/portfolio/series", auth=True, query={"range": range})
-
-    def quick_stats(self) -> QuickStats:
-        """Quick Stats — ``GET /api/dashboard/stats``."""
-        return self._http.request("GET", "/api/dashboard/stats", auth=True)
-
-
-class AsyncDashboardApi:
-    """`dashboard` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def dashboard(self) -> DashboardResponse:
-        """Dashboard — ``GET /api/dashboard/``."""
-        return await self._http.request("GET", "/api/dashboard/", auth=True)
-
-    async def analytics_timeline(self, *, days: Optional[int] = None) -> TimelineResponse:
-        """Analytics Timeline — ``GET /api/dashboard/analytics/timeline``."""
-        return await self._http.request("GET", "/api/dashboard/analytics/timeline", auth=True, query={"days": days})
-
-    async def portfolio_series(self, *, range: Optional[str] = None) -> PortfolioSeriesResponse:
-        """Portfolio Series — ``GET /api/dashboard/portfolio/series``."""
-        return await self._http.request("GET", "/api/dashboard/portfolio/series", auth=True, query={"range": range})
-
-    async def quick_stats(self) -> QuickStats:
-        """Quick Stats — ``GET /api/dashboard/stats``."""
-        return await self._http.request("GET", "/api/dashboard/stats", auth=True)
-
-
-class EmailApi:
-    """`email` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def send_notification(self, body: SendNotificationRequest) -> EmailSentResponse:
-        """Send Notification — ``POST /api/email/send-notification``."""
-        return self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
-
-    def send_verification(self, body: SendVerificationRequest) -> EmailSentResponse:
-        """Send Verification — ``POST /api/email/send-verification``."""
-        return self._http.request("POST", "/api/email/send-verification", auth=True, body=body)
-
-
-class AsyncEmailApi:
-    """`email` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def send_notification(self, body: SendNotificationRequest) -> EmailSentResponse:
-        """Send Notification — ``POST /api/email/send-notification``."""
-        return await self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
-
-    async def send_verification(self, body: SendVerificationRequest) -> EmailSentResponse:
-        """Send Verification — ``POST /api/email/send-verification``."""
-        return await self._http.request("POST", "/api/email/send-verification", auth=True, body=body)
-
-
-class ExchangeApi:
-    """`exchange` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def list_keys(self) -> List[APIKeyResponse]:
-        """List Keys — ``GET /api/exchange/keys``."""
-        return self._http.request("GET", "/api/exchange/keys", auth=True)
-
-    def add_or_update_key(self, body: APIKeyCreate) -> APIKeyResponse:
-        """Add Or Update Key — ``POST /api/exchange/keys``."""
-        return self._http.request("POST", "/api/exchange/keys", auth=True, body=body)
-
-    def delete_key(self, key_id: str) -> Any:
-        """Delete Key — ``DELETE /api/exchange/keys/{key_id}``."""
-        return self._http.request("DELETE", "/api/exchange/keys/" + _q(key_id), auth=True)
-
-    def verify_key(self, key_id: str) -> KeyVerifyResponse:
-        """Verify Key — ``POST /api/exchange/keys/{key_id}/verify``."""
-        return self._http.request("POST", "/api/exchange/keys/" + _q(key_id) + "/verify", auth=True)
-
-    def supported_exchanges(self) -> List[str]:
-        """Supported Exchanges — ``GET /api/exchange/supported``."""
-        return self._http.request("GET", "/api/exchange/supported", auth=False)
-
-
-class AsyncExchangeApi:
-    """`exchange` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def list_keys(self) -> List[APIKeyResponse]:
-        """List Keys — ``GET /api/exchange/keys``."""
-        return await self._http.request("GET", "/api/exchange/keys", auth=True)
-
-    async def add_or_update_key(self, body: APIKeyCreate) -> APIKeyResponse:
-        """Add Or Update Key — ``POST /api/exchange/keys``."""
-        return await self._http.request("POST", "/api/exchange/keys", auth=True, body=body)
-
-    async def delete_key(self, key_id: str) -> Any:
-        """Delete Key — ``DELETE /api/exchange/keys/{key_id}``."""
-        return await self._http.request("DELETE", "/api/exchange/keys/" + _q(key_id), auth=True)
-
-    async def verify_key(self, key_id: str) -> KeyVerifyResponse:
-        """Verify Key — ``POST /api/exchange/keys/{key_id}/verify``."""
-        return await self._http.request("POST", "/api/exchange/keys/" + _q(key_id) + "/verify", auth=True)
-
-    async def supported_exchanges(self) -> List[str]:
-        """Supported Exchanges — ``GET /api/exchange/supported``."""
-        return await self._http.request("GET", "/api/exchange/supported", auth=False)
-
-
-class IntegrationsApi:
-    """`integrations` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def available(self) -> List[IntegrationInfo]:
-        """Available — ``GET /api/integrations/available``."""
-        return self._http.request("GET", "/api/integrations/available", auth=True)
-
-    def list_webhooks(self) -> List[WebhookRow]:
-        """List Webhooks — ``GET /api/integrations/webhooks``."""
-        return self._http.request("GET", "/api/integrations/webhooks", auth=True)
-
-    def create_webhook(self, body: WebhookCreate) -> WebhookCreated:
-        """Create Webhook — ``POST /api/integrations/webhooks``."""
-        return self._http.request("POST", "/api/integrations/webhooks", auth=True, body=body)
-
-    def delete_webhook(self, webhook_id: str) -> Any:
-        """Delete Webhook — ``DELETE /api/integrations/webhooks/{webhook_id}``."""
-        return self._http.request("DELETE", "/api/integrations/webhooks/" + _q(webhook_id), auth=True)
-
-    def ping_webhook(self, webhook_id: str) -> WebhookRow:
-        """Ping Webhook — ``POST /api/integrations/webhooks/{webhook_id}/ping``."""
-        return self._http.request("POST", "/api/integrations/webhooks/" + _q(webhook_id) + "/ping", auth=True)
-
-
-class AsyncIntegrationsApi:
-    """`integrations` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def available(self) -> List[IntegrationInfo]:
-        """Available — ``GET /api/integrations/available``."""
-        return await self._http.request("GET", "/api/integrations/available", auth=True)
-
-    async def list_webhooks(self) -> List[WebhookRow]:
-        """List Webhooks — ``GET /api/integrations/webhooks``."""
-        return await self._http.request("GET", "/api/integrations/webhooks", auth=True)
-
-    async def create_webhook(self, body: WebhookCreate) -> WebhookCreated:
-        """Create Webhook — ``POST /api/integrations/webhooks``."""
-        return await self._http.request("POST", "/api/integrations/webhooks", auth=True, body=body)
-
-    async def delete_webhook(self, webhook_id: str) -> Any:
-        """Delete Webhook — ``DELETE /api/integrations/webhooks/{webhook_id}``."""
-        return await self._http.request("DELETE", "/api/integrations/webhooks/" + _q(webhook_id), auth=True)
-
-    async def ping_webhook(self, webhook_id: str) -> WebhookRow:
-        """Ping Webhook — ``POST /api/integrations/webhooks/{webhook_id}/ping``."""
-        return await self._http.request("POST", "/api/integrations/webhooks/" + _q(webhook_id) + "/ping", auth=True)
-
-
-class KycApi:
-    """`kyc` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def applicant_status(self, applicant_id: str) -> ApplicantStatusResponse:
-        """Applicant Status — ``GET /api/kyc/applicant/{applicant_id}/status``."""
-        return self._http.request("GET", "/api/kyc/applicant/" + _q(applicant_id) + "/status", auth=True)
-
-    def create_applicant(self, body: CreateApplicantRequest) -> CreateApplicantResponse:
-        """Create Applicant — ``POST /api/kyc/create-applicant``."""
-        return self._http.request("POST", "/api/kyc/create-applicant", auth=True, body=body)
-
-    def initiate_kyc(self) -> InitiateResponse:
-        """Initiate Kyc — ``POST /api/kyc/initiate``."""
-        return self._http.request("POST", "/api/kyc/initiate", auth=True)
-
-    def kyc_status(self, *, sync: Optional[bool] = None) -> StatusResponse:
-        """Kyc Status — ``GET /api/kyc/status``."""
-        return self._http.request("GET", "/api/kyc/status", auth=True, query={"sync": sync})
-
-    def sumsub_webhook(self) -> Any:
-        """Sumsub Webhook — ``POST /api/kyc/webhook``."""
-        return self._http.request("POST", "/api/kyc/webhook", auth=False)
-
-
-class AsyncKycApi:
-    """`kyc` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def applicant_status(self, applicant_id: str) -> ApplicantStatusResponse:
-        """Applicant Status — ``GET /api/kyc/applicant/{applicant_id}/status``."""
-        return await self._http.request("GET", "/api/kyc/applicant/" + _q(applicant_id) + "/status", auth=True)
-
-    async def create_applicant(self, body: CreateApplicantRequest) -> CreateApplicantResponse:
-        """Create Applicant — ``POST /api/kyc/create-applicant``."""
-        return await self._http.request("POST", "/api/kyc/create-applicant", auth=True, body=body)
-
-    async def initiate_kyc(self) -> InitiateResponse:
-        """Initiate Kyc — ``POST /api/kyc/initiate``."""
-        return await self._http.request("POST", "/api/kyc/initiate", auth=True)
-
-    async def kyc_status(self, *, sync: Optional[bool] = None) -> StatusResponse:
-        """Kyc Status — ``GET /api/kyc/status``."""
-        return await self._http.request("GET", "/api/kyc/status", auth=True, query={"sync": sync})
-
-    async def sumsub_webhook(self) -> Any:
-        """Sumsub Webhook — ``POST /api/kyc/webhook``."""
-        return await self._http.request("POST", "/api/kyc/webhook", auth=False)
-
-
-class NotificationsApi:
-    """`notifications` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def history(self, *, limit: Optional[int] = None, offset: Optional[int] = None) -> HistoryResponse:
-        """History — ``GET /api/notifications/history``."""
-        return self._http.request("GET", "/api/notifications/history", auth=True, query={"limit": limit, "offset": offset})
-
-    def get_preferences(self) -> PreferencesResponse:
-        """Get Preferences — ``GET /api/notifications/preferences``."""
-        return self._http.request("GET", "/api/notifications/preferences", auth=True)
-
-    def update_preferences(self, body: PreferencesPayload) -> PreferencesResponse:
-        """Update Preferences — ``PUT /api/notifications/preferences``."""
-        return self._http.request("PUT", "/api/notifications/preferences", auth=True, body=body)
-
-    def send_test(self) -> Any:
-        """Send Test — ``POST /api/notifications/test``."""
-        return self._http.request("POST", "/api/notifications/test", auth=True)
-
-
-class AsyncNotificationsApi:
-    """`notifications` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def history(self, *, limit: Optional[int] = None, offset: Optional[int] = None) -> HistoryResponse:
-        """History — ``GET /api/notifications/history``."""
-        return await self._http.request("GET", "/api/notifications/history", auth=True, query={"limit": limit, "offset": offset})
-
-    async def get_preferences(self) -> PreferencesResponse:
-        """Get Preferences — ``GET /api/notifications/preferences``."""
-        return await self._http.request("GET", "/api/notifications/preferences", auth=True)
-
-    async def update_preferences(self, body: PreferencesPayload) -> PreferencesResponse:
-        """Update Preferences — ``PUT /api/notifications/preferences``."""
-        return await self._http.request("PUT", "/api/notifications/preferences", auth=True, body=body)
-
-    async def send_test(self) -> Any:
-        """Send Test — ``POST /api/notifications/test``."""
-        return await self._http.request("POST", "/api/notifications/test", auth=True)
+    async def reset_password(self, body: ResetPasswordRequest) -> Any:
+        """Reset Password — ``POST /api/auth/reset-password``."""
+        return await self._http.request("POST", "/api/auth/reset-password", auth=False, body=body)
 
 
 class PublicApi:
@@ -704,103 +240,31 @@ class AsyncPublicApi:
         return await self._http.request("GET", "/api/public/meta", auth=False)
 
 
-class ReportsApi:
-    """`reports` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def export_pdf(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
-        """Export Pdf — ``GET /api/reports/export``."""
-        return self._http.request("GET", "/api/reports/export", auth=True, query={"year": year, "format": format})
-
-    def performance(self) -> Any:
-        """Performance — ``GET /api/reports/performance``."""
-        return self._http.request("GET", "/api/reports/performance", auth=True)
-
-    def tax_summary(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
-        """Tax Summary — ``GET /api/reports/tax-summary``."""
-        return self._http.request("GET", "/api/reports/tax-summary", auth=True, query={"year": year, "format": format})
-
-
-class AsyncReportsApi:
-    """`reports` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def export_pdf(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
-        """Export Pdf — ``GET /api/reports/export``."""
-        return await self._http.request("GET", "/api/reports/export", auth=True, query={"year": year, "format": format})
-
-    async def performance(self) -> Any:
-        """Performance — ``GET /api/reports/performance``."""
-        return await self._http.request("GET", "/api/reports/performance", auth=True)
-
-    async def tax_summary(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
-        """Tax Summary — ``GET /api/reports/tax-summary``."""
-        return await self._http.request("GET", "/api/reports/tax-summary", auth=True, query={"year": year, "format": format})
-
-
-class TransactionsApi:
-    """`transactions` endpoints."""
-
-    def __init__(self, http: SyncTransport) -> None:
-        self._http = http
-
-    def list_transactions(self, *, limit: Optional[int] = None, offset: Optional[int] = None, status_filter: Optional[str] = None) -> TransactionListResponse:
-        """List Transactions — ``GET /api/transactions/``."""
-        return self._http.request("GET", "/api/transactions/", auth=True, query={"limit": limit, "offset": offset, "status_filter": status_filter})
-
-    def transactions_by_crypto(self, crypto: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
-        """Transactions By Crypto — ``GET /api/transactions/crypto/{crypto}``."""
-        return self._http.request("GET", "/api/transactions/crypto/" + _q(crypto), auth=True, query={"limit": limit, "offset": offset})
-
-    def transaction_stats(self) -> TransactionStats:
-        """Transaction Stats — ``GET /api/transactions/stats/summary``."""
-        return self._http.request("GET", "/api/transactions/stats/summary", auth=True)
-
-    def transactions_by_status(self, tx_status: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
-        """Transactions By Status — ``GET /api/transactions/status/{tx_status}``."""
-        return self._http.request("GET", "/api/transactions/status/" + _q(tx_status), auth=True, query={"limit": limit, "offset": offset})
-
-    def get_transaction(self, transaction_id: str) -> TransactionResponse:
-        """Get Transaction — ``GET /api/transactions/{transaction_id}``."""
-        return self._http.request("GET", "/api/transactions/" + _q(transaction_id), auth=True)
-
-
-class AsyncTransactionsApi:
-    """`transactions` endpoints (async)."""
-
-    def __init__(self, http: AsyncTransport) -> None:
-        self._http = http
-
-    async def list_transactions(self, *, limit: Optional[int] = None, offset: Optional[int] = None, status_filter: Optional[str] = None) -> TransactionListResponse:
-        """List Transactions — ``GET /api/transactions/``."""
-        return await self._http.request("GET", "/api/transactions/", auth=True, query={"limit": limit, "offset": offset, "status_filter": status_filter})
-
-    async def transactions_by_crypto(self, crypto: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
-        """Transactions By Crypto — ``GET /api/transactions/crypto/{crypto}``."""
-        return await self._http.request("GET", "/api/transactions/crypto/" + _q(crypto), auth=True, query={"limit": limit, "offset": offset})
-
-    async def transaction_stats(self) -> TransactionStats:
-        """Transaction Stats — ``GET /api/transactions/stats/summary``."""
-        return await self._http.request("GET", "/api/transactions/stats/summary", auth=True)
-
-    async def transactions_by_status(self, tx_status: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
-        """Transactions By Status — ``GET /api/transactions/status/{tx_status}``."""
-        return await self._http.request("GET", "/api/transactions/status/" + _q(tx_status), auth=True, query={"limit": limit, "offset": offset})
-
-    async def get_transaction(self, transaction_id: str) -> TransactionResponse:
-        """Get Transaction — ``GET /api/transactions/{transaction_id}``."""
-        return await self._http.request("GET", "/api/transactions/" + _q(transaction_id), auth=True)
-
-
 class UserApi:
     """`user` endpoints."""
 
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
+
+    def two_factor_status(self) -> TwoFactorStatus:
+        """Two Factor Status — ``GET /api/user/2fa``."""
+        return self._http.request("GET", "/api/user/2fa", auth=True)
+
+    def enrol(self, body: EnrolRequest) -> EnrolResponse:
+        """Enrol — ``POST /api/user/2fa/enrol``."""
+        return self._http.request("POST", "/api/user/2fa/enrol", auth=True, body=body)
+
+    def confirm(self, body: ConfirmRequest) -> RecoveryCodesResponse:
+        """Confirm — ``POST /api/user/2fa/confirm``."""
+        return self._http.request("POST", "/api/user/2fa/confirm", auth=True, body=body)
+
+    def regenerate_recovery_codes(self, body: RegenerateRequest) -> RecoveryCodesResponse:
+        """Regenerate Recovery Codes — ``POST /api/user/2fa/recovery-codes``."""
+        return self._http.request("POST", "/api/user/2fa/recovery-codes", auth=True, body=body)
+
+    def disable(self, body: DisableRequest) -> Any:
+        """Disable — ``POST /api/user/2fa/disable``."""
+        return self._http.request("POST", "/api/user/2fa/disable", auth=True, body=body)
 
     def get_profile(self) -> UserProfile:
         """Get Profile — ``GET /api/user/profile``."""
@@ -821,6 +285,26 @@ class AsyncUserApi:
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
+    async def two_factor_status(self) -> TwoFactorStatus:
+        """Two Factor Status — ``GET /api/user/2fa``."""
+        return await self._http.request("GET", "/api/user/2fa", auth=True)
+
+    async def enrol(self, body: EnrolRequest) -> EnrolResponse:
+        """Enrol — ``POST /api/user/2fa/enrol``."""
+        return await self._http.request("POST", "/api/user/2fa/enrol", auth=True, body=body)
+
+    async def confirm(self, body: ConfirmRequest) -> RecoveryCodesResponse:
+        """Confirm — ``POST /api/user/2fa/confirm``."""
+        return await self._http.request("POST", "/api/user/2fa/confirm", auth=True, body=body)
+
+    async def regenerate_recovery_codes(self, body: RegenerateRequest) -> RecoveryCodesResponse:
+        """Regenerate Recovery Codes — ``POST /api/user/2fa/recovery-codes``."""
+        return await self._http.request("POST", "/api/user/2fa/recovery-codes", auth=True, body=body)
+
+    async def disable(self, body: DisableRequest) -> Any:
+        """Disable — ``POST /api/user/2fa/disable``."""
+        return await self._http.request("POST", "/api/user/2fa/disable", auth=True, body=body)
+
     async def get_profile(self) -> UserProfile:
         """Get Profile — ``GET /api/user/profile``."""
         return await self._http.request("GET", "/api/user/profile", auth=True)
@@ -834,128 +318,562 @@ class AsyncUserApi:
         return await self._http.request("GET", "/api/user/" + _q(user_id), auth=True)
 
 
-class V2Api:
-    """`v2` endpoints."""
+class ExchangeApi:
+    """`exchange` endpoints."""
 
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
 
-    def coin_market(self, coin: str, *, amount_usd: Optional[float] = None) -> CoinMarketOut:
-        """Coin Market — ``GET /api/v2/market/coins/{coin}``."""
-        return self._http.request("GET", "/api/v2/market/coins/" + _q(coin), auth=True, query={"amount_usd": amount_usd})
+    def supported_exchanges(self) -> List[str]:
+        """Supported Exchanges — ``GET /api/exchange/supported``."""
+        return self._http.request("GET", "/api/exchange/supported", auth=False)
 
-    def check_withdrawal_destination(self, *, chain: str, address: str, destination_type: Optional[str] = None, memo: Optional[str] = None) -> DestinationCheckOut:
-        """Check Withdrawal Destination — ``GET /api/v2/market/destination``."""
-        return self._http.request("GET", "/api/v2/market/destination", auth=True, query={"chain": chain, "address": address, "destination_type": destination_type, "memo": memo})
+    def list_keys(self) -> List[APIKeyResponse]:
+        """List Keys — ``GET /api/exchange/keys``."""
+        return self._http.request("GET", "/api/exchange/keys", auth=True)
 
-    def list_purchases(self) -> List[PurchaseOut]:
-        """List Purchases — ``GET /api/v2/purchases``."""
-        return self._http.request("GET", "/api/v2/purchases", auth=True)
+    def add_or_update_key(self, body: APIKeyCreate) -> APIKeyResponse:
+        """Add Or Update Key — ``POST /api/exchange/keys``."""
+        return self._http.request("POST", "/api/exchange/keys", auth=True, body=body)
 
-    def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
-        """Create Purchase — ``POST /api/v2/purchases``."""
-        return self._http.request("POST", "/api/v2/purchases", auth=True, body=body)
+    def verify_key(self, key_id: str) -> KeyVerifyResponse:
+        """Verify Key — ``POST /api/exchange/keys/{key_id}/verify``."""
+        return self._http.request("POST", "/api/exchange/keys/" + _q(key_id) + "/verify", auth=True)
 
-    def cancel_purchase(self, purchase_id: str) -> Any:
-        """Cancel Purchase — ``DELETE /api/v2/purchases/{purchase_id}``."""
-        return self._http.request("DELETE", "/api/v2/purchases/" + _q(purchase_id), auth=True)
-
-    def get_purchase(self, purchase_id: str) -> PurchaseDetailOut:
-        """Get Purchase — ``GET /api/v2/purchases/{purchase_id}``."""
-        return self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id), auth=True)
-
-    def update_purchase(self, purchase_id: str, body: PurchaseUpdateRequest) -> PurchaseOut:
-        """Update Purchase — ``PUT /api/v2/purchases/{purchase_id}``."""
-        return self._http.request("PUT", "/api/v2/purchases/" + _q(purchase_id), auth=True, body=body)
-
-    def retry_withdrawal(self, purchase_id: str) -> RetryWithdrawalOut:
-        """Retry Withdrawal — ``POST /api/v2/purchases/{purchase_id}/retry-withdrawal``."""
-        return self._http.request("POST", "/api/v2/purchases/" + _q(purchase_id) + "/retry-withdrawal", auth=True)
-
-    def purchase_transactions(self, purchase_id: str, *, status_filter: Optional[str] = None) -> List[TransactionOut]:
-        """Purchase Transactions — ``GET /api/v2/purchases/{purchase_id}/transactions``."""
-        return self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id) + "/transactions", auth=True, query={"status_filter": status_filter})
+    def delete_key(self, key_id: str) -> Any:
+        """Delete Key — ``DELETE /api/exchange/keys/{key_id}``."""
+        return self._http.request("DELETE", "/api/exchange/keys/" + _q(key_id), auth=True)
 
 
-class AsyncV2Api:
-    """`v2` endpoints (async)."""
+class AsyncExchangeApi:
+    """`exchange` endpoints (async)."""
 
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
-    async def coin_market(self, coin: str, *, amount_usd: Optional[float] = None) -> CoinMarketOut:
-        """Coin Market — ``GET /api/v2/market/coins/{coin}``."""
-        return await self._http.request("GET", "/api/v2/market/coins/" + _q(coin), auth=True, query={"amount_usd": amount_usd})
+    async def supported_exchanges(self) -> List[str]:
+        """Supported Exchanges — ``GET /api/exchange/supported``."""
+        return await self._http.request("GET", "/api/exchange/supported", auth=False)
 
-    async def check_withdrawal_destination(self, *, chain: str, address: str, destination_type: Optional[str] = None, memo: Optional[str] = None) -> DestinationCheckOut:
-        """Check Withdrawal Destination — ``GET /api/v2/market/destination``."""
-        return await self._http.request("GET", "/api/v2/market/destination", auth=True, query={"chain": chain, "address": address, "destination_type": destination_type, "memo": memo})
+    async def list_keys(self) -> List[APIKeyResponse]:
+        """List Keys — ``GET /api/exchange/keys``."""
+        return await self._http.request("GET", "/api/exchange/keys", auth=True)
 
-    async def list_purchases(self) -> List[PurchaseOut]:
-        """List Purchases — ``GET /api/v2/purchases``."""
-        return await self._http.request("GET", "/api/v2/purchases", auth=True)
+    async def add_or_update_key(self, body: APIKeyCreate) -> APIKeyResponse:
+        """Add Or Update Key — ``POST /api/exchange/keys``."""
+        return await self._http.request("POST", "/api/exchange/keys", auth=True, body=body)
 
-    async def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
-        """Create Purchase — ``POST /api/v2/purchases``."""
-        return await self._http.request("POST", "/api/v2/purchases", auth=True, body=body)
+    async def verify_key(self, key_id: str) -> KeyVerifyResponse:
+        """Verify Key — ``POST /api/exchange/keys/{key_id}/verify``."""
+        return await self._http.request("POST", "/api/exchange/keys/" + _q(key_id) + "/verify", auth=True)
 
-    async def cancel_purchase(self, purchase_id: str) -> Any:
-        """Cancel Purchase — ``DELETE /api/v2/purchases/{purchase_id}``."""
-        return await self._http.request("DELETE", "/api/v2/purchases/" + _q(purchase_id), auth=True)
-
-    async def get_purchase(self, purchase_id: str) -> PurchaseDetailOut:
-        """Get Purchase — ``GET /api/v2/purchases/{purchase_id}``."""
-        return await self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id), auth=True)
-
-    async def update_purchase(self, purchase_id: str, body: PurchaseUpdateRequest) -> PurchaseOut:
-        """Update Purchase — ``PUT /api/v2/purchases/{purchase_id}``."""
-        return await self._http.request("PUT", "/api/v2/purchases/" + _q(purchase_id), auth=True, body=body)
-
-    async def retry_withdrawal(self, purchase_id: str) -> RetryWithdrawalOut:
-        """Retry Withdrawal — ``POST /api/v2/purchases/{purchase_id}/retry-withdrawal``."""
-        return await self._http.request("POST", "/api/v2/purchases/" + _q(purchase_id) + "/retry-withdrawal", auth=True)
-
-    async def purchase_transactions(self, purchase_id: str, *, status_filter: Optional[str] = None) -> List[TransactionOut]:
-        """Purchase Transactions — ``GET /api/v2/purchases/{purchase_id}/transactions``."""
-        return await self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id) + "/transactions", auth=True, query={"status_filter": status_filter})
+    async def delete_key(self, key_id: str) -> Any:
+        """Delete Key — ``DELETE /api/exchange/keys/{key_id}``."""
+        return await self._http.request("DELETE", "/api/exchange/keys/" + _q(key_id), auth=True)
 
 
-class WalletsApi:
-    """`wallets` endpoints."""
+class TransactionsApi:
+    """`transactions` endpoints."""
 
     def __init__(self, http: SyncTransport) -> None:
         self._http = http
 
-    def list_wallets(self, *, blockchain_network: Optional[str] = None) -> List[WalletOut]:
-        """List Wallets — ``GET /api/wallets``."""
-        return self._http.request("GET", "/api/wallets", auth=True, query={"blockchain_network": blockchain_network})
+    def list_transactions(self, *, limit: Optional[int] = None, offset: Optional[int] = None, status_filter: Optional[str] = None) -> TransactionListResponse:
+        """List Transactions — ``GET /api/transactions/``."""
+        return self._http.request("GET", "/api/transactions/", auth=True, query={"limit": limit, "offset": offset, "status_filter": status_filter})
 
-    def add_wallet(self, body: WalletCreateRequest) -> WalletOut:
-        """Add Wallet — ``POST /api/wallets``."""
-        return self._http.request("POST", "/api/wallets", auth=True, body=body)
+    def transaction_stats(self) -> TransactionStats:
+        """Transaction Stats — ``GET /api/transactions/stats/summary``."""
+        return self._http.request("GET", "/api/transactions/stats/summary", auth=True)
 
-    def delete_wallet(self, wallet_id: str) -> Any:
-        """Delete Wallet — ``DELETE /api/wallets/{wallet_id}``."""
-        return self._http.request("DELETE", "/api/wallets/" + _q(wallet_id), auth=True)
+    def transactions_by_crypto(self, crypto: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
+        """Transactions By Crypto — ``GET /api/transactions/crypto/{crypto}``."""
+        return self._http.request("GET", "/api/transactions/crypto/" + _q(crypto), auth=True, query={"limit": limit, "offset": offset})
+
+    def transactions_by_status(self, tx_status: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
+        """Transactions By Status — ``GET /api/transactions/status/{tx_status}``."""
+        return self._http.request("GET", "/api/transactions/status/" + _q(tx_status), auth=True, query={"limit": limit, "offset": offset})
+
+    def get_transaction(self, transaction_id: str) -> TransactionResponse:
+        """Get Transaction — ``GET /api/transactions/{transaction_id}``."""
+        return self._http.request("GET", "/api/transactions/" + _q(transaction_id), auth=True)
 
 
-class AsyncWalletsApi:
-    """`wallets` endpoints (async)."""
+class AsyncTransactionsApi:
+    """`transactions` endpoints (async)."""
 
     def __init__(self, http: AsyncTransport) -> None:
         self._http = http
 
-    async def list_wallets(self, *, blockchain_network: Optional[str] = None) -> List[WalletOut]:
-        """List Wallets — ``GET /api/wallets``."""
-        return await self._http.request("GET", "/api/wallets", auth=True, query={"blockchain_network": blockchain_network})
+    async def list_transactions(self, *, limit: Optional[int] = None, offset: Optional[int] = None, status_filter: Optional[str] = None) -> TransactionListResponse:
+        """List Transactions — ``GET /api/transactions/``."""
+        return await self._http.request("GET", "/api/transactions/", auth=True, query={"limit": limit, "offset": offset, "status_filter": status_filter})
 
-    async def add_wallet(self, body: WalletCreateRequest) -> WalletOut:
-        """Add Wallet — ``POST /api/wallets``."""
-        return await self._http.request("POST", "/api/wallets", auth=True, body=body)
+    async def transaction_stats(self) -> TransactionStats:
+        """Transaction Stats — ``GET /api/transactions/stats/summary``."""
+        return await self._http.request("GET", "/api/transactions/stats/summary", auth=True)
 
-    async def delete_wallet(self, wallet_id: str) -> Any:
-        """Delete Wallet — ``DELETE /api/wallets/{wallet_id}``."""
-        return await self._http.request("DELETE", "/api/wallets/" + _q(wallet_id), auth=True)
+    async def transactions_by_crypto(self, crypto: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
+        """Transactions By Crypto — ``GET /api/transactions/crypto/{crypto}``."""
+        return await self._http.request("GET", "/api/transactions/crypto/" + _q(crypto), auth=True, query={"limit": limit, "offset": offset})
+
+    async def transactions_by_status(self, tx_status: str, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[TransactionResponse]:
+        """Transactions By Status — ``GET /api/transactions/status/{tx_status}``."""
+        return await self._http.request("GET", "/api/transactions/status/" + _q(tx_status), auth=True, query={"limit": limit, "offset": offset})
+
+    async def get_transaction(self, transaction_id: str) -> TransactionResponse:
+        """Get Transaction — ``GET /api/transactions/{transaction_id}``."""
+        return await self._http.request("GET", "/api/transactions/" + _q(transaction_id), auth=True)
+
+
+class DashboardApi:
+    """`dashboard` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def dashboard(self) -> DashboardResponse:
+        """Dashboard — ``GET /api/dashboard/``."""
+        return self._http.request("GET", "/api/dashboard/", auth=True)
+
+    def quick_stats(self) -> QuickStats:
+        """Quick Stats — ``GET /api/dashboard/stats``."""
+        return self._http.request("GET", "/api/dashboard/stats", auth=True)
+
+    def analytics_timeline(self, *, days: Optional[int] = None) -> TimelineResponse:
+        """Analytics Timeline — ``GET /api/dashboard/analytics/timeline``."""
+        return self._http.request("GET", "/api/dashboard/analytics/timeline", auth=True, query={"days": days})
+
+    def portfolio_series(self, *, range: Optional[str] = None) -> PortfolioSeriesResponse:
+        """Portfolio Series — ``GET /api/dashboard/portfolio/series``."""
+        return self._http.request("GET", "/api/dashboard/portfolio/series", auth=True, query={"range": range})
+
+
+class AsyncDashboardApi:
+    """`dashboard` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def dashboard(self) -> DashboardResponse:
+        """Dashboard — ``GET /api/dashboard/``."""
+        return await self._http.request("GET", "/api/dashboard/", auth=True)
+
+    async def quick_stats(self) -> QuickStats:
+        """Quick Stats — ``GET /api/dashboard/stats``."""
+        return await self._http.request("GET", "/api/dashboard/stats", auth=True)
+
+    async def analytics_timeline(self, *, days: Optional[int] = None) -> TimelineResponse:
+        """Analytics Timeline — ``GET /api/dashboard/analytics/timeline``."""
+        return await self._http.request("GET", "/api/dashboard/analytics/timeline", auth=True, query={"days": days})
+
+    async def portfolio_series(self, *, range: Optional[str] = None) -> PortfolioSeriesResponse:
+        """Portfolio Series — ``GET /api/dashboard/portfolio/series``."""
+        return await self._http.request("GET", "/api/dashboard/portfolio/series", auth=True, query={"range": range})
+
+
+class IntegrationsApi:
+    """`integrations` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def available(self) -> List[IntegrationInfo]:
+        """Available — ``GET /api/integrations/available``."""
+        return self._http.request("GET", "/api/integrations/available", auth=True)
+
+    def list_webhooks(self) -> List[WebhookRow]:
+        """List Webhooks — ``GET /api/integrations/webhooks``."""
+        return self._http.request("GET", "/api/integrations/webhooks", auth=True)
+
+    def create_webhook(self, body: WebhookCreate) -> WebhookCreated:
+        """Create Webhook — ``POST /api/integrations/webhooks``."""
+        return self._http.request("POST", "/api/integrations/webhooks", auth=True, body=body)
+
+    def ping_webhook(self, webhook_id: str) -> WebhookRow:
+        """Ping Webhook — ``POST /api/integrations/webhooks/{webhook_id}/ping``."""
+        return self._http.request("POST", "/api/integrations/webhooks/" + _q(webhook_id) + "/ping", auth=True)
+
+    def delete_webhook(self, webhook_id: str) -> Any:
+        """Delete Webhook — ``DELETE /api/integrations/webhooks/{webhook_id}``."""
+        return self._http.request("DELETE", "/api/integrations/webhooks/" + _q(webhook_id), auth=True)
+
+
+class AsyncIntegrationsApi:
+    """`integrations` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def available(self) -> List[IntegrationInfo]:
+        """Available — ``GET /api/integrations/available``."""
+        return await self._http.request("GET", "/api/integrations/available", auth=True)
+
+    async def list_webhooks(self) -> List[WebhookRow]:
+        """List Webhooks — ``GET /api/integrations/webhooks``."""
+        return await self._http.request("GET", "/api/integrations/webhooks", auth=True)
+
+    async def create_webhook(self, body: WebhookCreate) -> WebhookCreated:
+        """Create Webhook — ``POST /api/integrations/webhooks``."""
+        return await self._http.request("POST", "/api/integrations/webhooks", auth=True, body=body)
+
+    async def ping_webhook(self, webhook_id: str) -> WebhookRow:
+        """Ping Webhook — ``POST /api/integrations/webhooks/{webhook_id}/ping``."""
+        return await self._http.request("POST", "/api/integrations/webhooks/" + _q(webhook_id) + "/ping", auth=True)
+
+    async def delete_webhook(self, webhook_id: str) -> Any:
+        """Delete Webhook — ``DELETE /api/integrations/webhooks/{webhook_id}``."""
+        return await self._http.request("DELETE", "/api/integrations/webhooks/" + _q(webhook_id), auth=True)
+
+
+class ReportsApi:
+    """`reports` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def tax_summary(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
+        """Tax Summary — ``GET /api/reports/tax-summary``."""
+        return self._http.request("GET", "/api/reports/tax-summary", auth=True, query={"year": year, "format": format})
+
+    def performance(self) -> Any:
+        """Performance — ``GET /api/reports/performance``."""
+        return self._http.request("GET", "/api/reports/performance", auth=True)
+
+    def export_pdf(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
+        """Export Pdf — ``GET /api/reports/export``."""
+        return self._http.request("GET", "/api/reports/export", auth=True, query={"year": year, "format": format})
+
+
+class AsyncReportsApi:
+    """`reports` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def tax_summary(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
+        """Tax Summary — ``GET /api/reports/tax-summary``."""
+        return await self._http.request("GET", "/api/reports/tax-summary", auth=True, query={"year": year, "format": format})
+
+    async def performance(self) -> Any:
+        """Performance — ``GET /api/reports/performance``."""
+        return await self._http.request("GET", "/api/reports/performance", auth=True)
+
+    async def export_pdf(self, *, year: Optional[int] = None, format: Optional[str] = None) -> Any:
+        """Export Pdf — ``GET /api/reports/export``."""
+        return await self._http.request("GET", "/api/reports/export", auth=True, query={"year": year, "format": format})
+
+
+class NotificationsApi:
+    """`notifications` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def get_preferences(self) -> PreferencesResponse:
+        """Get Preferences — ``GET /api/notifications/preferences``."""
+        return self._http.request("GET", "/api/notifications/preferences", auth=True)
+
+    def update_preferences(self, body: PreferencesPayload) -> PreferencesResponse:
+        """Update Preferences — ``PUT /api/notifications/preferences``."""
+        return self._http.request("PUT", "/api/notifications/preferences", auth=True, body=body)
+
+    def history(self, *, limit: Optional[int] = None, offset: Optional[int] = None) -> HistoryResponse:
+        """History — ``GET /api/notifications/history``."""
+        return self._http.request("GET", "/api/notifications/history", auth=True, query={"limit": limit, "offset": offset})
+
+    def send_test(self) -> Any:
+        """Send Test — ``POST /api/notifications/test``."""
+        return self._http.request("POST", "/api/notifications/test", auth=True)
+
+
+class AsyncNotificationsApi:
+    """`notifications` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def get_preferences(self) -> PreferencesResponse:
+        """Get Preferences — ``GET /api/notifications/preferences``."""
+        return await self._http.request("GET", "/api/notifications/preferences", auth=True)
+
+    async def update_preferences(self, body: PreferencesPayload) -> PreferencesResponse:
+        """Update Preferences — ``PUT /api/notifications/preferences``."""
+        return await self._http.request("PUT", "/api/notifications/preferences", auth=True, body=body)
+
+    async def history(self, *, limit: Optional[int] = None, offset: Optional[int] = None) -> HistoryResponse:
+        """History — ``GET /api/notifications/history``."""
+        return await self._http.request("GET", "/api/notifications/history", auth=True, query={"limit": limit, "offset": offset})
+
+    async def send_test(self) -> Any:
+        """Send Test — ``POST /api/notifications/test``."""
+        return await self._http.request("POST", "/api/notifications/test", auth=True)
+
+
+class AdminApi:
+    """`admin` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def list_users(self, *, q: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminUserList:
+        """List Users — ``GET /api/admin/users``."""
+        return self._http.request("GET", "/api/admin/users", auth=True, query={"q": q, "limit": limit, "offset": offset})
+
+    def suspend_user(self, user_id: str) -> Any:
+        """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/suspend", auth=True)
+
+    def unsuspend_user(self, user_id: str, body: Optional[UnsuspendPayload] = None) -> Any:
+        """Unsuspend User — ``POST /api/admin/users/{user_id}/unsuspend``."""
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True, body=body)
+
+    def delete_user(self, user_id: str, *, confirm: str) -> Any:
+        """Delete User — ``DELETE /api/admin/users/{user_id}``."""
+        return self._http.request("DELETE", "/api/admin/users/" + _q(user_id), auth=True, query={"confirm": confirm})
+
+    def lift_wallet_hold(self, user_id: str, body: LiftWalletHold) -> Any:
+        """Lift Wallet Hold — ``POST /api/admin/users/{user_id}/lift-wallet-hold``."""
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/lift-wallet-hold", auth=True, body=body)
+
+    def kyc_override(self, user_id: str, body: KycOverride) -> Any:
+        """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
+
+    def reset_two_factor(self, user_id: str) -> Any:
+        """Reset Two Factor — ``POST /api/admin/users/{user_id}/2fa/reset``."""
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/2fa/reset", auth=True)
+
+    def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
+        """List Purchases — ``GET /api/admin/purchases``."""
+        return self._http.request("GET", "/api/admin/purchases", auth=True, query={"status": status, "limit": limit, "offset": offset})
+
+    def review_purchase(self, purchase_id: str) -> PurchaseReview:
+        """Review Purchase — ``GET /api/admin/purchases/{purchase_id}/review``."""
+        return self._http.request("GET", "/api/admin/purchases/" + _q(purchase_id) + "/review", auth=True)
+
+    def resolve_purchase(self, purchase_id: str, body: ResolvePurchase) -> AdminPurchaseRow:
+        """Resolve Purchase — ``POST /api/admin/purchases/{purchase_id}/resolve``."""
+        return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/resolve", auth=True, body=body)
+
+    def force_retry(self, purchase_id: str) -> Any:
+        """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
+        return self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
+
+    def fill_deviations(self, *, limit: Optional[int] = None) -> List[FillDeviation]:
+        """Fill Deviations — ``GET /api/admin/fills/deviations``."""
+        return self._http.request("GET", "/api/admin/fills/deviations", auth=True, query={"limit": limit})
+
+    def platform_stats(self) -> PlatformStats:
+        """Platform Stats — ``GET /api/admin/stats``."""
+        return self._http.request("GET", "/api/admin/stats", auth=True)
+
+    def all_transactions(self, *, status_filter: Optional[str] = None, user_id: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminTransactionList:
+        """All Transactions — ``GET /api/admin/transactions``."""
+        return self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
+
+    def undelivered_emails(self, *, limit: Optional[int] = None) -> EmailOutboxView:
+        """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
+        return self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
+
+    def alerts(self) -> List[AlertItem]:
+        """Alerts — ``GET /api/admin/alerts``."""
+        return self._http.request("GET", "/api/admin/alerts", auth=True)
+
+    def pause_scheduler(self) -> Any:
+        """Pause Scheduler — ``POST /api/admin/scheduler/pause``."""
+        return self._http.request("POST", "/api/admin/scheduler/pause", auth=True)
+
+    def resume_scheduler(self) -> Any:
+        """Resume Scheduler — ``POST /api/admin/scheduler/resume``."""
+        return self._http.request("POST", "/api/admin/scheduler/resume", auth=True)
+
+    def telegram_test(self) -> TelegramTestResult:
+        """Telegram Test — ``POST /api/admin/telegram/test``."""
+        return self._http.request("POST", "/api/admin/telegram/test", auth=True)
+
+
+class AsyncAdminApi:
+    """`admin` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def list_users(self, *, q: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminUserList:
+        """List Users — ``GET /api/admin/users``."""
+        return await self._http.request("GET", "/api/admin/users", auth=True, query={"q": q, "limit": limit, "offset": offset})
+
+    async def suspend_user(self, user_id: str) -> Any:
+        """Suspend User — ``POST /api/admin/users/{user_id}/suspend``."""
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/suspend", auth=True)
+
+    async def unsuspend_user(self, user_id: str, body: Optional[UnsuspendPayload] = None) -> Any:
+        """Unsuspend User — ``POST /api/admin/users/{user_id}/unsuspend``."""
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/unsuspend", auth=True, body=body)
+
+    async def delete_user(self, user_id: str, *, confirm: str) -> Any:
+        """Delete User — ``DELETE /api/admin/users/{user_id}``."""
+        return await self._http.request("DELETE", "/api/admin/users/" + _q(user_id), auth=True, query={"confirm": confirm})
+
+    async def lift_wallet_hold(self, user_id: str, body: LiftWalletHold) -> Any:
+        """Lift Wallet Hold — ``POST /api/admin/users/{user_id}/lift-wallet-hold``."""
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/lift-wallet-hold", auth=True, body=body)
+
+    async def kyc_override(self, user_id: str, body: KycOverride) -> Any:
+        """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
+
+    async def reset_two_factor(self, user_id: str) -> Any:
+        """Reset Two Factor — ``POST /api/admin/users/{user_id}/2fa/reset``."""
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/2fa/reset", auth=True)
+
+    async def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
+        """List Purchases — ``GET /api/admin/purchases``."""
+        return await self._http.request("GET", "/api/admin/purchases", auth=True, query={"status": status, "limit": limit, "offset": offset})
+
+    async def review_purchase(self, purchase_id: str) -> PurchaseReview:
+        """Review Purchase — ``GET /api/admin/purchases/{purchase_id}/review``."""
+        return await self._http.request("GET", "/api/admin/purchases/" + _q(purchase_id) + "/review", auth=True)
+
+    async def resolve_purchase(self, purchase_id: str, body: ResolvePurchase) -> AdminPurchaseRow:
+        """Resolve Purchase — ``POST /api/admin/purchases/{purchase_id}/resolve``."""
+        return await self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/resolve", auth=True, body=body)
+
+    async def force_retry(self, purchase_id: str) -> Any:
+        """Force Retry — ``POST /api/admin/purchases/{purchase_id}/force-retry``."""
+        return await self._http.request("POST", "/api/admin/purchases/" + _q(purchase_id) + "/force-retry", auth=True)
+
+    async def fill_deviations(self, *, limit: Optional[int] = None) -> List[FillDeviation]:
+        """Fill Deviations — ``GET /api/admin/fills/deviations``."""
+        return await self._http.request("GET", "/api/admin/fills/deviations", auth=True, query={"limit": limit})
+
+    async def platform_stats(self) -> PlatformStats:
+        """Platform Stats — ``GET /api/admin/stats``."""
+        return await self._http.request("GET", "/api/admin/stats", auth=True)
+
+    async def all_transactions(self, *, status_filter: Optional[str] = None, user_id: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminTransactionList:
+        """All Transactions — ``GET /api/admin/transactions``."""
+        return await self._http.request("GET", "/api/admin/transactions", auth=True, query={"status_filter": status_filter, "user_id": user_id, "limit": limit, "offset": offset})
+
+    async def undelivered_emails(self, *, limit: Optional[int] = None) -> EmailOutboxView:
+        """Undelivered Emails — ``GET /api/admin/emails/undelivered``."""
+        return await self._http.request("GET", "/api/admin/emails/undelivered", auth=True, query={"limit": limit})
+
+    async def alerts(self) -> List[AlertItem]:
+        """Alerts — ``GET /api/admin/alerts``."""
+        return await self._http.request("GET", "/api/admin/alerts", auth=True)
+
+    async def pause_scheduler(self) -> Any:
+        """Pause Scheduler — ``POST /api/admin/scheduler/pause``."""
+        return await self._http.request("POST", "/api/admin/scheduler/pause", auth=True)
+
+    async def resume_scheduler(self) -> Any:
+        """Resume Scheduler — ``POST /api/admin/scheduler/resume``."""
+        return await self._http.request("POST", "/api/admin/scheduler/resume", auth=True)
+
+    async def telegram_test(self) -> TelegramTestResult:
+        """Telegram Test — ``POST /api/admin/telegram/test``."""
+        return await self._http.request("POST", "/api/admin/telegram/test", auth=True)
+
+
+class AnalyticsApi:
+    """`analytics` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def performance(self) -> PerformanceResponse:
+        """Performance — ``GET /api/analytics/performance``."""
+        return self._http.request("GET", "/api/analytics/performance", auth=True)
+
+    def comparison(self) -> ComparisonResponse:
+        """Comparison — ``GET /api/analytics/comparison``."""
+        return self._http.request("GET", "/api/analytics/comparison", auth=True)
+
+    def recurring(self) -> RecurringResponse:
+        """Recurring — ``GET /api/analytics/recurring``."""
+        return self._http.request("GET", "/api/analytics/recurring", auth=True)
+
+    def volatility(self) -> VolatilityResponse:
+        """Volatility — ``GET /api/analytics/volatility``."""
+        return self._http.request("GET", "/api/analytics/volatility", auth=True)
+
+
+class AsyncAnalyticsApi:
+    """`analytics` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def performance(self) -> PerformanceResponse:
+        """Performance — ``GET /api/analytics/performance``."""
+        return await self._http.request("GET", "/api/analytics/performance", auth=True)
+
+    async def comparison(self) -> ComparisonResponse:
+        """Comparison — ``GET /api/analytics/comparison``."""
+        return await self._http.request("GET", "/api/analytics/comparison", auth=True)
+
+    async def recurring(self) -> RecurringResponse:
+        """Recurring — ``GET /api/analytics/recurring``."""
+        return await self._http.request("GET", "/api/analytics/recurring", auth=True)
+
+    async def volatility(self) -> VolatilityResponse:
+        """Volatility — ``GET /api/analytics/volatility``."""
+        return await self._http.request("GET", "/api/analytics/volatility", auth=True)
+
+
+class KycApi:
+    """`kyc` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def initiate_kyc(self) -> InitiateResponse:
+        """Initiate Kyc — ``POST /api/kyc/initiate``."""
+        return self._http.request("POST", "/api/kyc/initiate", auth=True)
+
+    def kyc_status(self, *, sync: Optional[bool] = None) -> StatusResponse:
+        """Kyc Status — ``GET /api/kyc/status``."""
+        return self._http.request("GET", "/api/kyc/status", auth=True, query={"sync": sync})
+
+    def sumsub_webhook(self) -> Any:
+        """Sumsub Webhook — ``POST /api/kyc/webhook``."""
+        return self._http.request("POST", "/api/kyc/webhook", auth=False)
+
+    def create_applicant(self, body: CreateApplicantRequest) -> CreateApplicantResponse:
+        """Create Applicant — ``POST /api/kyc/create-applicant``."""
+        return self._http.request("POST", "/api/kyc/create-applicant", auth=True, body=body)
+
+    def applicant_status(self, applicant_id: str) -> ApplicantStatusResponse:
+        """Applicant Status — ``GET /api/kyc/applicant/{applicant_id}/status``."""
+        return self._http.request("GET", "/api/kyc/applicant/" + _q(applicant_id) + "/status", auth=True)
+
+
+class AsyncKycApi:
+    """`kyc` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def initiate_kyc(self) -> InitiateResponse:
+        """Initiate Kyc — ``POST /api/kyc/initiate``."""
+        return await self._http.request("POST", "/api/kyc/initiate", auth=True)
+
+    async def kyc_status(self, *, sync: Optional[bool] = None) -> StatusResponse:
+        """Kyc Status — ``GET /api/kyc/status``."""
+        return await self._http.request("GET", "/api/kyc/status", auth=True, query={"sync": sync})
+
+    async def sumsub_webhook(self) -> Any:
+        """Sumsub Webhook — ``POST /api/kyc/webhook``."""
+        return await self._http.request("POST", "/api/kyc/webhook", auth=False)
+
+    async def create_applicant(self, body: CreateApplicantRequest) -> CreateApplicantResponse:
+        """Create Applicant — ``POST /api/kyc/create-applicant``."""
+        return await self._http.request("POST", "/api/kyc/create-applicant", auth=True, body=body)
+
+    async def applicant_status(self, applicant_id: str) -> ApplicantStatusResponse:
+        """Applicant Status — ``GET /api/kyc/applicant/{applicant_id}/status``."""
+        return await self._http.request("GET", "/api/kyc/applicant/" + _q(applicant_id) + "/status", auth=True)
 
 
 class WebhooksApi:
@@ -980,27 +898,181 @@ class AsyncWebhooksApi:
         return await self._http.request("POST", "/api/webhooks/sumsub", auth=False)
 
 
+class EmailApi:
+    """`email` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def send_verification(self, body: SendVerificationRequest) -> EmailSentResponse:
+        """Send Verification — ``POST /api/email/send-verification``."""
+        return self._http.request("POST", "/api/email/send-verification", auth=True, body=body)
+
+    def send_notification(self, body: SendNotificationRequest) -> EmailSentResponse:
+        """Send Notification — ``POST /api/email/send-notification``."""
+        return self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
+
+
+class AsyncEmailApi:
+    """`email` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def send_verification(self, body: SendVerificationRequest) -> EmailSentResponse:
+        """Send Verification — ``POST /api/email/send-verification``."""
+        return await self._http.request("POST", "/api/email/send-verification", auth=True, body=body)
+
+    async def send_notification(self, body: SendNotificationRequest) -> EmailSentResponse:
+        """Send Notification — ``POST /api/email/send-notification``."""
+        return await self._http.request("POST", "/api/email/send-notification", auth=True, body=body)
+
+
+class V2Api:
+    """`v2` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def list_purchases(self) -> List[PurchaseOut]:
+        """List Purchases — ``GET /api/v2/purchases``."""
+        return self._http.request("GET", "/api/v2/purchases", auth=True)
+
+    def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
+        """Create Purchase — ``POST /api/v2/purchases``."""
+        return self._http.request("POST", "/api/v2/purchases", auth=True, body=body)
+
+    def get_purchase(self, purchase_id: str) -> PurchaseDetailOut:
+        """Get Purchase — ``GET /api/v2/purchases/{purchase_id}``."""
+        return self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    def update_purchase(self, purchase_id: str, body: PurchaseUpdateRequest) -> PurchaseOut:
+        """Update Purchase — ``PUT /api/v2/purchases/{purchase_id}``."""
+        return self._http.request("PUT", "/api/v2/purchases/" + _q(purchase_id), auth=True, body=body)
+
+    def cancel_purchase(self, purchase_id: str) -> Any:
+        """Cancel Purchase — ``DELETE /api/v2/purchases/{purchase_id}``."""
+        return self._http.request("DELETE", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    def retry_withdrawal(self, purchase_id: str) -> RetryWithdrawalOut:
+        """Retry Withdrawal — ``POST /api/v2/purchases/{purchase_id}/retry-withdrawal``."""
+        return self._http.request("POST", "/api/v2/purchases/" + _q(purchase_id) + "/retry-withdrawal", auth=True)
+
+    def purchase_transactions(self, purchase_id: str, *, status_filter: Optional[str] = None) -> List[TransactionOut]:
+        """Purchase Transactions — ``GET /api/v2/purchases/{purchase_id}/transactions``."""
+        return self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id) + "/transactions", auth=True, query={"status_filter": status_filter})
+
+    def coin_market(self, coin: str, *, amount_usd: Optional[float] = None) -> CoinMarketOut:
+        """Coin Market — ``GET /api/v2/market/coins/{coin}``."""
+        return self._http.request("GET", "/api/v2/market/coins/" + _q(coin), auth=True, query={"amount_usd": amount_usd})
+
+    def check_withdrawal_destination(self, *, chain: str, address: str, destination_type: Optional[str] = None, memo: Optional[str] = None) -> DestinationCheckOut:
+        """Check Withdrawal Destination — ``GET /api/v2/market/destination``."""
+        return self._http.request("GET", "/api/v2/market/destination", auth=True, query={"chain": chain, "address": address, "destination_type": destination_type, "memo": memo})
+
+
+class AsyncV2Api:
+    """`v2` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def list_purchases(self) -> List[PurchaseOut]:
+        """List Purchases — ``GET /api/v2/purchases``."""
+        return await self._http.request("GET", "/api/v2/purchases", auth=True)
+
+    async def create_purchase(self, body: PurchaseCreateRequest) -> PurchaseCreatedOut:
+        """Create Purchase — ``POST /api/v2/purchases``."""
+        return await self._http.request("POST", "/api/v2/purchases", auth=True, body=body)
+
+    async def get_purchase(self, purchase_id: str) -> PurchaseDetailOut:
+        """Get Purchase — ``GET /api/v2/purchases/{purchase_id}``."""
+        return await self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    async def update_purchase(self, purchase_id: str, body: PurchaseUpdateRequest) -> PurchaseOut:
+        """Update Purchase — ``PUT /api/v2/purchases/{purchase_id}``."""
+        return await self._http.request("PUT", "/api/v2/purchases/" + _q(purchase_id), auth=True, body=body)
+
+    async def cancel_purchase(self, purchase_id: str) -> Any:
+        """Cancel Purchase — ``DELETE /api/v2/purchases/{purchase_id}``."""
+        return await self._http.request("DELETE", "/api/v2/purchases/" + _q(purchase_id), auth=True)
+
+    async def retry_withdrawal(self, purchase_id: str) -> RetryWithdrawalOut:
+        """Retry Withdrawal — ``POST /api/v2/purchases/{purchase_id}/retry-withdrawal``."""
+        return await self._http.request("POST", "/api/v2/purchases/" + _q(purchase_id) + "/retry-withdrawal", auth=True)
+
+    async def purchase_transactions(self, purchase_id: str, *, status_filter: Optional[str] = None) -> List[TransactionOut]:
+        """Purchase Transactions — ``GET /api/v2/purchases/{purchase_id}/transactions``."""
+        return await self._http.request("GET", "/api/v2/purchases/" + _q(purchase_id) + "/transactions", auth=True, query={"status_filter": status_filter})
+
+    async def coin_market(self, coin: str, *, amount_usd: Optional[float] = None) -> CoinMarketOut:
+        """Coin Market — ``GET /api/v2/market/coins/{coin}``."""
+        return await self._http.request("GET", "/api/v2/market/coins/" + _q(coin), auth=True, query={"amount_usd": amount_usd})
+
+    async def check_withdrawal_destination(self, *, chain: str, address: str, destination_type: Optional[str] = None, memo: Optional[str] = None) -> DestinationCheckOut:
+        """Check Withdrawal Destination — ``GET /api/v2/market/destination``."""
+        return await self._http.request("GET", "/api/v2/market/destination", auth=True, query={"chain": chain, "address": address, "destination_type": destination_type, "memo": memo})
+
+
+class WalletsApi:
+    """`wallets` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def add_wallet(self, body: WalletCreateRequest) -> WalletOut:
+        """Add Wallet — ``POST /api/wallets``."""
+        return self._http.request("POST", "/api/wallets", auth=True, body=body)
+
+    def list_wallets(self, *, blockchain_network: Optional[str] = None) -> List[WalletOut]:
+        """List Wallets — ``GET /api/wallets``."""
+        return self._http.request("GET", "/api/wallets", auth=True, query={"blockchain_network": blockchain_network})
+
+    def delete_wallet(self, wallet_id: str) -> Any:
+        """Delete Wallet — ``DELETE /api/wallets/{wallet_id}``."""
+        return self._http.request("DELETE", "/api/wallets/" + _q(wallet_id), auth=True)
+
+
+class AsyncWalletsApi:
+    """`wallets` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def add_wallet(self, body: WalletCreateRequest) -> WalletOut:
+        """Add Wallet — ``POST /api/wallets``."""
+        return await self._http.request("POST", "/api/wallets", auth=True, body=body)
+
+    async def list_wallets(self, *, blockchain_network: Optional[str] = None) -> List[WalletOut]:
+        """List Wallets — ``GET /api/wallets``."""
+        return await self._http.request("GET", "/api/wallets", auth=True, query={"blockchain_network": blockchain_network})
+
+    async def delete_wallet(self, wallet_id: str) -> Any:
+        """Delete Wallet — ``DELETE /api/wallets/{wallet_id}``."""
+        return await self._http.request("DELETE", "/api/wallets/" + _q(wallet_id), auth=True)
+
+
 class Api:
     """All resource groups, keyed by API module."""
 
     def __init__(self, http: SyncTransport) -> None:
         self.system = SystemApi(http)
+        self.auth = AuthApi(http)
+        self.public = PublicApi(http)
+        self.user = UserApi(http)
+        self.exchange = ExchangeApi(http)
+        self.transactions = TransactionsApi(http)
+        self.dashboard = DashboardApi(http)
+        self.integrations = IntegrationsApi(http)
+        self.reports = ReportsApi(http)
+        self.notifications = NotificationsApi(http)
         self.admin = AdminApi(http)
         self.analytics = AnalyticsApi(http)
-        self.auth = AuthApi(http)
-        self.dashboard = DashboardApi(http)
-        self.email = EmailApi(http)
-        self.exchange = ExchangeApi(http)
-        self.integrations = IntegrationsApi(http)
         self.kyc = KycApi(http)
-        self.notifications = NotificationsApi(http)
-        self.public = PublicApi(http)
-        self.reports = ReportsApi(http)
-        self.transactions = TransactionsApi(http)
-        self.user = UserApi(http)
+        self.webhooks = WebhooksApi(http)
+        self.email = EmailApi(http)
         self.v2 = V2Api(http)
         self.wallets = WalletsApi(http)
-        self.webhooks = WebhooksApi(http)
 
 
 class AsyncApi:
@@ -1008,19 +1080,19 @@ class AsyncApi:
 
     def __init__(self, http: AsyncTransport) -> None:
         self.system = AsyncSystemApi(http)
+        self.auth = AsyncAuthApi(http)
+        self.public = AsyncPublicApi(http)
+        self.user = AsyncUserApi(http)
+        self.exchange = AsyncExchangeApi(http)
+        self.transactions = AsyncTransactionsApi(http)
+        self.dashboard = AsyncDashboardApi(http)
+        self.integrations = AsyncIntegrationsApi(http)
+        self.reports = AsyncReportsApi(http)
+        self.notifications = AsyncNotificationsApi(http)
         self.admin = AsyncAdminApi(http)
         self.analytics = AsyncAnalyticsApi(http)
-        self.auth = AsyncAuthApi(http)
-        self.dashboard = AsyncDashboardApi(http)
-        self.email = AsyncEmailApi(http)
-        self.exchange = AsyncExchangeApi(http)
-        self.integrations = AsyncIntegrationsApi(http)
         self.kyc = AsyncKycApi(http)
-        self.notifications = AsyncNotificationsApi(http)
-        self.public = AsyncPublicApi(http)
-        self.reports = AsyncReportsApi(http)
-        self.transactions = AsyncTransactionsApi(http)
-        self.user = AsyncUserApi(http)
+        self.webhooks = AsyncWebhooksApi(http)
+        self.email = AsyncEmailApi(http)
         self.v2 = AsyncV2Api(http)
         self.wallets = AsyncWalletsApi(http)
-        self.webhooks = AsyncWebhooksApi(http)

@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-10-13: Two-factor authentication and sign out everywhere (PR TBD)
+
+First of the Guardian merge PRs (`docs/GUARDIAN` plan): the platform gains the
+optional TOTP second factor that Minas AI Guardian's customers already have,
+ahead of their accounts moving over. `GUARDIAN_ENABLED` does not exist yet;
+nothing else about Guardian lands here.
+
+### Added
+
+* Optional two-factor authentication for every account: `/api/user/2fa`
+  (enrol with the password, confirm with a code, ten single-use recovery
+  codes shown once, regenerate against a code, disable with the password plus
+  a code or a recovery code). Settings → Security renders the QR code in the
+  browser (`qrcode` 1.5.4; the secret never leaves the page) and shows the
+  recovery codes once with copy and download. Every change emails the account.
+  RFC 6238 on the standard library, ported verbatim from Guardian
+  (`api/services/totp.py`, `api/services/twofactor.py`): no new Python
+  dependency inside the authentication path.
+* `POST /api/auth/login` answers **202** `{mfa_required, mfa_token, expires_in}`
+  for an account with two-factor on and sets no cookie; `POST /api/auth/login/mfa`
+  finishes the session with the same body and cookies as `/login`. The login
+  page gains the code step (authenticator code or recovery code).
+* `POST /api/auth/logout-all` ("Sign out everywhere" in Settings → Security):
+  `users.sessions_revoked_at`; every access and refresh token issued before it
+  is refused, the caller's included.
+* Admin: `totp_enabled` on the user list with a 2FA pill, a "Reset 2FA"
+  support action (`POST /api/admin/users/{id}/2fa/reset`, audited, the user is
+  emailed), and `ADMIN_MFA_REQUIRED` (default 0): when on, every admin route
+  answers 403 `mfa_required_for_admin` until the admin has enrolled, and an
+  admin cannot turn two-factor off.
+* **Migration 029** (`029_user_totp_and_session_revocation`): `user_totp`,
+  `user_totp_recovery_codes`, `users.sessions_revoked_at`. Empty tables, no
+  backfill; nothing changes for a user who never enrols.
+* New `.env` line (also in compose): `ADMIN_MFA_REQUIRED=0`.
+
+### Changed
+
+* The Fernet helpers moved from `api/routes/exchange.py` to
+  `api/services/crypto.py` byte for byte (the router re-exports the same
+  names; services and the coming Guardian worker encrypt without importing a
+  router). TOTP secrets use the same cipher; `scripts/rotate_encryption_key.py`
+  rotates `user_totp` alongside `api_keys`.
+* `POST /api/auth/verify` answers `valid: false` for the MFA pending token;
+  the email-verification token still identifies its user there, as before.
+* The bearer guard and `/refresh` compare a token's `iat` against the later of
+  `password_changed_at` and `sessions_revoked_at` (`api.auth.token_cutoff`);
+  with the new column NULL the behaviour is identical to before.
+
+### Security
+
+* The pending MFA token lives five minutes, is redeemable once, allows five
+  attempts, is bound to the password hash it was issued against, and is
+  refused by the bearer guard and by `/verify`. A wrong code, a wrong password
+  at enrol/disable and a wrong code at regenerate all count towards the
+  15-minute lockout. Each 30-second step is accepted once, atomically (two
+  requests spending the same code get exactly one success). Secrets, codes
+  and tokens never reach the log; the tests assert it on captured output.
+* A session that existed before enrolment keeps working: turning two-factor
+  on protects future sign-ins, it does not evict the person turning it on.
+
+### Tests
+
+* Backend 654 → 720 (`tests/test_totp.py` 19 ported verbatim,
+  `test_twofactor_service.py`, `test_mfa_login.py`, `test_twofactor_routes.py`,
+  `test_logout_all.py`); the existing auth suites (`test_session_cookies`,
+  `test_refresh_grace`, `test_logout_stale_csrf`, `test_routes_auth`,
+  `test_password_reset`, `test_security`) unchanged and green. Frontend
+  150 → 162 (`LoginMfa.test.tsx`, `SecuritySettings.test.tsx`); the Settings
+  suite still finds exactly two password fields on the page.
+
 ## [0.8.2] — 2026-10-14: plain-English failure text, Funding hint (PR #93)
 
 ### Changed
@@ -168,7 +238,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bitget (URL); trademark of [project]; used unaltered only to identify the
   coin". All ten coins now show a logo; clearing a File cell in
   `LOGO_SOURCES.md` puts a coin back on its lettered circle.
-
 
 ## [0.7.6] — 2026-10-07: coin logos (PR #74)
 

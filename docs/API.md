@@ -62,6 +62,24 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 - `POST /api/auth/logout` (same CSRF header) revokes the refresh token
   server-side and clears both cookies. Always 204.
 - `POST /api/auth/change-password` invalidates **every** token issued before it.
+- **Two-factor sign-in (v0.9.0).** For an account with two-factor
+  authentication on, `POST /api/auth/login` answers **202**
+  `{mfa_required: true, mfa_token, expires_in: 300}` and sets no cookie.
+  Finish with `POST /api/auth/login/mfa` `{mfa_token, code}` or
+  `{mfa_token, recovery_code}`, which answers the same 200 body and cookies
+  as `/login`. The pending token is not a credential (the bearer guard and
+  `/verify` refuse it), is redeemable once, allows five attempts, lives five
+  minutes and dies if the password changes; a wrong code counts towards the
+  lockout exactly like a wrong password. A recovery code works once and the
+  account is emailed when one is used. The second factor is asked at
+  password login only; the session then refreshes as usual.
+- `POST /api/auth/logout-all` (bearer, no CSRF header): sign out everywhere.
+  Every access and refresh token issued before now is refused
+  (`users.sessions_revoked_at`, the same check as a password change), the
+  caller's own included; both cookies are cleared. Always 204.
+- `POST /api/auth/verify` answers `valid: false` for the MFA pending token
+  (it identifies nobody until the second factor is given); the bearer guard
+  refuses it too.
 - Refresh tokens are rejected as access tokens and vice versa; a refresh
   token posted in a body is ignored.
 - Same-origin only: the Vite dev server proxies `/api` to the API and nginx
@@ -73,8 +91,9 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 
 | Module | Endpoints |
 |---|---|
-| auth (`/api/auth`) | `POST /register` · `/login` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password/validate` (`{token}` → 200 `{valid: true}` / 400 `{valid: false}`, does not consume the token) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
+| auth (`/api/auth`) | `POST /register` · `/login` (200, or 202 `mfa_required` when two-factor is on) · `/login/mfa` · `/logout-all` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password/validate` (`{token}` → 200 `{valid: true}` / 400 `{valid: false}`, does not consume the token) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
 | user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
+| security (`/api/user/2fa`, v0.9.0) | `GET /` (`{enabled, enrolled_at, recovery_codes_remaining, pending_enrolment}`) · `POST /enrol` (`{password}` → `{secret, otpauth_uri}`, shown once; 409 when already on; nothing is in force until confirmed) · `POST /confirm` (`{code}` → `{recovery_codes[10]}`, shown once; 400 wrong code) · `POST /recovery-codes` (`{code}` from the authenticator, never a recovery code → a new set; the old set stops working) · `POST /disable` (`{password, code \| recovery_code}` → 204; 403 for admins while `ADMIN_MFA_REQUIRED=1`). Every change emails the account (security category). Admin: `totp_enabled` on `GET /api/admin/users`, `POST /api/admin/users/{id}/2fa/reset` (support path for a lost authenticator; audited, the user is emailed). With `ADMIN_MFA_REQUIRED=1` every admin route answers 403 `{"error": "mfa_required_for_admin"}` until the admin has enrolled |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
 | auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; `blockchain_network` is the exchange's chain name (`BTC`, `ERC20`, `TRC20`, `SOL`, `ArbitrumOne`, …; defaults to the coin's native chain); any wallet is validated against that chain's address format and rejected if it is a known burn/unspendable address; on Bitget the pair, minimum order, chain and (for autobuy) the minimum withdrawal are checked live, see "Bitget market data") · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, `travel_rule_info`, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `POST /{id}/retry-withdrawal` (withdrawal_failed / needs_info only: re-sends the last filled buy's coins, never buys again) · `DELETE /{id}` (cancel, history kept) |
 | wallets (`/api/wallets`) | `POST /` (`blockchain_network` = exchange chain name; the address format must match the chain family: bitcoin mainnet only, EVM `0x…`, Solana base58, Tron `T…`, XRP Ledger `r…`/`X…`, Stellar `G…`/`M…`; tag chains also take `destination_type` + `memo`, see "Destination tag / memo") · `GET /?blockchain_network=` · `DELETE /{id}` |
@@ -112,8 +131,10 @@ verified users.** `kyc_status` cannot be set through the profile API.
 | Code | Meaning |
 |---|---|
 | 400 | Request conflicts with state (duplicate email, nothing to update) |
-| 401 | Missing/invalid/expired/revoked token, or wrong credentials |
+| 401 | Missing/invalid/expired/revoked token, or wrong credentials (including a wrong two-factor code) |
+| 403 | Not allowed: admin role required, `csrf_failed`, the withdraw gate, or `mfa_required_for_admin` (an admin without two-factor while `ADMIN_MFA_REQUIRED=1`) |
 | 404 | Not found — including other users' resources (no existence leaks) |
+| 409 | Two-factor authentication is already on (`POST /api/user/2fa/enrol`) |
 | 413 | Body over 1MB |
 | 422 | Validation failure (amounts, crypto allow-list, addresses, password policy, duplicate active schedule) |
 | 429 | Rate limit or account lockout — honor `Retry-After` |
@@ -121,9 +142,12 @@ verified users.** `kyc_status` cannot be set through the profile API.
 
 ## Rate limits (per user when authenticated, else per IP)
 
-login/register 5/min · verify/refresh/logout 10/min · key verification 3/min ·
+login/register 5/min · login/mfa 5/min (per IP; plus five attempts per pending token) ·
+logout-all 5/min · verify/refresh/logout 10/min · key verification 3/min ·
+2fa enrol/disable 5/min · 2fa confirm 10/min · 2fa recovery-codes 3/min ·
 purchase creation 20/min · transaction listing 30/min · dashboard 10/min ·
-default 60/min. Login lockout: 5 failed attempts → 15 minutes.
+default 60/min. Login lockout: 5 failed attempts (passwords or two-factor
+codes) → 15 minutes.
 
 ## Auto-Buy purchases
 
