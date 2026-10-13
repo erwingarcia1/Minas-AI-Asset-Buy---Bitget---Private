@@ -6,15 +6,28 @@ import type {
   EmailSentResponse, IntegrationInfo, KeyVerifyResponse, KycInitiateResponse, KycStatusResponse, Performance,
   QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
- RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview, PortfolioSeries, SeriesRange, PublicMeta } from "@/types";
+ RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview, PortfolioSeries, SeriesRange, PublicMeta,
+ MfaFactor, MfaRequiredResponse, RecoveryCodes, TwoFactorEnrolment, TwoFactorStatus } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
+
+/** A password login either starts a session (200) or, for an account with two-factor on, hands back a
+ *  short-lived token to finish with a code (202). The token is never a credential and lives only in memory. */
+export type LoginOutcome = { kind: "session"; tokens: TokenResponse } | { kind: "mfa"; mfaToken: string; expiresIn: number };
 
 export const authAPI = {
   register: (email: string, password: string, inviteCode?: string) =>
     data<UserProfile>(api.post("/auth/register", { email, password, ...(inviteCode ? { invite_code: inviteCode } : {}) })),
-  login: (email: string, password: string) =>
-    data<TokenResponse>(api.post("/auth/login", { email, password })),
+  login: (email: string, password: string): Promise<LoginOutcome> =>
+    api.post<TokenResponse | MfaRequiredResponse>("/auth/login", { email, password }).then((r) =>
+      r.status === 202
+        ? { kind: "mfa", mfaToken: (r.data as MfaRequiredResponse).mfa_token, expiresIn: (r.data as MfaRequiredResponse).expires_in }
+        : { kind: "session", tokens: r.data as TokenResponse }),
+  /** Second step of a two-factor sign-in: same body and cookies as a plain login. */
+  loginMfa: (mfaToken: string, factor: MfaFactor) =>
+    data<TokenResponse>(api.post("/auth/login/mfa", { mfa_token: mfaToken, ...factor })),
+  /** Every token issued before now stops working, this session included. */
+  logoutAll: () => api.post("/auth/logout-all"),
   /** From the httpOnly cookie; the CSRF header is added here. */
   refresh: () => data<TokenResponse>(api.post("/auth/refresh", undefined, { headers: { [CSRF_HEADER]: csrfToken() ?? "" } })),
   /** Revokes the refresh cookie server-side and clears it. */
@@ -27,6 +40,18 @@ export const authAPI = {
   validateResetToken: (token: string) => data<{ valid: boolean }>(api.post("/auth/reset-password/validate", { token })),
   /** 400 = invalid/expired/used link, 422 = password policy. */
   resetPassword: (token: string, new_password: string) => api.post("/auth/reset-password", { token, new_password }),
+};
+
+export const twoFactorAPI = {
+  status: () => data<TwoFactorStatus>(api.get("/user/2fa")),
+  /** Needs the current password; 409 when two-factor is already on. */
+  enrol: (password: string) => data<TwoFactorEnrolment>(api.post("/user/2fa/enrol", { password })),
+  /** Switches two-factor on; answers the recovery codes, shown once. 400 = wrong code. */
+  confirm: (code: string) => data<RecoveryCodes>(api.post("/user/2fa/confirm", { code })),
+  /** A new set against a current authenticator code; the previous set stops working. */
+  regenerateCodes: (code: string) => data<RecoveryCodes>(api.post("/user/2fa/recovery-codes", { code })),
+  /** Password plus a code or a recovery code. 403 for admins while ADMIN_MFA_REQUIRED is on. */
+  disable: (password: string, factor: MfaFactor) => api.post("/user/2fa/disable", { password, ...factor }),
 };
 
 export const notificationAPI = {
@@ -122,6 +147,8 @@ export const adminAPI = {
   /** Support override for the 24h wallet-change hold; `confirm` must equal the user's email. */
   liftWalletHold: (id: string, confirm: string, reason: string) =>
     api.post(`/admin/users/${id}/lift-wallet-hold`, { confirm_email: confirm, reason }),
+  /** Support path for a lost authenticator: removes the enrolment and recovery codes; the user is emailed. */
+  resetTwoFactor: (id: string) => api.post(`/admin/users/${id}/2fa/reset`),
   transactions: (params: { status_filter?: string; user_id?: string; limit?: number; offset?: number } = {}) =>
     data<{ items: AdminTxRow[]; total: number }>(api.get("/admin/transactions", { params })),
   alerts: () => data<AdminAlert[]>(api.get("/admin/alerts")),

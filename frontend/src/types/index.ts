@@ -9,6 +9,33 @@ export interface TokenResponse {
   csrf_token: string;
 }
 
+/** 202 from POST /api/auth/login: the password was accepted but the account has two-factor on. No session yet. */
+export interface MfaRequiredResponse {
+  mfa_required: true;
+  mfa_token: string;
+  expires_in: number;
+}
+
+export type MfaFactor = { code: string } | { recovery_code: string };
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  enrolled_at: string | null;
+  recovery_codes_remaining: number;
+  pending_enrolment: boolean;
+}
+
+/** Shown once; the secret never comes back from the API again. */
+export interface TwoFactorEnrolment {
+  secret: string;
+  otpauth_uri: string;
+}
+
+/** Shown once; the previous codes stop working. */
+export interface RecoveryCodes {
+  recovery_codes: string[];
+}
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -388,7 +415,7 @@ export interface AdminStats {
   signups_by_day?: { day: string; count: number }[];   // last 14 days (UTC), so a leaked invite code is visible
 }
 export interface AdminUserRow { id: string; email: string; role: string; kyc_status: string; suspended: boolean; created_at: string; invested_usdt: number;
-  wallet_hold_until?: string | null; wallet_hold_reason?: string | null }
+  wallet_hold_until?: string | null; wallet_hold_reason?: string | null; totp_enabled?: boolean }
 export interface AdminTxRow { id: string; user_id: string; crypto: string; cost_usdt: number; status: string; error_message?: string | null; created_at: string }
 export interface AdminAlert { name: string; severity: "ok" | "warning" | "critical"; value: string; detail: string }
 
