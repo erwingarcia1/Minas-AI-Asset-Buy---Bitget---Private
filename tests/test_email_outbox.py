@@ -329,7 +329,7 @@ async def test_purchase_failure_emails_are_queued_as_failure_category(db, user, 
     for _ in range(3):   # the failure email goes out once the cycle is exhausted (here: the stop)
         await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
     (m,) = await queued()
-    assert m["category"] == "failure" and m["user_id"] == str(user.id) and "has been stopped" in m["subject"]
+    assert m["category"] == "failure" and m["user_id"] == str(user.id) and "We've paused your" in m["subject"]
 
 
 def test_scheduler_has_the_outbox_job():

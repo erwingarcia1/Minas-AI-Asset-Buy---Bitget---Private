@@ -143,10 +143,16 @@ async def _dispatcher(db, event: PurchaseEvent) -> None:
                     else f", sent to {p.wallet_address}" if event.type == "withdrawal_sent" else ", held on the exchange"),
             critical=(tx.cost_usd or p.amount_usd) >= LARGE_TRANSACTION_USDT, include_email=False)
     else:
+        body = str(event.error or "")[:200]
+        if event.type == "buy_failed":
+            from api.services import failure_text as ft
+            cls = ft.classify(body)
+            if cls != ft.UNKNOWN or event.tx.tx_type == "buy":
+                body = ft.in_app_line(cls, p.crypto_symbol)
         await dispatcher.notify(
             db, event.user, template="purchase_failed",
             subject=f"{'Withdrawal' if event.type == 'withdrawal_failed' else 'Purchase'} failed: {p.crypto_symbol}",
-            body=str(event.error or "")[:200], critical=True, include_email=False)
+            body=body, critical=True, include_email=False)
 
 
 @subscribe

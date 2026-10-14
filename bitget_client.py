@@ -400,6 +400,17 @@ class BitgetUnifiedClient(BitgetClient):
                  "amount": r.get("execValue"), "feeDetail": r.get("feeDetail")} for r in rows or []]
 
     # Every v3 path this client calls, with a harmless read-only request for each (place-order excluded):
+    def get_funding_available(self, coin):
+        """Available `coin` in the FUNDING account (read-only; #91's top-up hint).
+        Buys can never spend this balance — it exists only to tell the customer
+        where their money is sitting. Verified live 2026-10-12."""
+        data = self._request("GET", "/api/v3/account/funding-assets", params={"coin": coin}) or []
+        rows = data.get("assets") if isinstance(data, dict) else data
+        for row in rows or []:
+            if str(row.get("coin", "")).upper() == coin.upper():
+                return float(row.get("available") or 0)
+        return 0.0
+
     # a made-up order id must get Bitget's normal "no such order" answer, never 40404 (unknown URL).
     PROBE_PATHS = (
         ("GET", "/api/v3/account/info", {}),

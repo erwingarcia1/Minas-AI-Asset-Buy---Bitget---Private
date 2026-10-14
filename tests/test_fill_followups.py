@@ -122,10 +122,10 @@ async def test_a_recurring_purchase_misses_the_cycle_after_three_attempts_and_mo
     # not due again before then
     assert (await ps.execute_due_purchases(db, now=NOW + timedelta(hours=3), gateway=BuyFails(), dry_run=True)) == {"executed": 0, "failed": 0, "skipped": 0}
     # the customer heard ONCE, when the cycle was exhausted: attempts 1 and 2 send nothing
-    mails = [m for m in capture.sent if "Purchase missed" in m["subject"] or "Purchase failed" in m["subject"]]
-    assert len(mails) == 1 and "Purchase missed: BTC" in mails[0]["subject"]
-    assert "tried 3 times" in mails[0]["text"] and "missed for this cycle" in mails[0]["text"]
-    assert "next attempt is at" in mails[0]["text"] and "no money was spent" in mails[0]["text"]
+    mails = [m for m in capture.sent if "didn't go through" in m["subject"] or "Purchase failed" in m["subject"]]
+    assert len(mails) == 1 and "Your BTC buy didn't go through" in mails[0]["subject"]
+    assert "tried 3 times" in mails[0]["text"] and "Your next attempt is" in mails[0]["text"]
+    assert "Nothing was bought and no money left your account" in mails[0]["text"]
     # Slack: one line per run (three runs), never a per-attempt line per purchase
     run_lines = [s for s in slack if "purchase(s) failed a buy attempt" in s]
     assert len(run_lines) == 3 and all("1 purchase(s)" in s for s in run_lines)
@@ -156,9 +156,10 @@ async def test_three_missed_cycles_in_a_row_stop_the_purchase_and_alert(db, user
     assert p.last_error.startswith("PURCHASE STOPPED after 9 failed attempts (3 cycles missed in a row)")
     assert any("PURCHASE STOPPED" in s for s in slack)
     mails = capture.sent
-    stopped = [m for m in mails if "has been stopped" in m["subject"]]
-    assert len(stopped) == 1 and "has now been STOPPED" in stopped[0]["text"] and "no money was spent" in stopped[0]["text"]
-    assert len([m for m in mails if "Purchase missed" in m["subject"]]) == 2, "one email per missed cycle before the stop"
+    stopped = [m for m in mails if "We've paused your" in m["subject"]]
+    assert len(stopped) == 1 and "We've paused this purchase" in stopped[0]["text"]
+    assert "Nothing was bought and no money left your account" in stopped[0]["text"]
+    assert len([m for m in mails if "didn't go through" in m["subject"]]) == 2, "one email per missed cycle before the stop"
     async with api() as c:
         alerts = {a["name"]: a for a in (await c.get("/api/admin/alerts", headers=auth_headers(admin))).json()}
     assert alerts["stopped_purchases"]["severity"] == "critical" and alerts["stopped_purchases"]["value"] == "1"
@@ -179,7 +180,7 @@ async def test_a_one_time_purchase_stops_after_its_three_attempts(db, user, bitg
     assert p.status == "failed" and p.next_execution is None and p.last_error.startswith("PURCHASE STOPPED after 3 failed attempts:")
     assert any("PURCHASE STOPPED" in s for s in slack)
     # same day: the one-time purchase is stopped within ~15 minutes and that is the one email it gets
-    assert [m["subject"] for m in capture.sent] == ["[DRY RUN] ⛔ Your BTC purchase has been stopped"]
+    assert [m["subject"] for m in capture.sent] == ["[DRY RUN] We've paused your BTC purchase. No money was spent"]
 
 
 def test_attempt_in_cycle_math():

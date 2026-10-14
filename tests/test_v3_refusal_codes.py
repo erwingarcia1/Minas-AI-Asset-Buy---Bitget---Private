@@ -110,9 +110,11 @@ async def test_stopped_one_time_purchase_emails_the_same_text_as_classic(db, use
     assert p.status == "failed" and p.next_execution is None
     mails = [m for m in capture.sent if m["template"] == "purchase"]
     assert len(mails) == 1, "one email, when the purchase is stopped — not one per attempt"
-    assert mails[0]["subject"] == "⛔ Your PEPE purchase has been stopped"
-    assert "last error: 25202: Insufficient balance" in mails[0]["text"]
-    assert "no money was spent" in mails[0]["text"]
+    assert mails[0]["subject"] == "We've paused your PEPE purchase. No money was spent"
+    assert "didn't have enough USDT" in mails[0]["text"]
+    assert "25202" not in mails[0]["text"], "venue codes never reach the customer"
+    assert "Nothing was bought and no money left your account" in mails[0]["text"]
+    assert mails[0]["text"].endswith("Need help? Reply to this email or ask in the AutoBuy Telegram group.")
 
 
 # ------------------------------------------------- unknown errors keep the lookup path

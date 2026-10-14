@@ -146,7 +146,7 @@ async def test_real_subscribers_email_campaign_webhook_slack(db, user, binance_k
     assert delivered[-1]["event"] == "purchase.buy_failed" and delivered[-1]["data"]["error"]
     for _ in range(2):
         await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
-    assert any("has been stopped" in m["subject"] for m in capture.sent), "the stop is the one email it gets"
+    assert any("We've paused your" in m["subject"] for m in capture.sent), "the stop is the one email it gets"
     assert any("PURCHASE STOPPED" in s for s in slack_calls)
     assert purchase_events.emit is not None
 

@@ -84,7 +84,7 @@ class NotificationDispatcher:
         results = {}
 
         if not include_email:
-            results["email"] = "skipped_pref"
+            results["email"] = "covered_elsewhere"   # a richer email carries this event
         elif prefs.email_enabled:
             ok = await email_service._send(user.email, subject,
                                            html or f"<p>{body}</p>", body,
