@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] — 2026-10-14: plain-English failure text, Funding hint (PR #93)
+
+### Changed
+
+* Customer-facing buy-failure wording (#90): plain English with no venue
+  codes, new subjects ("Your {COIN} buy didn't go through. No money was
+  spent" / "We've paused your {COIN} purchase. No money was spent"), USDT-only
+  money, the current balance and exact top-up amount when readable, next
+  attempts in Eastern with the UTC clock in brackets, mode-specific key-fix
+  steps, and a help footer. Raw codes stay on the rows, in admin views, Slack
+  and Telegram. Bitget menu labels live in one BITGET_LABELS block.
+* The pre-buy top-up warning's instructions are per account mode, and on
+  Unified accounts the email says when USDT sits in Funding and how to move
+  it (#91) — "enough to cover this" only when Funding covers the shortfall.
+* The customer notification feed returns sent rows only; the rich-email case
+  records "covered_elsewhere" instead of "skipped_pref".
+
 ## [0.8.1] — 2026-10-12: Unified definite refusals (PR #89)
 
 ### Fixed
