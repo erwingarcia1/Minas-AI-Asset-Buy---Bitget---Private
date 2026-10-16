@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from api.services.telegram import mask_email
 from guardian.db import Database
 
 logger = logging.getLogger("guardian.events")
@@ -120,7 +121,7 @@ def notify_alert_destination_change(db: Database, account_label: str,
             _PlainNotice(message), account_label, [old_email], [],
         )
     except Exception as exc:  # noqa: BLE001 - the change has already happened
-        logger.error("could not send the destination-change notice to %s: %s", old_email, exc)
+        logger.error("could not send the destination-change notice to %s: %s", mask_email(old_email), exc)
 
 
 def record_member_security_event(db: Database, user_id, event_type: str,

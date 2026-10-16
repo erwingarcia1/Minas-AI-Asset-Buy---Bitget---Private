@@ -28,6 +28,7 @@ from typing import Optional
 
 from api.config import settings
 from api.integrations import resend
+from api.services.telegram import mask_email
 
 logger = logging.getLogger("autobuy.email_outbox")
 
@@ -118,13 +119,13 @@ def enqueue_sync(to: str, subject: str, html: str, text: str, template: str = "g
             if size > MAX_QUEUE_LENGTH:
                 dropped = r.zremrangebyrank(OUTBOX_KEY, 0, size - MAX_QUEUE_LENGTH - 1)
                 logger.error("email outbox over its cap of %d messages: %d earliest-due message(s) dropped (newest kept: to=%s template=%s)",
-                             MAX_QUEUE_LENGTH, dropped, to, template)
+                             MAX_QUEUE_LENGTH, dropped, mask_email(to), template)
         finally:
             r.close()
         return True
     except Exception as exc:
         logger.error("email outbox unavailable, message not queued: to=%s template=%s subject=%r reason=%s",
-                     to, template, subject, exc)
+                     mask_email(to), template, subject, exc)
         return False
 
 
