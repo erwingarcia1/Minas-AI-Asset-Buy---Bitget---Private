@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { transactionAPI } from "@/api/endpoints";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
+import UpcomingSchedules from "@/components/Transactions/UpcomingSchedules";
 import { useAsync } from "@/hooks/useAsync";
 import { fmtCrypto, fmtDate, fmtUsdt, fmtPrice } from "@/utils/format";
 
@@ -31,6 +32,7 @@ export default function Transactions() {
           <div className="card" data-testid="tile-average"><p className="text-sm text-slate-500">Average per completed buy</p><p className="text-2xl font-semibold">{fmtUsdt(stats.average_purchase_usdt)}</p></div>
         </div>
       )}
+      <UpcomingSchedules />
       {loading ? <Loading /> : error || !data ? <Alert kind="error">{error}</Alert> : (
         <>
           <div className="card overflow-x-auto p-0">

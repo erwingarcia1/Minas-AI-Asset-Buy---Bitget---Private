@@ -3,8 +3,8 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Transactions from "@/pages/Transactions";
 
-vi.mock("@/api/endpoints", () => ({ transactionAPI: { list: vi.fn(), stats: vi.fn() } }));
-import { transactionAPI } from "@/api/endpoints";
+vi.mock("@/api/endpoints", () => ({ transactionAPI: { list: vi.fn(), stats: vi.fn() }, autoBuyAPI: { list: vi.fn() } }));
+import { autoBuyAPI, transactionAPI } from "@/api/endpoints";
 
 const ok = { id: "t1", purchase_id: "p1", crypto: "BTC", purchase_type: "dca", tx_type: "buy", status: "completed", amount_crypto: 0.00019134,
   cost_usdt: 15, exchange_rate: 78395.01, fee: null, fee_currency: null, exchange: "bitget", order_id: "DRY-ab-1", withdrawal_id: null,
@@ -15,6 +15,7 @@ const failed = { ...ok, id: "t2", status: "failed", amount_crypto: 0, cost_usdt:
 
 describe("Transactions page: failed attempts are distinct and the tiles agree", () => {
   beforeEach(() => {
+    vi.mocked(autoBuyAPI.list).mockResolvedValue([] as never);
     vi.mocked(transactionAPI.list).mockResolvedValue({ items: [ok, failed], total: 2 } as never);
     vi.mocked(transactionAPI.stats).mockResolvedValue({ total_transactions: 16, total_invested_usdt: 255, average_purchase_usdt: 31.875,
       completed_count: 8, failed_count: 6, pending_count: 0, needs_review_count: 1 } as never);

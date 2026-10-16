@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { dashboardAPI } from "@/api/endpoints";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
+import ActiveSince from "@/components/Dashboard/ActiveSince";
 import Analytics from "@/components/Dashboard/Analytics";
 import PortfolioChart from "@/components/Dashboard/PortfolioChart";
 import { useAsync } from "@/hooks/useAsync";
@@ -32,6 +33,7 @@ export default function Dashboard() {
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <Link to="/purchases" className="btn-primary">New purchase</Link>
       </div>
+      <ActiveSince />
       {stats.kyc_status !== "verified" && (
         <Alert kind="warning">Identity not verified — scheduled purchases will not execute. <Link to="/kyc" className="font-medium underline">Verify now</Link></Alert>
       )}
