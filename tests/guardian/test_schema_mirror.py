@@ -1,4 +1,4 @@
-"""api/models/guardian.py and migration 030 describe the same tables.
+"""api/models/guardian.py, the User model and migration 030 describe the same schema.
 
 The worker writes through raw SQL and the API reads through the ORM; the
 only thing keeping them honest is that both match the migrated schema. Any
@@ -21,8 +21,10 @@ def test_orm_mirror_matches_the_migrated_guardian_tables():
             diffs = compare_metadata(ctx, Base.metadata)
     finally:
         engine.dispose()
-    guardian_diffs = [d for d in diffs if "guardian_" in repr(d)]
-    assert guardian_diffs == [], f"ORM and migration 030 disagree: {guardian_diffs}"
+    # The users table is included for the two columns 030 touches (password_reset_required,
+    # notification_preferences -> Text); older drift in other tables is not this migration's.
+    relevant = [d for d in diffs if "guardian_" in repr(d) or "'users'" in repr(d)]
+    assert relevant == [], f"ORM and migration 030 disagree: {relevant}"
 
 
 def test_every_guardian_table_is_mirrored():

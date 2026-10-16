@@ -28,7 +28,8 @@ production before any feature does.
   timestamptz, jsonb and numeric columns, cascading foreign keys from the
   account and `guardian_accounts.user_id` → `users.id`; plus
   `users.password_reset_required` and `users.notification_preferences`
-  widened to Text. `api/models/guardian.py` mirrors it for the API.
+  widened to Text. `api/models/guardian.py` mirrors the tables for the API;
+  the `User` model carries the two columns.
 * The `guardian` compose service (`autobuy_guardian`, the API image,
   `python -m guardian.worker`, no ports, 1 GB cap, waits for the API so
   migrations have run). Heartbeat `autobuy:guardian:heartbeat` and pause
