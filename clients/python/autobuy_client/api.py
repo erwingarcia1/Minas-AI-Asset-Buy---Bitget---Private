@@ -59,6 +59,7 @@ from .types import (
     ResetPasswordRequest,
     ResetTokenRequest,
     ResetTokenValidity,
+    ResetTwoFactorRequest,
     ResolvePurchase,
     RetryWithdrawalOut,
     SendNotificationRequest,
@@ -641,9 +642,9 @@ class AdminApi:
         """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
         return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
 
-    def reset_two_factor(self, user_id: str) -> Any:
+    def reset_two_factor(self, user_id: str, body: Optional[ResetTwoFactorRequest] = None) -> Any:
         """Reset Two Factor — ``POST /api/admin/users/{user_id}/2fa/reset``."""
-        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/2fa/reset", auth=True)
+        return self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/2fa/reset", auth=True, body=body)
 
     def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
         """List Purchases — ``GET /api/admin/purchases``."""
@@ -724,9 +725,9 @@ class AsyncAdminApi:
         """Kyc Override — ``POST /api/admin/users/{user_id}/kyc-override``."""
         return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/kyc-override", auth=True, body=body)
 
-    async def reset_two_factor(self, user_id: str) -> Any:
+    async def reset_two_factor(self, user_id: str, body: Optional[ResetTwoFactorRequest] = None) -> Any:
         """Reset Two Factor — ``POST /api/admin/users/{user_id}/2fa/reset``."""
-        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/2fa/reset", auth=True)
+        return await self._http.request("POST", "/api/admin/users/" + _q(user_id) + "/2fa/reset", auth=True, body=body)
 
     async def list_purchases(self, *, status: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> AdminPurchaseList:
         """List Purchases — ``GET /api/admin/purchases``."""

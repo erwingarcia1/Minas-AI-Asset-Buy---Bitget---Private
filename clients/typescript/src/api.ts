@@ -56,6 +56,7 @@ import type {
   ResetPasswordRequest,
   ResetTokenRequest,
   ResetTokenValidity,
+  ResetTwoFactorRequest,
   ResolvePurchase,
   RetryWithdrawalOut,
   SendNotificationRequest,
@@ -418,8 +419,8 @@ export class AdminApi {
   }
 
   /** Reset Two Factor — `POST /api/admin/users/{user_id}/2fa/reset` */
-  resetTwoFactor(userId: string): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/2fa/reset", { auth: true });
+  resetTwoFactor(userId: string, body?: ResetTwoFactorRequest | null): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/2fa/reset", { body, auth: true });
   }
 
   /** List Purchases — `GET /api/admin/purchases` */

@@ -56,6 +56,7 @@ import type {
   ResetPasswordRequest,
   ResetTokenRequest,
   ResetTokenValidity,
+  ResetTwoFactorRequest,
   ResolvePurchase,
   RetryWithdrawalOut,
   SendNotificationRequest,
@@ -245,7 +246,7 @@ export declare class AdminApi {
   /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
   kycOverride(userId: string, body: KycOverride): Promise<unknown>;
   /** Reset Two Factor — `POST /api/admin/users/{user_id}/2fa/reset` */
-  resetTwoFactor(userId: string): Promise<unknown>;
+  resetTwoFactor(userId: string, body?: ResetTwoFactorRequest | null): Promise<unknown>;
   /** List Purchases — `GET /api/admin/purchases` */
   listPurchases(query?: { status?: string | null; limit?: number; offset?: number }): Promise<AdminPurchaseList>;
   /** Review Purchase — `GET /api/admin/purchases/{purchase_id}/review` */

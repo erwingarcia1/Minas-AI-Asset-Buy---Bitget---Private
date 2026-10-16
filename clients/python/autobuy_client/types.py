@@ -682,6 +682,11 @@ class ResetTokenValidity(TypedDict):
     valid: bool
 
 
+class ResetTwoFactorRequest(TypedDict):
+    """The calling admin's own current authenticator code; required when two-factor is on for their account."""
+    code: NotRequired[Optional[str]]
+
+
 class ResolvePurchase(TypedDict):
     """ResolvePurchase."""
     action: str

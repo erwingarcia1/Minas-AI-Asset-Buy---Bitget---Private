@@ -613,6 +613,11 @@ export interface ResetTokenValidity {
   valid: boolean;
 }
 
+/** The calling admin's own current authenticator code; required when two-factor is on for their account. */
+export interface ResetTwoFactorRequest {
+  code?: string | null;
+}
+
 export interface ResolvePurchase {
   action: string;
   note: string;

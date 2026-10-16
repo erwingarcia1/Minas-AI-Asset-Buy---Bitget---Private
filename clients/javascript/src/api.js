@@ -574,10 +574,11 @@ export class AdminApi {
   /**
    * Reset Two Factor — `POST /api/admin/users/{user_id}/2fa/reset`
    * @param {string} userId
+   * @param {import('./types.js').ResetTwoFactorRequest | null} body
    * @returns {Promise<unknown>}
    */
-  resetTwoFactor(userId) {
-    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/2fa/reset", { auth: true });
+  resetTwoFactor(userId, body) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/2fa/reset", { body, auth: true });
   }
 
   /**

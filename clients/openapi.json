@@ -2309,7 +2309,7 @@
           "user"
         ],
         "summary": "Reset Two Factor",
-        "description": "Support path for a lost authenticator: remove the user's two-factor\nenrolment and recovery codes so they can sign in with the password alone\nand enrol again. Audited; the user is emailed when something was removed.",
+        "description": "Support path for a lost authenticator: remove the user's two-factor\nenrolment and recovery codes so they can sign in with the password alone\nand enrol again. Never for the caller's own account (a stolen admin session\nmust not strip its owner's second factor: use Settings \u2192 Security, or ask\nanother admin), and an admin who has two-factor on proves it with their\ncurrent code. Audited; the user is emailed when something was removed.",
         "operationId": "reset_two_factor_api_admin_users__user_id__2fa_reset_post",
         "security": [
           {
@@ -2328,6 +2328,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ResetTwoFactorRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -4928,7 +4945,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "maxLength": 16,
+            "maxLength": 32,
             "title": "Code"
           }
         },
@@ -5155,7 +5172,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 16
+                "maxLength": 32
               },
               {
                 "type": "null"
@@ -5817,7 +5834,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 16
+                "maxLength": 32
               },
               {
                 "type": "null"
@@ -7301,7 +7318,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "maxLength": 16,
+            "maxLength": 32,
             "title": "Code"
           }
         },
@@ -7393,6 +7410,25 @@
           "valid"
         ],
         "title": "ResetTokenValidity"
+      },
+      "ResetTwoFactorRequest": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "title": "ResetTwoFactorRequest",
+        "description": "The calling admin's own current authenticator code; required when two-factor is on for their account."
       },
       "ResolvePurchase": {
         "properties": {
