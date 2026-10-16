@@ -34,15 +34,20 @@ def main() -> None:
     url = settings.database_url.replace("+asyncpg", "+psycopg2")
     engine = create_engine(url)
     with engine.begin() as conn:
+        def rotate(token):
+            """None stays None (Binance keys carry no passphrase)."""
+            return None if token is None else new_f.encrypt(old_f.decrypt(token.encode())).decode()
+
         rows = conn.execute(
-            text("SELECT id, encrypted_api_key, encrypted_api_secret FROM api_keys")).all()
+            text("SELECT id, encrypted_api_key, encrypted_api_secret, encrypted_passphrase FROM api_keys")).all()
         for row in rows:
             conn.execute(
-                text("UPDATE api_keys SET encrypted_api_key=:k, encrypted_api_secret=:s "
+                text("UPDATE api_keys SET encrypted_api_key=:k, encrypted_api_secret=:s, encrypted_passphrase=:p "
                      "WHERE id=:id"),
                 {"id": row.id,
-                 "k": new_f.encrypt(old_f.decrypt(row.encrypted_api_key.encode())).decode(),
-                 "s": new_f.encrypt(old_f.decrypt(row.encrypted_api_secret.encode())).decode()})
+                 "k": rotate(row.encrypted_api_key),
+                 "s": rotate(row.encrypted_api_secret),
+                 "p": rotate(row.encrypted_passphrase)})
         print(f"re-encrypted {len(rows)} api_keys row(s)")
         totp_rows = conn.execute(text("SELECT user_id, encrypted_secret FROM user_totp")).all()
         for row in totp_rows:
