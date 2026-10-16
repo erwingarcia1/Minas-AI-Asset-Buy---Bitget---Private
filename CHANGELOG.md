@@ -35,7 +35,9 @@ production before any feature does.
   switch `autobuy:guardian:paused` in Redis; `/health` gains a `guardian`
   block (`running`, `enabled`, `paused`, `active_accounts`, heartbeat age).
   `scripts/deploy.sh` asserts the worker was recreated on the API's image and
-  waits for a fresh heartbeat before calling the deploy done.
+  waits for a fresh heartbeat before calling the deploy done — only when the
+  checkout's compose file declares the `guardian` service, so the script stays
+  correct if it ever runs against a tree without the worker.
 * Channels on the platform's transports: customer and admin email through the
   Resend outbox (`email_outbox.enqueue_sync`), Telegram through
   `api/services/telegram.send_sync` (emails masked; optional

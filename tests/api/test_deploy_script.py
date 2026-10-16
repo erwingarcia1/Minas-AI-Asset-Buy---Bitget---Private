@@ -47,6 +47,15 @@ def test_deploy_script_proves_the_guardian_worker_moved_and_is_alive():
     assert "container_name: autobuy_guardian" in guardian_block and "image: autobuy-api:latest" in guardian_block
     assert "ports:" not in guardian_block, "the worker publishes nothing"
     assert '"python", "-m", "guardian.worker"' in guardian_block
+    # Both checks key on the checkout's compose file, so the script stays correct when it runs
+    # against a tree without the worker (2026-10-14: a checkout left on the Guardian branch
+    # deployed main and the unguarded check aborted the run after the API had moved).
+    assert "grep -qx guardian" in text and "guardian_declared=1" in text
+    assert "the worker checks are skipped" in text
+    body = text[text.index("deploy_platform() {"):text.index("\nwait_for_guardian_heartbeat() {")]
+    guards = [m.start() for m in re.finditer(r'if \[ "\$guardian_declared" = 1 \]; then', body)]
+    assert len(guards) == 2, "the recreate check and the heartbeat wait are each behind the guard"
+    assert guards[0] < body.index("guardian_after_id=") < guards[1] < body.index("wait_for_guardian_heartbeat || exit 1")
 
 
 def test_image_is_stamped_with_the_commit_and_health_reports_it(monkeypatch, tmp_path):

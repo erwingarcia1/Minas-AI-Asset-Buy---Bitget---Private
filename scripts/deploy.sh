@@ -182,6 +182,17 @@ deploy_platform() {
         exit 1
     fi
 
+    # The Guardian worker exists from v0.9.1. Its checks key on THIS checkout's compose file,
+    # not on this script: deploy.sh runs from the file on disk at invocation, so a newer script
+    # can run against an older tree (2026-10-14: a checkout left on the Guardian branch deployed
+    # main, and the unguarded check below aborted the run after the API had already moved).
+    local guardian_declared=0
+    if compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config --services 2>/dev/null | grep -qx guardian; then
+        guardian_declared=1
+    else
+        echo "==> [platform] docker-compose.yml declares no guardian service in this checkout — the worker checks are skipped"
+    fi
+
     local before_id before_created expected_commit expected_tree guardian_before_id
     before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_api 2>/dev/null || echo none)"
     before_created="$($SUDO docker inspect --format '{{.Created}}' autobuy_api 2>/dev/null || echo none)"
@@ -237,23 +248,25 @@ deploy_platform() {
 
     # 1b. the Guardian worker (v0.9.1) must have been recreated on the SAME image as the API:
     #     it imports api/config.py, so an old worker next to a new API is a half-deployed box.
-    local guardian_after_id api_image guardian_image
-    guardian_after_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_guardian 2>/dev/null || echo none)"
-    if [ "$guardian_after_id" = "none" ]; then
-        echo "ERROR: no autobuy_guardian container after 'up -d' — the Guardian worker did not start." >&2
-        exit 1
+    if [ "$guardian_declared" = 1 ]; then
+        local guardian_after_id api_image guardian_image
+        guardian_after_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_guardian 2>/dev/null || echo none)"
+        if [ "$guardian_after_id" = "none" ]; then
+            echo "ERROR: no autobuy_guardian container after 'up -d' — the Guardian worker did not start." >&2
+            exit 1
+        fi
+        if [ "$guardian_after_id" = "$guardian_before_id" ]; then
+            echo "ERROR: the autobuy_guardian container was not recreated (same id ${guardian_after_id:0:12})." >&2
+            exit 1
+        fi
+        api_image="$($SUDO docker inspect --format '{{.Image}}' autobuy_api 2>/dev/null || echo api)"
+        guardian_image="$($SUDO docker inspect --format '{{.Image}}' autobuy_guardian 2>/dev/null || echo guardian)"
+        if [ "$api_image" != "$guardian_image" ]; then
+            echo "ERROR: autobuy_guardian runs image ${guardian_image:0:19} but autobuy_api runs ${api_image:0:19} — the worker is not on the deployed build." >&2
+            exit 1
+        fi
+        echo "==> [platform] guardian container recreated: ${guardian_before_id:0:12} -> ${guardian_after_id:0:12} (same image as the API)"
     fi
-    if [ "$guardian_after_id" = "$guardian_before_id" ]; then
-        echo "ERROR: the autobuy_guardian container was not recreated (same id ${guardian_after_id:0:12})." >&2
-        exit 1
-    fi
-    api_image="$($SUDO docker inspect --format '{{.Image}}' autobuy_api 2>/dev/null || echo api)"
-    guardian_image="$($SUDO docker inspect --format '{{.Image}}' autobuy_guardian 2>/dev/null || echo guardian)"
-    if [ "$api_image" != "$guardian_image" ]; then
-        echo "ERROR: autobuy_guardian runs image ${guardian_image:0:19} but autobuy_api runs ${api_image:0:19} — the worker is not on the deployed build." >&2
-        exit 1
-    fi
-    echo "==> [platform] guardian container recreated: ${guardian_before_id:0:12} -> ${guardian_after_id:0:12} (same image as the API)"
 
     echo "==> [platform] Waiting for the API to pass /health (migrations run at boot) ..."
     local _try health
@@ -284,7 +297,9 @@ deploy_platform() {
             echo "==> [platform] Web app on :8080 serves the bundle built from this checkout (frontend tree ${served_tree:0:7})"
             # 4. the Guardian worker (v0.9.1) must be alive: /health.guardian.running is true once its
             #    heartbeat is younger than 180 s, whether GUARDIAN_ENABLED is on or off.
-            wait_for_guardian_heartbeat || exit 1
+            if [ "$guardian_declared" = 1 ]; then
+                wait_for_guardian_heartbeat || exit 1
+            fi
             return 0
         fi
         sleep 4

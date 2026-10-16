@@ -313,6 +313,10 @@ platform` builds, recreates and verifies it with the API:
   **whether `GUARDIAN_ENABLED` is on or off**. Off, the worker only heartbeats.
 - Its loops are not scheduler jobs: the job list in the deploy checklist stays
   seven.
+- Both checks key on the checkout's `docker-compose.yml` declaring the
+  `guardian` service. `deploy.sh` runs from the file on disk at invocation, so
+  a newer script can run against an older tree; without the service the worker
+  checks are skipped with a note and the rest of the verification still runs.
 
 Settings (all in `.env.example`, both compose blocks and `api/config.py`):
 `GUARDIAN_ENABLED` (0/1, the owner's switch), `GUARDIAN_ALLOWED_EMAILS`
