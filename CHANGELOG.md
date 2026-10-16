@@ -75,6 +75,23 @@ nothing else about Guardian lands here.
   150 → 162 (`LoginMfa.test.tsx`, `SecuritySettings.test.tsx`); the Settings
   suite still finds exactly two password fields on the page.
 
+### Hardening (review before merge, 2026-10-16)
+
+* `/login` no longer clears the failed-login counter while a second factor is
+  still owed, so re-posting the password cannot reset the lockout between
+  code guesses; the counter clears when the sign-in completes.
+* Recovery codes are 80 bits (`XXXXX-XXXXX-XXXXX-XXXXX`); codes issued at the
+  older length still verify.
+* An admin cannot reset their own two-factor through the admin route (403),
+  and an admin who has two-factor on proves it with their current code.
+* A wrong password or code on `/api/user/2fa/*` answers 400, not 401, so the
+  web client does not refresh the session and replay the mistake; validation
+  errors no longer echo the submitted body; the delivery-failure log masks
+  the address; "sign out everywhere" stores a whole-second cutoff.
+* `scripts/rotate_encryption_key.py` also re-encrypts
+  `api_keys.encrypted_passphrase` — a pre-existing gap: a rotation would have
+  left every Bitget passphrase under the old key and stopped every buy.
+
 ## [0.8.2] — 2026-10-14: plain-English failure text, Funding hint (PR #93)
 
 ### Changed

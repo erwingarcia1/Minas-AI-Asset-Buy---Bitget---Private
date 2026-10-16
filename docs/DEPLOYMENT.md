@@ -294,6 +294,10 @@ testing steps: `docs/API.md` → "Email (Resend)".
 - Adopting a pre-Alembic DB: `alembic stamp 001 && alembic upgrade head`.
 - Backups: `docker exec autobuy_postgres pg_dump -U autobuy autobuy_db | gzip > backup.sql.gz` on a cron; test restores quarterly.
 - Restore: `gunzip -c backup.sql.gz | docker exec -i autobuy_postgres psql -U autobuy autobuy_db`.
+- Rolling back below migration 029 (`alembic downgrade 028`) drops every two-factor
+  enrolment (those users fall back to password only and must enrol again) and
+  forgets every "sign out everywhere" revocation; rotate `SECRET_KEY` first if a
+  revoked session must stay dead.
 
 ## Monitoring
 
