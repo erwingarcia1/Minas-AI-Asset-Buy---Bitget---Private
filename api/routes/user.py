@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import token_cutoff
 from api.config import settings
 from api.database import get_db
 from api.routes._deps import user_or_404
@@ -67,7 +68,7 @@ async def get_current_user(
         )
     except JWTError:
         raise unauthorized
-    if payload.get("type") in ("refresh", "email_verify", "password_reset"):  # only access tokens log in
+    if payload.get("type") in ("refresh", "email_verify", "password_reset", "mfa_pending"):  # only access tokens log in
         raise unauthorized
     sub = payload.get("sub")
     if not sub:
@@ -82,10 +83,11 @@ async def get_current_user(
         raise unauthorized
     if user.suspended:
         raise HTTPException(status_code=403, detail="Account suspended — contact support")
-    if user.password_changed_at is not None and payload.get("iat") is not None:
+    cutoff = token_cutoff(user)
+    if cutoff is not None and payload.get("iat") is not None:
         issued = datetime.fromtimestamp(payload["iat"], tz=timezone.utc)
-        if issued < user.password_changed_at:
-            raise unauthorized  # token predates the last password change
+        if issued < cutoff:
+            raise unauthorized  # token predates the last password change or "sign out everywhere"
     return user
 
 

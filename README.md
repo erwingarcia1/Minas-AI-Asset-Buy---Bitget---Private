@@ -7,6 +7,15 @@ coin, an amount and a cadence, and either accumulate on the exchange or have
 every buy withdrawn to their own wallet. Executed buys, withdrawals, holdings
 and P&L are recorded from what the exchange actually filled.
 
+The same login will also carry **Guardian**, read-only monitoring of the
+customer's own exchange accounts (Bitget, Bybit, OKX, Binance) that detects
+withdrawals to unknown addresses, unexplained balance drops, trading in
+never-touched markets and the monitoring key being revoked, and tells the
+customer within a minute of the exchange reporting it. It detects and tells;
+it cannot stop anything. Its engine ships in `guardian/` behind
+`GUARDIAN_ENABLED` (v0.9.1) and switches on only when the owner says so; see
+[`docs/GUARDIAN-ARCHITECTURE.md`](docs/GUARDIAN-ARCHITECTURE.md).
+
 Where to look:
 
 - [`docs/API.md`](docs/API.md) — every endpoint, the purchase rules, holdings arithmetic, error codes

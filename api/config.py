@@ -134,11 +134,40 @@ class Settings(BaseSettings):
     # Private beta: registration needs this code (constant-time compared). Empty = open in
     # development; in production an empty value closes registration entirely.
     signup_invite_code: str = os.getenv("SIGNUP_INVITE_CODE", "")
+    # Admins must have two-factor authentication on before any admin route answers (403 with
+    # mfa_required_for_admin until they enrol). Off while the admins enrol; the owner switches it
+    # on afterwards. Compose passes "" when unset: only "1"/"true"/"yes" turns it on.
+    admin_mfa_required: bool = (os.getenv("ADMIN_MFA_REQUIRED") or "0").strip().lower() in ("1", "true", "yes")
     # Telegram ops alerts (api/services/telegram.py): both unset = no-op. The token is never logged or echoed.
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     # At most this many Telegram messages per minute; excess is dropped and counted (compose passes "" when unset)
     telegram_max_per_minute: int = int(os.getenv("TELEGRAM_MAX_PER_MINUTE") or "20")
+
+    # Guardian: read-only exchange monitoring (v0.9.1). Off = nothing visible in the app and an idle
+    # worker that only writes its heartbeat. Flipped only by the owner in .env.
+    guardian_enabled: bool = (os.getenv("GUARDIAN_ENABLED") or "0").strip().lower() in ("1", "true", "yes")
+    # Internal test phase: only these users see Guardian (CSV of emails; empty = every user).
+    guardian_allowed_emails_csv: str = os.getenv("GUARDIAN_ALLOWED_EMAILS", "")
+    # Detection thresholds. Shipped inside the image next to the package; a host file can override it.
+    guardian_rules_path: str = os.getenv("GUARDIAN_RULES_PATH") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guardian", "rules.yaml")
+    # The worker's Prometheus exposition, on the compose network only (no port is published).
+    guardian_metrics_host: str = os.getenv("GUARDIAN_METRICS_HOST") or "0.0.0.0"  # nosec B104 - container bind
+    guardian_metrics_port: int = int(os.getenv("GUARDIAN_METRICS_PORT") or "9109")
+    # Optional second Telegram chat of the same bot (the Guardian team group); empty = TELEGRAM_CHAT_ID only.
+    guardian_telegram_chat_id: str = os.getenv("GUARDIAN_TELEGRAM_CHAT_ID", "")
+    # SMS for Guardian CRITICAL alerts: ClickSend preferred, Twilio (the TWILIO_* above) as fallback.
+    # *_TO_NUMBERS are the operators' own numbers for pages; customers' numbers live on their accounts.
+    clicksend_username: str = os.getenv("CLICKSEND_USERNAME", "")
+    clicksend_api_key: str = os.getenv("CLICKSEND_API_KEY", "")
+    clicksend_from: str = os.getenv("CLICKSEND_FROM", "")
+    clicksend_to_numbers: str = os.getenv("CLICKSEND_TO_NUMBERS", "")
+    twilio_to_numbers: str = os.getenv("TWILIO_TO_NUMBERS", "")
+
+    @property
+    def guardian_allowed_emails(self) -> List[str]:
+        return [e.strip().lower() for e in (self.guardian_allowed_emails_csv or "").split(",") if e.strip()]
 
     # Rate limiting
     rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "1") not in ("0", "false", "no")

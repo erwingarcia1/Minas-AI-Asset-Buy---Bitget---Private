@@ -194,3 +194,40 @@ describe("refresh rate limit (429) never signs the user out", () => {
     expect(document.cookie).not.toContain("autobuy_csrf=cookie-csrf");
   });
 });
+
+describe("refresh on 401: /auth/* routes answer for themselves, except the one that needs a bearer token", () => {
+  beforeEach(() => {
+    document.cookie = "autobuy_csrf=cookie-csrf; path=/";
+    useAuthStore.setState({ accessToken: null, csrfToken: null, user: null, status: "unknown", notice: null });
+    useAuthStore.getState().setTokens({ ...TOKENS, access_token: "expired-acc", csrf_token: "cookie-csrf" });
+    post.mockReset();
+    instanceRequest.mockReset();
+  });
+
+  it("/auth/logout-all: a 401 refreshes once and replays, so 'sign out everywhere' still revokes after the access token aged out", async () => {
+    post.mockResolvedValue({ data: { ...TOKENS, access_token: "fresh-acc" } });
+    instanceRequest.mockResolvedValue({ status: 204 });
+    const onError = responseInterceptors[0];
+    const original = { url: "/auth/logout-all", headers: { Authorization: "Bearer expired-acc" } as Record<string, string> };
+    const result = await onError({ config: original, response: { status: 401 } });
+    expect(result).toEqual({ status: 204 });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(expect.stringMatching(/\/auth\/refresh$/), undefined, expect.objectContaining({ headers: { "X-CSRF-Token": "cookie-csrf" } }));
+    expect(instanceRequest).toHaveBeenCalledTimes(1);
+    expect(instanceRequest).toHaveBeenCalledWith(expect.objectContaining({ url: "/auth/logout-all", _retried: true, headers: expect.objectContaining({ Authorization: "Bearer fresh-acc" }) }));
+    expect(useAuthStore.getState().accessToken).toBe("fresh-acc");
+    expect(useAuthStore.getState().notice).toBeNull();
+  });
+
+  it.each(["/auth/login", "/auth/login/mfa", "/auth/refresh", "/auth/logout", "/auth/register", "/auth/forgot-password", "/auth/reset-password", "/auth/reset-password/validate"])(
+    "%s: a 401 is that route's own answer, so no refresh, no replay, no sign-out, and the error comes back as is", async (url) => {
+    post.mockResolvedValue({ data: { ...TOKENS, access_token: "fresh-acc" } });
+    const onError = responseInterceptors[0];
+    const error = { config: { url, headers: {} }, response: { status: 401 } };
+    await expect(onError(error)).rejects.toBe(error);
+    expect(post).not.toHaveBeenCalled();
+    expect(instanceRequest).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().accessToken).toBe("expired-acc");   // the session is left alone
+    expect(useAuthStore.getState().notice).toBeNull();
+  });
+});

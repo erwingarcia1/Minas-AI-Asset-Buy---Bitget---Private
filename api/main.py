@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 OPENAPI_TAGS = [
     {"name": "auth", "description": "Registration, login, JWT lifecycle (refresh, logout, password change)."},
+    {"name": "security", "description": "Two-factor authentication (TOTP with recovery codes) and sign out everywhere."},
     {"name": "user", "description": "Profile management. `kyc_status` is read-only here — it is owned by the KYC flow."},
     {"name": "kyc", "description": "Sumsub identity verification: widget token, status sync, review webhook."},
     {"name": "exchange", "description": "Exchange API keys: encrypted at rest, masked on read, verified against Binance."},
@@ -90,6 +91,20 @@ app.middleware("http")(platform_middleware)
 # Unhandled exceptions: JSON 500 with request id, no stack trace to the client
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
+# Validation errors: FastAPI's default body echoes the submitted input back, which for a
+# password or one-time-code field is the secret itself. Keep location and message, drop the echo.
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
+
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -133,12 +148,15 @@ async def health_check(request: Request):
     autobuy = await scheduler_state.status("autobuy")
     withdrawals = await scheduler_state.status("withdrawals")
     autobuy_sched = getattr(request.app.state, "autobuy_scheduler", None)
+    from api.services import guardian_state
     return {
         "status": "healthy",
         "environment": settings.api_env,
         "version": "1.0.0",
         "commit": build_commit(),   # the git commit this image was built from ("unknown" outside a stamped image)
         "dry_run": settings.autobuy_dry_run,
+        # the Guardian worker (separate container): alive = a heartbeat younger than 180 s, flag on or off
+        "guardian": await guardian_state.health(),
         "schedulers": {
             "paused": pause["paused"],           # None = Redis unreadable (the job fails closed)
             "paused_since": pause["since"],
@@ -190,6 +208,9 @@ from api.routes import auth, dashboard, exchange, transactions, user, public
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(public.router, prefix="/api/public", tags=["public"])
+from api.routes import twofactor
+# Before the user router: its GET /api/user/{user_id} would otherwise capture /api/user/2fa.
+app.include_router(twofactor.router, prefix="/api/user/2fa", tags=["security"])
 app.include_router(user.router, prefix="/api/user", tags=["user"])
 app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])

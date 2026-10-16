@@ -5,6 +5,192 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-10-13: Guardian engine, dark (PR TBD)
+
+Second Guardian merge PR. Minas AI Guardian's read-only monitoring engine
+moves into this repository as the `guardian/` package and a worker container,
+behind `GUARDIAN_ENABLED` (default 0). Nothing is visible to customers and the
+worker only writes its heartbeat until the owner switches it on; this PR
+exists so the heavy pieces (image, schema, container) land and are proven in
+production before any feature does.
+
+### Added
+
+* `guardian/` — Guardian's engine, poller, twelve detectors, dispatch,
+  escalation, retention, limiters, breakers, read-only onboarding gates and
+  alert copy, ported with the storage swapped for Postgres: a psycopg2 wrapper
+  (`guardian/db.py`) keeps the `cursor()` contract the engine was written
+  against, with typecasters so timestamps and JSON come back in the shapes the
+  engine wrote. `?` became `%s`, `lastrowid` became `RETURNING id`, tables
+  gained the `guardian_` prefix; the detectors are untouched (one message now
+  says Guardian instead of Sentinel).
+* **Migration 030** (`030_guardian_tables`): 19 `guardian_*` tables with
+  bigint identity ids (Guardian's dedup keys survive the cutover),
+  timestamptz, jsonb and numeric columns, cascading foreign keys from the
+  account and `guardian_accounts.user_id` → `users.id`; plus
+  `users.password_reset_required` and `users.notification_preferences`
+  widened to Text. `api/models/guardian.py` mirrors the tables for the API;
+  the `User` model carries the two columns.
+* The `guardian` compose service (`autobuy_guardian`, the API image,
+  `python -m guardian.worker`, no ports, 1 GB cap, waits for the API so
+  migrations have run). Heartbeat `autobuy:guardian:heartbeat` and pause
+  switch `autobuy:guardian:paused` in Redis; `/health` gains a `guardian`
+  block (`running`, `enabled`, `paused`, `active_accounts`, heartbeat age).
+  `scripts/deploy.sh` asserts the worker was recreated on the API's image and
+  waits for a fresh heartbeat before calling the deploy done — only when the
+  checkout's compose file declares the `guardian` service, so the script stays
+  correct if it ever runs against a tree without the worker.
+* Channels on the platform's transports: customer and admin email through the
+  Resend outbox (`email_outbox.enqueue_sync`), Telegram through
+  `api/services/telegram.send_sync` (emails masked; optional
+  `GUARDIAN_TELEGRAM_CHAT_ID`), SMS via ClickSend or Twilio
+  (`CLICKSEND_*`, `TWILIO_TO_NUMBERS`). The daily MEDIUM/LOW digest runs
+  inside the worker (`alerting.digest_hour_utc`, default 08:00 UTC) instead
+  of Guardian's host cron.
+* Settings `GUARDIAN_ENABLED`, `GUARDIAN_ALLOWED_EMAILS`, `GUARDIAN_RULES_PATH`,
+  `GUARDIAN_METRICS_HOST/PORT`, `GUARDIAN_TELEGRAM_CHAT_ID`, `CLICKSEND_USERNAME`,
+  `CLICKSEND_API_KEY`, `CLICKSEND_FROM`, `CLICKSEND_TO_NUMBERS`,
+  `TWILIO_TO_NUMBERS` in `.env.example` and both compose blocks;
+  `tests/test_env_plumbing.py` now also asserts the worker's block carries
+  every api setting.
+* Dependencies: `ccxt==4.5.63` (Guardian's pin; the four read-only adapters
+  were verified against it), `PyYAML==6.0.3`, an explicit `cryptography` pin.
+* `tests/guardian/` — Guardian's engine suite on Postgres (its own conftest:
+  truncate-per-test, one throwaway test user, every transport setting blanked);
+  the suite is the proof detection did not change in the move.
+* Docs: `docs/GUARDIAN-ARCHITECTURE.md`, `GUARDIAN-SECURITY.md`,
+  `GUARDIAN-THREAT-MODEL.md`, `GUARDIAN-RETENTION.md`, a "Guardian worker"
+  section in `docs/DEPLOYMENT.md`.
+
+### Changed
+
+* `api/services/email_outbox.py`: the queued message is built by one helper
+  shared with the new synchronous entry point; the async path is unchanged.
+* `api/services/telegram.py`: `send_detailed`/`send` take an optional
+  `chat_id`; `send_sync` for a thread without an event loop.
+* CI runs on `guardian/**` changes too and measures `--cov=guardian`.
+
+### Not in this PR
+
+* No API route, page or nav entry (PR3–PR5); no live channel in production
+  (PR6 switches the flag on for internal accounts); no data migration (PR7).
+* Not ported from Guardian: its HTML dashboard and portal, CLI, operator and
+  member identities, scrypt passwords, SQLite schema, optional AI triage,
+  WebSocket monitor, deploy gate, mutation testing and git hooks.
+### Hardening (review before merge, 2026-10-16)
+
+* `scripts/deploy.sh`: the worker checks key on the checkout's compose file
+  (a newer script can run against an older tree); a rollback to a tree
+  without the worker warns and stops an orphaned `autobuy_guardian` instead
+  of leaving it running on the old image; the compose services list is read
+  once. The worker's `SKIP_MIGRATIONS` is a literal, not a knob.
+* The `User` model mirrors the two `users` columns of migration 030 and the
+  schema-mirror test compares that table too.
+* Engine: a key replacement rewrites `key_fingerprint` and refuses a key that
+  already watches another account; accounts still seeding their baseline are
+  not polled; labels fit `varchar(100)`; digest-bound and snoozed alerts no
+  longer page operators as "delivered to nobody"; an unreadable rules file
+  pages once, not every pass; the heartbeat beats at least every 60 s
+  whatever the poll interval; the scheduler thread is joined on stop and the
+  worker exits 1 when its engine dies on its own.
+* Copy and masking: no alert or page tells anyone to run a `sentinel` CLI;
+  wallet addresses, emails and phone numbers are masked in Telegram text and
+  in the worker's logs; amounts render with at most 8 decimals and never in
+  scientific notation.
+* `api/services/telegram.send_sync` holds a lock around the shared limiter
+  state, so worker threads cannot exceed the per-minute cap together.
+* Tests: the SMS-provider factory tests set `settings` (they were vacuous);
+  the breaker back-off test drives a fake clock; the root conftest pins every
+  new variable.
+
+## [0.9.0] — 2026-10-13: Two-factor authentication and sign out everywhere (PR TBD)
+
+First of the Guardian merge PRs (`docs/GUARDIAN` plan): the platform gains the
+optional TOTP second factor that Minas AI Guardian's customers already have,
+ahead of their accounts moving over. `GUARDIAN_ENABLED` does not exist yet;
+nothing else about Guardian lands here.
+
+### Added
+
+* Optional two-factor authentication for every account: `/api/user/2fa`
+  (enrol with the password, confirm with a code, ten single-use recovery
+  codes shown once, regenerate against a code, disable with the password plus
+  a code or a recovery code). Settings → Security renders the QR code in the
+  browser (`qrcode` 1.5.4; the secret never leaves the page) and shows the
+  recovery codes once with copy and download. Every change emails the account.
+  RFC 6238 on the standard library, ported verbatim from Guardian
+  (`api/services/totp.py`, `api/services/twofactor.py`): no new Python
+  dependency inside the authentication path.
+* `POST /api/auth/login` answers **202** `{mfa_required, mfa_token, expires_in}`
+  for an account with two-factor on and sets no cookie; `POST /api/auth/login/mfa`
+  finishes the session with the same body and cookies as `/login`. The login
+  page gains the code step (authenticator code or recovery code).
+* `POST /api/auth/logout-all` ("Sign out everywhere" in Settings → Security):
+  `users.sessions_revoked_at`; every access and refresh token issued before it
+  is refused, the caller's included.
+* Admin: `totp_enabled` on the user list with a 2FA pill, a "Reset 2FA"
+  support action (`POST /api/admin/users/{id}/2fa/reset`, audited, the user is
+  emailed), and `ADMIN_MFA_REQUIRED` (default 0): when on, every admin route
+  answers 403 `mfa_required_for_admin` until the admin has enrolled, and an
+  admin cannot turn two-factor off.
+* **Migration 029** (`029_user_totp_and_session_revocation`): `user_totp`,
+  `user_totp_recovery_codes`, `users.sessions_revoked_at`. Empty tables, no
+  backfill; nothing changes for a user who never enrols.
+* New `.env` line (also in compose): `ADMIN_MFA_REQUIRED=0`.
+
+### Changed
+
+* The Fernet helpers moved from `api/routes/exchange.py` to
+  `api/services/crypto.py` byte for byte (the router re-exports the same
+  names; services and the coming Guardian worker encrypt without importing a
+  router). TOTP secrets use the same cipher; `scripts/rotate_encryption_key.py`
+  rotates `user_totp` alongside `api_keys`.
+* `POST /api/auth/verify` answers `valid: false` for the MFA pending token;
+  the email-verification token still identifies its user there, as before.
+* The bearer guard and `/refresh` compare a token's `iat` against the later of
+  `password_changed_at` and `sessions_revoked_at` (`api.auth.token_cutoff`);
+  with the new column NULL the behaviour is identical to before.
+
+### Security
+
+* The pending MFA token lives five minutes, is redeemable once, allows five
+  attempts, is bound to the password hash it was issued against, and is
+  refused by the bearer guard and by `/verify`. A wrong code, a wrong password
+  at enrol/disable and a wrong code at regenerate all count towards the
+  15-minute lockout. Each 30-second step is accepted once, atomically (two
+  requests spending the same code get exactly one success). Secrets, codes
+  and tokens never reach the log; the tests assert it on captured output.
+* A session that existed before enrolment keeps working: turning two-factor
+  on protects future sign-ins, it does not evict the person turning it on.
+
+### Tests
+
+* Backend 654 → 720 (`tests/test_totp.py` 19 ported verbatim,
+  `test_twofactor_service.py`, `test_mfa_login.py`, `test_twofactor_routes.py`,
+  `test_logout_all.py`); the existing auth suites (`test_session_cookies`,
+  `test_refresh_grace`, `test_logout_stale_csrf`, `test_routes_auth`,
+  `test_password_reset`, `test_security`) unchanged and green. Frontend
+  150 → 162 (`LoginMfa.test.tsx`, `SecuritySettings.test.tsx`); the Settings
+  suite still finds exactly two password fields on the page.
+
+### Hardening (review before merge, 2026-10-16)
+
+* `/login` no longer clears the failed-login counter while a second factor is
+  still owed, so re-posting the password cannot reset the lockout between
+  code guesses; the counter clears when the sign-in completes.
+* Recovery codes are 80 bits (`XXXXX-XXXXX-XXXXX-XXXXX`); codes issued at the
+  older length still verify.
+* An admin cannot reset their own two-factor through the admin route (403),
+  and an admin who has two-factor on proves it with their current code.
+* A wrong password or code on `/api/user/2fa/*` answers 400, not 401, so the
+  web client does not refresh the session and replay the mistake; validation
+  errors no longer echo the submitted body; the delivery-failure log masks
+  the address; a sign-in that lands in the same second as a revocation waits
+  for the next whole second instead of being dead on arrival.
+* `scripts/rotate_encryption_key.py` also re-encrypts
+  `api_keys.encrypted_passphrase` — a pre-existing gap: a rotation would have
+  left every Bitget passphrase under the old key and stopped every buy.
+
 ## [0.8.2] — 2026-10-14: plain-English failure text, Funding hint (PR #93)
 
 ### Changed
@@ -168,7 +354,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bitget (URL); trademark of [project]; used unaltered only to identify the
   coin". All ten coins now show a logo; clearing a File cell in
   `LOGO_SOURCES.md` puts a coin back on its lettered circle.
-
 
 ## [0.7.6] — 2026-10-07: coin logos (PR #74)
 

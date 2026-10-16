@@ -87,6 +87,15 @@ for var in ("RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_REPLY_TO", "SUPPORT_E
             "APP_NAME", "LOG_RESET_LINKS", "SUMSUB_APP_TOKEN", "SUMSUB_SECRET_KEY", "SUMSUB_WEBHOOK_SECRET",
             "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "FCM_SERVER_KEY", "SLACK_WEBHOOK_URL"):
     os.environ[var] = ""
+# Guardian (v0.9.1) and its SMS transports, pinned to the defaults (off / empty / the compose
+# values): a shell export must not switch the monitor on or point a test at a provider.
+# tests/guardian/conftest.py turns settings.guardian_enabled on per test, on the object.
+os.environ["GUARDIAN_ENABLED"] = "0"
+os.environ["GUARDIAN_METRICS_HOST"] = "0.0.0.0"
+os.environ["GUARDIAN_METRICS_PORT"] = "9109"
+for var in ("GUARDIAN_ALLOWED_EMAILS", "GUARDIAN_RULES_PATH", "GUARDIAN_TELEGRAM_CHAT_ID", "CLICKSEND_USERNAME",
+            "CLICKSEND_API_KEY", "CLICKSEND_FROM", "CLICKSEND_TO_NUMBERS", "TWILIO_TO_NUMBERS"):
+    os.environ[var] = ""
 
 
 def _ensure_test_database() -> None:

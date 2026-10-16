@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { passwordProblem } from "@/utils/validation";
 import { capitalize, fmtDate } from "@/utils/format";
 import NotificationSettings from "@/components/Settings/NotificationSettings";
+import SecuritySettings from "@/components/Settings/SecuritySettings";
 import WalletHoldNotice from "@/components/Common/WalletHoldNotice";
 
 type Msg = { kind: "error" | "success"; text: string } | null;
@@ -24,9 +25,11 @@ export default function Settings() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const notificationsRef = useRef<HTMLElement | null>(null);
+  const securityRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    // the "unsubscribe" link in emails lands on /settings/notifications
+    // the "unsubscribe" link in emails lands on /settings/notifications; security emails link to /settings/security
     if (location.pathname.endsWith("/notifications") && typeof notificationsRef.current?.scrollIntoView === "function") notificationsRef.current.scrollIntoView({ block: "start" });
+    if (location.pathname.endsWith("/security") && typeof securityRef.current?.scrollIntoView === "function") securityRef.current.scrollIntoView({ block: "start" });
   }, [location.pathname]);
   const keys = useAsync(() => userAPI.exchangeKeys());
   const supported = useAsync(() => userAPI.supportedExchanges().catch(() => ["bitget"]));
@@ -203,6 +206,8 @@ export default function Settings() {
           <div className="sm:col-span-2"><button className="btn-primary" type="submit" disabled={!current || !next}>Update password</button></div>
         </form>
       </section>
+
+      <SecuritySettings ref={securityRef} highlight={location.pathname.endsWith("/security")} />
 
       <Reports />
       <Integrations />

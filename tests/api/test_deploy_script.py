@@ -32,7 +32,67 @@ def test_deploy_script_asserts_the_container_was_recreated_and_the_commit_matche
     assert "docker inspect --format '{{.Id}}' autobuy_api" in text
     assert "was not recreated" in text and "Nothing was deployed" in text
     assert 'GIT_COMMIT="$expected_commit"' in text, "the build is stamped with the checkout's commit"
-    assert '"commit": *"' in text and "is not running the deployed code" in text
+    assert 'health_field "$health" commit' in text and "is not running the deployed code" in text
+    # /health nests the worker's own commit under guardian.commit: the API's commit must be read from
+    # the top level, never by a greedy match over the whole document.
+    assert 'sed -n \'s/.*"commit": *"' not in text
+    assert "json.load(sys.stdin)" in text and 'health_field "$health" guardian.commit' in text
+    assert "not running the deployed code" in text[text.index("wait_for_guardian_heartbeat() {"):]
+
+
+def test_deploy_script_proves_the_guardian_worker_moved_and_is_alive():
+    """v0.9.1: the worker container is recreated on the API's image and its heartbeat is fresh
+    before the deploy is called done, whether GUARDIAN_ENABLED is on or off."""
+    text = SCRIPT.read_text()
+    assert "docker inspect --format '{{.Id}}' autobuy_guardian" in text
+    assert "the worker is not on the deployed build" in text
+    assert "wait_for_guardian_heartbeat" in text and '"guardian": *{' in text
+    compose = (ROOT / "docker-compose.yml").read_text()
+    guardian_block = compose[compose.index("\n  guardian:"):compose.index("\n  # Web frontend")]
+    assert "container_name: autobuy_guardian" in guardian_block and "image: autobuy-api:latest" in guardian_block
+    assert "ports:" not in guardian_block, "the worker publishes nothing"
+    assert '"python", "-m", "guardian.worker"' in guardian_block
+    # Both checks key on the checkout's compose file, so the script stays correct when it runs
+    # against a tree without the worker (2026-10-14: a checkout left on the Guardian branch
+    # deployed main and the unguarded check aborted the run after the API had moved).
+    assert "grep -qx guardian" in text and "guardian_declared=1" in text
+    assert "the worker checks are skipped" in text
+    body = text[text.index("deploy_platform() {"):text.index("\nwait_for_guardian_heartbeat() {")]
+    guards = [m.start() for m in re.finditer(r'if \[ "\$guardian_declared" = 1 \]; then', body)]
+    assert len(guards) >= 2, "the recreate check and the heartbeat wait are each behind the guard"
+    assert guards[0] < body.index("guardian_after_id=") < guards[1] < body.index("wait_for_guardian_heartbeat || exit 1")
+
+
+def test_deploy_script_reads_the_compose_services_once():
+    """`config --services` is captured into one variable that both the api check and
+    `guardian_declared` read. A failing call is then an empty list, which the api check
+    refuses, instead of reading as "no guardian service" and skipping the worker checks."""
+    text = SCRIPT.read_text()
+    body = text[text.index("deploy_platform() {"):text.index("\nwait_for_guardian_heartbeat() {")]
+    invocation = 'compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config --services'
+    assert body.count(invocation) == 1, "one call; the comments and the error hint may mention it"
+    assert f'services="$({invocation}' in body
+    assert "printf '%s\\n' \"$services\" | grep -qx api" in body
+    assert "printf '%s\\n' \"$services\" | grep -qx guardian" in body
+    assert body.index("grep -qx api") < body.index("grep -qx guardian")
+
+
+def test_deploy_script_stops_an_orphaned_guardian_worker_but_never_removes_it():
+    """A tree without the worker deployed over a box that runs one (a rollback past v0.9.1)
+    leaves autobuy_guardian running on the previous image next to the new API. The script
+    says so and stops that container once the API has moved; it never removes it, never
+    runs compose with --remove-orphans, and says how to start it again. With no container
+    at all (or a stopped one) the one-line note is all that prints."""
+    text = SCRIPT.read_text()
+    body = text[text.index("deploy_platform() {"):text.index("\nwait_for_guardian_heartbeat() {")]
+    assert "docker inspect --format '{{.State.Running}}' autobuy_guardian" in body
+    assert "declares no guardian service in this checkout, but the autobuy_guardian container" in body
+    assert "stopping the orphaned autobuy_guardian container" in body
+    assert "docker stop autobuy_guardian" in body and "docker start autobuy_guardian" in body
+    assert "docker rm" not in text and "--remove-orphans" not in text
+    assert body.index("up -d --build") < body.index("docker stop autobuy_guardian"), "stopped only once the API has moved"
+    assert 'elif [ "$guardian_orphan" = 1 ]; then' in body
+    assert "declares no guardian service in this checkout — the worker checks are skipped" in body
 
 
 def test_image_is_stamped_with_the_commit_and_health_reports_it(monkeypatch, tmp_path):

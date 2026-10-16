@@ -13,7 +13,7 @@ Resource groups and types are generated from the API's OpenAPI spec.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Union
 
 import httpx
 
@@ -21,7 +21,8 @@ from . import types
 from ._http import AsyncTransport, SyncTransport, TokenPair, TokensCallback
 from .api import Api, AsyncApi
 from .errors import ApiError, AuthenticationError, AutoBuyError, RateLimitError, ValidationError
-from .types import PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse, UserOut, UserProfile
+from .types import (MfaLoginRequest, MfaRequiredResponse, PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse,
+                    UserOut, UserProfile)
 
 __version__ = "0.5.0"
 __all__ = [
@@ -29,6 +30,22 @@ __all__ = [
     "ApiError", "AuthenticationError", "AutoBuyError", "RateLimitError", "ValidationError",
     "TokenPair", "__version__",
 ]
+
+
+def _mfa_required(result: Any) -> bool:
+    """True when ``POST /api/auth/login`` answered 202: a two-factor challenge, not a token pair."""
+    return isinstance(result, dict) and bool(result.get("mfa_required"))
+
+
+def _mfa_body(mfa_token: str, code: Optional[str], recovery_code: Optional[str]) -> MfaLoginRequest:
+    if code is None and recovery_code is None:
+        raise ValueError("login_mfa needs either code or recovery_code")
+    body: MfaLoginRequest = {"mfa_token": mfa_token}
+    if code is not None:
+        body["code"] = code
+    if recovery_code is not None:
+        body["recovery_code"] = recovery_code
+    return body
 
 
 class AutoBuyClient:
@@ -81,9 +98,28 @@ class AutoBuyClient:
         """``POST /api/auth/register`` — create an account. Does not log in."""
         return self.auth.register({"email": email, "password": password})
 
-    def login(self, email: str, password: str) -> TokenResponse:
-        """``POST /api/auth/login`` — authenticate and store the resulting tokens."""
-        pair = self.auth.login({"email": email, "password": password})
+    def login(self, email: str, password: str) -> Union[TokenResponse, MfaRequiredResponse]:
+        """``POST /api/auth/login`` — authenticate and store the resulting tokens.
+
+        An account with two-factor authentication on answers ``202`` with
+        ``{"mfa_required": True, "mfa_token": ..., "expires_in": ...}`` instead of a token
+        pair, and nothing is stored. Check ``result.get("mfa_required")`` and finish the
+        sign-in with :meth:`login_mfa` within ``expires_in`` seconds.
+        """
+        result = self.auth.login({"email": email, "password": password})
+        if _mfa_required(result):
+            return result
+        self.transport.set_tokens(result)
+        return result
+
+    def login_mfa(self, mfa_token: str, code: Optional[str] = None,
+                  recovery_code: Optional[str] = None) -> TokenResponse:
+        """``POST /api/auth/login/mfa`` — finish a two-factor sign-in and store the resulting tokens.
+
+        ``mfa_token`` is the one returned by :meth:`login`; pass either the authenticator
+        ``code`` or a ``recovery_code``.
+        """
+        pair = self.auth.login_mfa(_mfa_body(mfa_token, code, recovery_code))
         self.transport.set_tokens(pair)
         return pair
 
@@ -153,8 +189,18 @@ class AsyncAutoBuyClient:
     async def register(self, email: str, password: str) -> UserOut:
         return await self.auth.register({"email": email, "password": password})
 
-    async def login(self, email: str, password: str) -> TokenResponse:
-        pair = await self.auth.login({"email": email, "password": password})
+    async def login(self, email: str, password: str) -> Union[TokenResponse, MfaRequiredResponse]:
+        """See :meth:`AutoBuyClient.login`: a 202 two-factor challenge is returned, not stored."""
+        result = await self.auth.login({"email": email, "password": password})
+        if _mfa_required(result):
+            return result
+        self.transport.set_tokens(result)
+        return result
+
+    async def login_mfa(self, mfa_token: str, code: Optional[str] = None,
+                        recovery_code: Optional[str] = None) -> TokenResponse:
+        """See :meth:`AutoBuyClient.login_mfa`."""
+        pair = await self.auth.login_mfa(_mfa_body(mfa_token, code, recovery_code))
         self.transport.set_tokens(pair)
         return pair
 

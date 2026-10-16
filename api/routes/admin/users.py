@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from api.routes.user import UTCModel, get_current_user
 from api.routes._deps import user_or_404
 from api.routes.admin._deps import VALID_KYC, audit, logger, require_admin  # noqa: F401
 from api.services import withdraw_gate
+from api.services.rate_limit import register_failed_login
 
 router = APIRouter()
 
@@ -35,6 +36,7 @@ class AdminUserRow(UTCModel):
     invested_usdt: float = 0.0
     wallet_hold_until: Optional[datetime] = None   # active 24h hold on new withdrawal addresses, else null
     wallet_hold_reason: Optional[str] = None
+    totp_enabled: bool = False                     # two-factor authentication confirmed (v0.9.0)
 
 
 class AdminUserList(BaseModel):
@@ -60,6 +62,10 @@ async def list_users(
         select(User).where(*filters)
         .order_by(User.created_at.desc()).limit(limit).offset(offset))).scalars().all()
     invested = await history.invested_per_user(db)
+    from api.models.security import UserTotp
+    enrolled = set((await db.execute(
+        select(UserTotp.user_id).where(UserTotp.confirmed.is_(True),
+                                       UserTotp.user_id.in_([u.id for u in users])))).scalars().all()) if users else set()
     items = []
     from api.services.wallet_hold import active_hold
     for user in users:
@@ -67,6 +73,7 @@ async def list_users(
         row.invested_usdt = invested.get(user.id, 0.0)
         row.wallet_hold_until = active_hold(user)
         row.wallet_hold_reason = user.wallet_hold_reason if row.wallet_hold_until else None
+        row.totp_enabled = user.id in enrolled
         items.append(row)
     return AdminUserList(items=items, total=total)
 
@@ -196,3 +203,41 @@ async def kyc_override(
     audit(admin, "kyc_override", user_id=str(user_id),
           new_status=payload.status, note=payload.note)
 
+
+class ResetTwoFactorRequest(BaseModel):
+    """The calling admin's own current authenticator code; required when two-factor is on for their account."""
+    code: Optional[str] = Field(default=None, max_length=32)
+
+
+@router.post("/users/{user_id}/2fa/reset", status_code=204)
+async def reset_two_factor(
+    user_id: UUID,
+    background: BackgroundTasks,
+    payload: Optional[ResetTwoFactorRequest] = None,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Support path for a lost authenticator: remove the user's two-factor
+    enrolment and recovery codes so they can sign in with the password alone
+    and enrol again. Never for the caller's own account (a stolen admin session
+    must not strip its owner's second factor: use Settings → Security, or ask
+    another admin), and an admin who has two-factor on proves it with their
+    current code. Audited; the user is emailed when something was removed."""
+    if user_id == admin.id:
+        raise HTTPException(status_code=403,
+                            detail="You cannot reset two-factor authentication on your own account here. "
+                                   "Turn it off from Settings → Security, or ask another admin.")
+    user = await user_or_404(db, user_id)
+    from api.services import twofactor
+    if await twofactor.is_enabled(db, admin.id):
+        code = ((payload.code if payload else None) or "").replace(" ", "")
+        if not await twofactor.check_code(db, admin, code):
+            await register_failed_login(admin.email)   # a stolen admin session guessing codes should get loud
+            raise HTTPException(status_code=400,
+                                detail="Enter the current code from your authenticator app to reset "
+                                       "two-factor authentication for another account.")
+    removed = await twofactor.admin_reset(db, user.id)
+    audit(admin, "user_2fa_reset", user_id=str(user_id), had_enrolment=removed)
+    if removed:
+        from api.routes.twofactor import send_two_factor_notice
+        background.add_task(send_two_factor_notice, user.email, "reset_by_admin", when=datetime.now(timezone.utc))

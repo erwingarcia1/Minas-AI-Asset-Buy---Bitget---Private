@@ -121,12 +121,21 @@ export async function bootstrapSession(): Promise<boolean> {
   }
 }
 
+/** A 401 from an /auth/* route means what that route says (wrong password, bad code, stale
+ *  link), never that the access token aged out, so those are not refreshed and replayed. The one
+ *  exception is /auth/logout-all: it needs a live bearer token like any other route, and once the
+ *  30-minute access token has expired only a refresh lets it revoke anything. */
+const AUTH_ROUTES_NEEDING_BEARER = new Set(["/auth/logout-all"]);
+function refreshesOn401(url: string | undefined): boolean {
+  const path = (url ?? "").split("?")[0];
+  return !path.startsWith("/auth/") || AUTH_ROUTES_NEEDING_BEARER.has(path);
+}
+
 api.interceptors.response.use(undefined, async (error: AxiosError<ApiErrorBody>) => {
   const original = error.config as RetriableConfig | undefined;
   const status = error.response?.status;
-  const isAuthRoute = original?.url?.startsWith("/auth/");
 
-  if (status === 401 && original && !original._retried && !isAuthRoute) {
+  if (status === 401 && original && !original._retried && refreshesOn401(original.url)) {
     try {
       refreshing = refreshing ?? refreshAccessToken();
       const token = await refreshing;

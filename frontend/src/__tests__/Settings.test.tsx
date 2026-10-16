@@ -11,10 +11,12 @@ vi.mock("@/api/endpoints", () => ({
   publicAPI: { meta: vi.fn().mockResolvedValue({ coins: ["BTC"], exchanges: ["bitget"], support_email: "support@example.com", server_ip: "203.0.113.7" }) },
   notificationAPI: { preferences: vi.fn(), update: vi.fn() },
   integrationsAPI: { available: vi.fn().mockResolvedValue([]), webhooks: vi.fn().mockResolvedValue([]) },
+  twoFactorAPI: { status: vi.fn().mockResolvedValue({ enabled: false, enrolled_at: null, recovery_codes_remaining: 0, pending_enrolment: false }),
+                  enrol: vi.fn(), confirm: vi.fn(), regenerateCodes: vi.fn(), disable: vi.fn() },
 }));
 const authUser: Record<string, unknown> = { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z", withdrawals_allowed: true };
 let currentUser: Record<string, unknown> | null = authUser;   // null = session still bootstrapping (a direct load of /settings)
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: currentUser, logout: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: currentUser, logout: vi.fn(), signOutEverywhere: vi.fn(), refreshProfile: vi.fn().mockResolvedValue(authUser) }) }));
 import { notificationAPI, userAPI } from "@/api/endpoints";
 
 const PREFS = { email_enabled: true, email_purchase_confirmations: true, email_weekly_summary: true, email_milestones: true, email_low_balance: true,

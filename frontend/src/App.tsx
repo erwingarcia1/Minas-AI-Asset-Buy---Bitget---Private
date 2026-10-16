@@ -57,6 +57,7 @@ export default function App() {
                 <Route path="/transactions" element={<Transactions />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/notifications" element={<Settings />} />
+                <Route path="/settings/security" element={<Settings />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="*" element={<NotFound />} />
               </Route>

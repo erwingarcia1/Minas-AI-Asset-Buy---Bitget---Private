@@ -57,6 +57,24 @@ try {
 await client.logout();
 ```
 
+### Two-factor accounts
+
+When the account has two-factor authentication on, `login()` resolves to the
+`202` challenge (`MfaRequiredResponse`) instead of a token pair and stores
+nothing. Narrow the result with `isMfaRequired()` and finish with `loginMfa()`
+within `expires_in` seconds, passing `{ code }` (authenticator) or
+`{ recovery_code }`:
+
+```ts
+import { AutoBuyClient, isMfaRequired } from "@autobuy/ts-client";
+
+let result = await client.login("me@example.com", "Str0ng!Passw0rd");
+if (isMfaRequired(result)) {
+  result = await client.loginMfa(result.mfa_token, { code: await promptForCode() });   // or { recovery_code }
+}
+// result is now the TokenResponse and the client is signed in
+```
+
 ### Restoring a session
 
 ```ts
