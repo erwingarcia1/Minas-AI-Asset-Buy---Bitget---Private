@@ -313,6 +313,11 @@ platform` builds, recreates and verifies it with the API:
   **whether `GUARDIAN_ENABLED` is on or off**. Off, the worker only heartbeats.
 - Its loops are not scheduler jobs: the job list in the deploy checklist stays
   seven.
+- Rolling back below migration 030 (`alembic downgrade 029`) drops the 19
+  `guardian_*` tables with their data and narrows `users.notification_preferences`
+  back to 500 characters: Postgres refuses the downgrade if any row holds a
+  longer blob (nothing writes one before the Guardian toggles land in PR4), so
+  the schema stays at 030 and the operator trims or exports first.
 - Both checks key on the checkout's `docker-compose.yml` declaring the
   `guardian` service. `deploy.sh` runs from the file on disk at invocation, so
   a newer script can run against an older tree; without the service the worker
@@ -339,9 +344,55 @@ reads it every pass and fails closed when Redis is unreadable. The daily
 MEDIUM/LOW digest goes out from the worker after `alerting.digest_hour_utc`
 (08:00 UTC by default), once per day, tracked in Redis.
 
-Resources: the worker is capped at 1 GB and holds about ten Postgres
-connections (the engine's pool plus the scheduler). Check `SHOW
-max_connections;` on the server before the first deploy of this service.
+Resources: the worker is capped at 1 GB. Two things the operator checks
+before the first deploy of this service:
+
+- **Postgres connections.** The API opens one SQLAlchemy pool *per gunicorn
+  worker*: `api/database.py` sets `pool_size=20, max_overflow=10` and
+  `Dockerfile.api` runs `--workers 4`, so the API alone holds up to
+  4 × 20 = 80 connections once every pool has filled and can burst to
+  4 × 30 = 120 under load (overflow connections open on demand and close when
+  returned). The worker adds about ten: `guardian/db.py` keeps one psycopg2
+  connection per thread, and the process has 8 pool threads
+  (`workers.pool_size` in `guardian/rules.yaml`), the scheduler and the main
+  thread. The server runs Postgres's default `max_connections = 100`; the
+  owner confirms it with `SHOW max_connections;` before the deploy. 80 + 10
+  fits, with room for a few `psql` / `pg_dump` sessions; a full API burst
+  (120 + 10) does not. Whoever connects last then gets `FATAL: sorry, too many
+  clients already` — for the worker that is at start-up (`Database()` connects
+  in its constructor and refuses to look healthy without a connection), so the
+  container exits and compose restarts it in a loop. If the numbers do not
+  fit, either raise `max_connections` on the `postgres` service
+  (`command: ["postgres", "-c", "max_connections=200"]` in
+  `docker-compose.yml`; the postgres container must be recreated, so that is
+  its own deploy) or lower `pool_size` / `max_overflow` in `api/database.py`
+  (a code change). The owner decides which.
+- **`up -d` waits for the API's healthcheck.** The worker declares
+  `depends_on: api: condition: service_healthy`, so `docker compose up -d`
+  does not return until `autobuy_api` reports healthy. Healthy is the
+  `HEALTHCHECK` in `Dockerfile.api`: GET `/health` every 10 s, 5 s timeout,
+  3 retries, 15 s start period — failures inside the start period do not
+  count, so the API has roughly 40–45 s from container start to answer, and
+  migrations run in the entrypoint before gunicorn listens, so a slow
+  migration spends that budget. If the API is marked unhealthy, `up -d` exits
+  non-zero with `dependency failed to start: container autobuy_api is
+  unhealthy`, and `scripts/deploy.sh` stops right there (`set -e`): none of
+  its own verification runs — not the "container recreated" check, not the
+  two-minute `/health` loop that was written to wait for migrations, not the
+  commit, bundle or heartbeat checks. The API container keeps running (Docker
+  never restarts on health alone) and the worker was not started (`docker ps
+  -a` shows whether its container was even created). What to do: watch
+  `sudo docker inspect --format '{{.State.Health.Status}}' autobuy_api` and
+  `curl -s http://127.0.0.1:8000/health`; once the API is healthy, start the
+  worker with `sudo docker compose -p autobuy-platform --profile prod up -d
+  guardian` and run the post-deploy checks from the checklist by hand (health
+  commit, served bundle, `alembic current`, holdings and digest, scheduler
+  jobs, the worker heartbeat, the WARNING/ERROR scan). Re-running
+  `scripts/deploy.sh platform` is not the way out: the API container is
+  already the new one, so the script's "was not recreated" check refuses. If
+  the API never turns healthy, read `docker compose ... logs api`: that is a
+  failed migration or boot guard, not a worker problem.
+
 See `docs/GUARDIAN-ARCHITECTURE.md`, `docs/GUARDIAN-SECURITY.md`,
 `docs/GUARDIAN-THREAT-MODEL.md` and `docs/GUARDIAN-RETENTION.md`.
 

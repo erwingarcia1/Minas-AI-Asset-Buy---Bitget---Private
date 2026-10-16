@@ -22,7 +22,8 @@ production before any feature does.
   (`guardian/db.py`) keeps the `cursor()` contract the engine was written
   against, with typecasters so timestamps and JSON come back in the shapes the
   engine wrote. `?` became `%s`, `lastrowid` became `RETURNING id`, tables
-  gained the `guardian_` prefix; the detectors are untouched.
+  gained the `guardian_` prefix; the detectors are untouched (one message now
+  says Guardian instead of Sentinel).
 * **Migration 030** (`030_guardian_tables`): 19 `guardian_*` tables with
   bigint identity ids (Guardian's dedup keys survive the cutover),
   timestamptz, jsonb and numeric columns, cascading foreign keys from the
@@ -76,6 +77,32 @@ production before any feature does.
 * Not ported from Guardian: its HTML dashboard and portal, CLI, operator and
   member identities, scrypt passwords, SQLite schema, optional AI triage,
   WebSocket monitor, deploy gate, mutation testing and git hooks.
+### Hardening (review before merge, 2026-10-16)
+
+* `scripts/deploy.sh`: the worker checks key on the checkout's compose file
+  (a newer script can run against an older tree); a rollback to a tree
+  without the worker warns and stops an orphaned `autobuy_guardian` instead
+  of leaving it running on the old image; the compose services list is read
+  once. The worker's `SKIP_MIGRATIONS` is a literal, not a knob.
+* The `User` model mirrors the two `users` columns of migration 030 and the
+  schema-mirror test compares that table too.
+* Engine: a key replacement rewrites `key_fingerprint` and refuses a key that
+  already watches another account; accounts still seeding their baseline are
+  not polled; labels fit `varchar(100)`; digest-bound and snoozed alerts no
+  longer page operators as "delivered to nobody"; an unreadable rules file
+  pages once, not every pass; the heartbeat beats at least every 60 s
+  whatever the poll interval; the scheduler thread is joined on stop and the
+  worker exits 1 when its engine dies on its own.
+* Copy and masking: no alert or page tells anyone to run a `sentinel` CLI;
+  wallet addresses, emails and phone numbers are masked in Telegram text and
+  in the worker's logs; amounts render with at most 8 decimals and never in
+  scientific notation.
+* `api/services/telegram.send_sync` holds a lock around the shared limiter
+  state, so worker threads cannot exceed the per-minute cap together.
+* Tests: the SMS-provider factory tests set `settings` (they were vacuous);
+  the breaker back-off test drives a fake clock; the root conftest pins every
+  new variable.
+
 ## [0.9.0] — 2026-10-13: Two-factor authentication and sign out everywhere (PR TBD)
 
 First of the Guardian merge PRs (`docs/GUARDIAN` plan): the platform gains the
