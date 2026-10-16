@@ -297,7 +297,9 @@ deploy_platform() {
         if health="$(curl -fsS --max-time 3 http://127.0.0.1:8000/health 2>/dev/null)"; then
             # 2. the running code must be the commit we just deployed
             local running_commit
-            running_commit="$(printf '%s' "$health" | sed -n 's/.*"commit": *"\([^"]*\)".*/\1/p')"
+            # The top-level "commit" is the API's; the nested guardian block carries the
+            # worker's own stamp under the same key, and a greedy pattern would read that one.
+            running_commit="$(health_field "$health" commit)"
             if [ "$running_commit" != "$expected_commit" ]; then
                 echo "ERROR: /health reports commit '${running_commit:-<none>}' but the checkout is $expected_commit." >&2
                 echo "       The container that answered is not running the deployed code (stale image or another process on :8000)." >&2
@@ -332,6 +334,25 @@ deploy_platform() {
     exit 1
 }
 
+# One field of the /health JSON by dotted path ("commit", "guardian.commit"). python3 is on the
+# server; the sed fallback reads only the top-level object (nothing past the first nested brace).
+health_field() {
+    local json="$1" path="$2"
+    if command -v python3 >/dev/null 2>&1; then
+        printf '%s' "$json" | python3 -c '
+import json, sys
+value = json.load(sys.stdin)
+for part in sys.argv[1].split("."):
+    value = value.get(part) if isinstance(value, dict) else None
+print("" if value is None else value)' "$path" 2>/dev/null
+        return 0
+    fi
+    case "$path" in
+        *.*) printf '' ;;
+        *) printf '%s' "$json" | sed -n "s/^{[^{]*\"$path\": *\"\([^\"]*\)\".*/\1/p" ;;
+    esac
+}
+
 wait_for_guardian_heartbeat() {
     local _try health running
     echo "==> [platform] Waiting for the Guardian worker's heartbeat (/health.guardian.running) ..."
@@ -339,7 +360,15 @@ wait_for_guardian_heartbeat() {
         health="$(curl -fsS --max-time 3 http://127.0.0.1:8000/health 2>/dev/null || true)"
         running="$(printf '%s' "$health" | sed -n 's/.*"guardian": *{[^}]*"running": *\([a-z]*\).*/\1/p')"
         if [ "$running" = "true" ]; then
-            echo "==> [platform] Guardian worker is alive (heartbeat fresh)"
+            # Alive AND on the deployed code: the heartbeat carries the worker's commit stamp.
+            local worker_commit
+            worker_commit="$(health_field "$health" guardian.commit)"
+            if [ -n "$worker_commit" ] && [ "$worker_commit" != "unknown" ] && [ "$worker_commit" != "$(git rev-parse HEAD)" ]; then
+                echo "ERROR: the Guardian worker heartbeat reports commit '${worker_commit:0:12}' but the checkout is $(git rev-parse --short HEAD)." >&2
+                echo "       The worker that answered is not running the deployed code." >&2
+                return 1
+            fi
+            echo "==> [platform] Guardian worker is alive (heartbeat fresh, commit ${worker_commit:0:7})"
             return 0
         fi
         sleep 5

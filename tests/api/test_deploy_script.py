@@ -32,7 +32,12 @@ def test_deploy_script_asserts_the_container_was_recreated_and_the_commit_matche
     assert "docker inspect --format '{{.Id}}' autobuy_api" in text
     assert "was not recreated" in text and "Nothing was deployed" in text
     assert 'GIT_COMMIT="$expected_commit"' in text, "the build is stamped with the checkout's commit"
-    assert '"commit": *"' in text and "is not running the deployed code" in text
+    assert 'health_field "$health" commit' in text and "is not running the deployed code" in text
+    # /health nests the worker's own commit under guardian.commit: the API's commit must be read from
+    # the top level, never by a greedy match over the whole document.
+    assert 'sed -n \'s/.*"commit": *"' not in text
+    assert "json.load(sys.stdin)" in text and 'health_field "$health" guardian.commit' in text
+    assert "not running the deployed code" in text[text.index("wait_for_guardian_heartbeat() {"):]
 
 
 def test_deploy_script_proves_the_guardian_worker_moved_and_is_alive():
