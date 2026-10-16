@@ -87,7 +87,8 @@ nothing else about Guardian lands here.
 * A wrong password or code on `/api/user/2fa/*` answers 400, not 401, so the
   web client does not refresh the session and replay the mistake; validation
   errors no longer echo the submitted body; the delivery-failure log masks
-  the address; "sign out everywhere" stores a whole-second cutoff.
+  the address; a sign-in that lands in the same second as a revocation waits
+  for the next whole second instead of being dead on arrival.
 * `scripts/rotate_encryption_key.py` also re-encrypts
   `api_keys.encrypted_passphrase` — a pre-existing gap: a rotation would have
   left every Bitget passphrase under the old key and stopped every buy.
