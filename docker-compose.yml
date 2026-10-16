@@ -148,7 +148,7 @@ services:
     restart: always
     command: ["python", "-m", "guardian.worker"]
     environment:
-      SKIP_MIGRATIONS: ${SKIP_MIGRATIONS:-true}
+      SKIP_MIGRATIONS: "true"   # a literal, not a .env knob: the worker never migrates (the api container does, at boot)
       API_ENV: ${API_ENV:-production}
       REQUIRE_PRODUCTION: ${REQUIRE_PRODUCTION:-}
       DATABASE_URL: postgresql+asyncpg://autobuy:${POSTGRES_PASSWORD:-autobuy_password}@postgres:5432/autobuy_db

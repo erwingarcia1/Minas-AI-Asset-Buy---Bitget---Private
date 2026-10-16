@@ -68,6 +68,36 @@ def _idle(heartbeat, stop: threading.Event) -> int:
     return 0
 
 
+# Every join after a stop shares this budget; compose's stop_grace_period is 40 s.
+ENGINE_JOIN_SECONDS = 30.0
+
+
+def _supervise(engine, runner: threading.Thread, stop: threading.Event, heartbeat, db,
+               join_timeout: float = ENGINE_JOIN_SECONDS) -> int:
+    """Run the engine thread until a signal sets `stop`, or until that thread
+    dies on its own. The pool and the engine thread are then joined within one
+    bounded budget BEFORE the final "stopping" heartbeat, so the heartbeat is
+    the last thing the process writes and no thread outlives it mid-pass. A
+    stop asked for by a signal exits 0; an engine that died by itself exits 1,
+    so the restart compose performs (restart: always) shows up as a crash."""
+    runner.start()
+    while not stop.is_set() and runner.is_alive():
+        stop.wait(1.0)
+    died = not stop.is_set()
+    if died:
+        logger.error("engine thread died on its own; exiting non-zero so the restart is visible")
+    engine.stop()
+    deadline = time.monotonic() + join_timeout
+    engine.join(join_timeout)
+    runner.join(max(0.0, deadline - time.monotonic()))
+    if runner.is_alive():
+        logger.warning("engine thread still running after %.0f s; exiting anyway", join_timeout)
+    heartbeat.stopping()
+    db.close()
+    logger.info("guardian worker stopped")
+    return 1 if died else 0
+
+
 def main() -> int:
     _setup_logging()
     from api.config import settings
@@ -138,15 +168,7 @@ def main() -> int:
 
     logger.info("guardian worker starting: commit %s, rules %s", _commit(), settings.guardian_rules_path)
     runner = threading.Thread(target=engine.run, name="engine", daemon=True)
-    runner.start()
-    while not stop.is_set() and runner.is_alive():
-        stop.wait(1.0)
-    engine.stop()
-    engine.join(30.0)
-    heartbeat.stopping()
-    db.close()
-    logger.info("guardian worker stopped")
-    return 0
+    return _supervise(engine, runner, stop, heartbeat, db)
 
 
 if __name__ == "__main__":

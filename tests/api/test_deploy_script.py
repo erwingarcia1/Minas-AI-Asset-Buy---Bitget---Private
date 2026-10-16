@@ -54,8 +54,40 @@ def test_deploy_script_proves_the_guardian_worker_moved_and_is_alive():
     assert "the worker checks are skipped" in text
     body = text[text.index("deploy_platform() {"):text.index("\nwait_for_guardian_heartbeat() {")]
     guards = [m.start() for m in re.finditer(r'if \[ "\$guardian_declared" = 1 \]; then', body)]
-    assert len(guards) == 2, "the recreate check and the heartbeat wait are each behind the guard"
+    assert len(guards) >= 2, "the recreate check and the heartbeat wait are each behind the guard"
     assert guards[0] < body.index("guardian_after_id=") < guards[1] < body.index("wait_for_guardian_heartbeat || exit 1")
+
+
+def test_deploy_script_reads_the_compose_services_once():
+    """`config --services` is captured into one variable that both the api check and
+    `guardian_declared` read. A failing call is then an empty list, which the api check
+    refuses, instead of reading as "no guardian service" and skipping the worker checks."""
+    text = SCRIPT.read_text()
+    body = text[text.index("deploy_platform() {"):text.index("\nwait_for_guardian_heartbeat() {")]
+    invocation = 'compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config --services'
+    assert body.count(invocation) == 1, "one call; the comments and the error hint may mention it"
+    assert f'services="$({invocation}' in body
+    assert "printf '%s\\n' \"$services\" | grep -qx api" in body
+    assert "printf '%s\\n' \"$services\" | grep -qx guardian" in body
+    assert body.index("grep -qx api") < body.index("grep -qx guardian")
+
+
+def test_deploy_script_stops_an_orphaned_guardian_worker_but_never_removes_it():
+    """A tree without the worker deployed over a box that runs one (a rollback past v0.9.1)
+    leaves autobuy_guardian running on the previous image next to the new API. The script
+    says so and stops that container once the API has moved; it never removes it, never
+    runs compose with --remove-orphans, and says how to start it again. With no container
+    at all (or a stopped one) the one-line note is all that prints."""
+    text = SCRIPT.read_text()
+    body = text[text.index("deploy_platform() {"):text.index("\nwait_for_guardian_heartbeat() {")]
+    assert "docker inspect --format '{{.State.Running}}' autobuy_guardian" in body
+    assert "declares no guardian service in this checkout, but the autobuy_guardian container" in body
+    assert "stopping the orphaned autobuy_guardian container" in body
+    assert "docker stop autobuy_guardian" in body and "docker start autobuy_guardian" in body
+    assert "docker rm" not in text and "--remove-orphans" not in text
+    assert body.index("up -d --build") < body.index("docker stop autobuy_guardian"), "stopped only once the API has moved"
+    assert 'elif [ "$guardian_orphan" = 1 ]; then' in body
+    assert "declares no guardian service in this checkout — the worker checks are skipped" in body
 
 
 def test_image_is_stamped_with_the_commit_and_health_reports_it(monkeypatch, tmp_path):

@@ -176,9 +176,15 @@ deploy_platform() {
     # A profile that matches nothing makes `up -d` a silent no-op ("Container
     # autobuy_postgres Running", exit 0) while the old API keeps serving stale
     # code and env. Refuse unless the api service is part of the resolved config.
-    if ! compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config --services 2>/dev/null | grep -qx api; then
+    # The services list is read ONCE: the guardian check below derives from the same
+    # output, so a `config --services` that fails is caught here as "no api service"
+    # instead of reading as "no guardian service" and silently skipping the worker checks.
+    local services
+    services="$(compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config --services 2>/dev/null || true)"
+    if ! printf '%s\n' "$services" | grep -qx api; then
         echo "ERROR: compose profile '$PLATFORM_PROFILE' does not include the api service — nothing would be deployed." >&2
-        echo "       docker-compose.yml declares the API under profiles: [\"prod\"]." >&2
+        echo "       docker-compose.yml declares the API under profiles: [\"prod\"]. (An empty service list means" >&2
+        echo "       'docker compose config --services' itself failed; run it by hand to see why.)" >&2
         exit 1
     fi
 
@@ -186,17 +192,25 @@ deploy_platform() {
     # not on this script: deploy.sh runs from the file on disk at invocation, so a newer script
     # can run against an older tree (2026-10-14: a checkout left on the Guardian branch deployed
     # main, and the unguarded check below aborted the run after the API had already moved).
-    local guardian_declared=0
-    if compose -p autobuy-platform --profile "$PLATFORM_PROFILE" config --services 2>/dev/null | grep -qx guardian; then
+    local guardian_declared=0 guardian_orphan=0 guardian_before_id
+    guardian_before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_guardian 2>/dev/null || echo none)"
+    if printf '%s\n' "$services" | grep -qx guardian; then
         guardian_declared=1
+    elif [ "$($SUDO docker inspect --format '{{.State.Running}}' autobuy_guardian 2>/dev/null || echo false)" = "true" ]; then
+        # A tree without the worker deployed over a box that runs one (a rollback past v0.9.1):
+        # compose leaves the orphan running on the previous image next to the new API, which
+        # is a half-deployed box. It is stopped, never removed, once the API has moved (1b).
+        guardian_orphan=1
+        echo "WARNING: docker-compose.yml declares no guardian service in this checkout, but the autobuy_guardian container" >&2
+        echo "         (${guardian_before_id:0:12}) is running. It is stopped once the API has moved, so the previous build's" >&2
+        echo "         worker does not keep running against the new API. The worker checks are skipped." >&2
     else
         echo "==> [platform] docker-compose.yml declares no guardian service in this checkout — the worker checks are skipped"
     fi
 
-    local before_id before_created expected_commit expected_tree guardian_before_id
+    local before_id before_created expected_commit expected_tree
     before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_api 2>/dev/null || echo none)"
     before_created="$($SUDO docker inspect --format '{{.Created}}' autobuy_api 2>/dev/null || echo none)"
-    guardian_before_id="$($SUDO docker inspect --format '{{.Id}}' autobuy_guardian 2>/dev/null || echo none)"
     expected_commit="$(git rev-parse HEAD)"
 
     # 0. the web bundle: shipped from --web, or already on disk and built from this checkout.
@@ -266,6 +280,15 @@ deploy_platform() {
             exit 1
         fi
         echo "==> [platform] guardian container recreated: ${guardian_before_id:0:12} -> ${guardian_after_id:0:12} (same image as the API)"
+    elif [ "$guardian_orphan" = 1 ]; then
+        echo "WARNING: stopping the orphaned autobuy_guardian container (${guardian_before_id:0:12}): this checkout declares no guardian" >&2
+        echo "         service, so compose left the previous build's worker running next to the new API." >&2
+        if ! $SUDO docker stop autobuy_guardian >/dev/null; then
+            echo "ERROR: could not stop autobuy_guardian — stop it by hand:  $SUDO docker stop autobuy_guardian" >&2
+            exit 1
+        fi
+        echo "         Stopped, not removed. To run it again:  $SUDO docker start autobuy_guardian" >&2
+        echo "         (restart: always brings it back when the Docker daemon restarts; remove it by hand once the rollback is final.)" >&2
     fi
 
     echo "==> [platform] Waiting for the API to pass /health (migrations run at boot) ..."

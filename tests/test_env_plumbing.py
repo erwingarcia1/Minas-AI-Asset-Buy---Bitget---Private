@@ -73,10 +73,16 @@ def test_compose_and_env_example_carry_nothing_the_code_ignores():
 
 
 def test_compose_passes_settings_in_interpolated_style():
-    """Every value is `${VAR:-default}` (or a fixed compose-internal URL), never a hard-coded literal."""
+    """Every value is `${VAR:-default}` (or a fixed compose-internal URL), never a hard-coded literal,
+    with one deliberate exception: the worker's SKIP_MIGRATIONS is the literal "true"."""
     compose = (ROOT / "docker-compose.yml").read_text()
     block = compose[compose.index("\n  api:"):]
     for name, value in re.findall(r"^\s{6}([A-Z0-9_]+):\s*(.+)$", block, re.M):
         if name in COMPOSE_PROVIDED:
+            continue
+        if name == "SKIP_MIGRATIONS":
+            # The worker never migrates (the api container does, at boot). A literal, so no
+            # .env value can make the worker a second migrator next to the API.
+            assert value.split("#")[0].strip() == '"true"', f'SKIP_MIGRATIONS must be the literal "true", got {value!r}'
             continue
         assert re.fullmatch(r"\$\{" + name + r":-[^}]*\}", value.strip()), f"{name}: expected ${{{name}:-default}}, got {value!r}"

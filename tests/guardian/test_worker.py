@@ -131,7 +131,9 @@ def test_daily_digest_with_nothing_to_report_still_marks_the_day(db):
     _clear()
 
 
-def test_idle_worker_only_heartbeats(tmp_path, monkeypatch):
+def test_idle_worker_only_heartbeats(tmp_path, monkeypatch, db):
+    # `db` truncates the guardian tables first: the empty-database assertion below is this
+    # test's own, not something the previous test's teardown happened to leave behind.
     from guardian import worker
     _clear()
     monkeypatch.setattr(worker, "IDLE_BEAT_SECONDS", 0.05)
@@ -163,3 +165,72 @@ def _guardian_rows() -> int:
         return total
     finally:
         database.close()
+
+
+class _FakeEngine:
+    """Stands in for Engine in the supervisor tests: run() blocks until stop() and then takes a
+    moment to return, like a half-done scheduler pass; join() records the budget it was given."""
+
+    def __init__(self):
+        self._stop = threading.Event()
+        self.joined_with = None
+
+    def run(self):
+        self._stop.wait(10.0)
+        import time
+        time.sleep(0.2)
+
+    def stop(self):
+        self._stop.set()
+
+    def join(self, timeout):
+        self.joined_with = timeout
+
+
+class _FakeDb:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_supervisor_exits_non_zero_when_the_engine_dies_on_its_own(tmp_path):
+    """The engine thread ending without a signal is a crash, not a stop. compose restarts the
+    container either way (restart: always); the exit code and the log line say which it was,
+    and the shutdown sequence still runs: stop, join, the "stopping" heartbeat, db.close()."""
+    from guardian import worker
+    _clear()
+    engine = _FakeEngine()
+    runner = threading.Thread(target=lambda: None, name="engine", daemon=True)   # returns at once
+    hb = Heartbeat(settings.redis_url, enabled=True, file_path=str(tmp_path / "beat"))
+    db = _FakeDb()
+    assert worker._supervise(engine, runner, threading.Event(), hb, db, join_timeout=2.0) == 1
+    assert engine._stop.is_set() and engine.joined_with == 2.0 and db.closed
+    assert json.loads(_redis().get(HEARTBEAT_KEY)).get("stopping") is True
+    _clear()
+
+
+def test_supervisor_joins_the_engine_thread_before_the_stopping_heartbeat(tmp_path):
+    """SIGTERM: the engine thread is joined (bounded) BEFORE the final heartbeat, so "stopping"
+    is the last thing the process writes and the thread cannot outlive it mid-pass. The fake
+    engine lingers 200 ms after stop(), so without the join it would still be alive here."""
+    from guardian import worker
+    _clear()
+    engine = _FakeEngine()
+    runner = threading.Thread(target=engine.run, name="engine", daemon=True)
+    stop = threading.Event()
+    seen = {}
+
+    class _Hb(Heartbeat):
+        def stopping(self):
+            seen["runner_alive_at_stopping"] = runner.is_alive()
+            super().stopping()
+
+    hb = _Hb(settings.redis_url, enabled=True, file_path=str(tmp_path / "beat"))
+    threading.Timer(0.2, stop.set).start()
+    assert worker._supervise(engine, runner, stop, hb, _FakeDb(), join_timeout=5.0) == 0
+    assert seen == {"runner_alive_at_stopping": False}
+    assert not runner.is_alive()
+    assert json.loads(_redis().get(HEARTBEAT_KEY)).get("stopping") is True
+    _clear()

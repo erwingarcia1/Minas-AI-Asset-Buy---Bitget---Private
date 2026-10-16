@@ -6,7 +6,11 @@ Usage:
 
 OLD_ENCRYPTION_KEY may be empty ("") when rotating off the legacy
 SECRET_KEY-derived cipher — the script then uses SECRET_KEY as the old material.
-Run with the API stopped; the change is transactional (all rows or none).
+Run with the API and the Guardian worker stopped
+(`docker compose -p autobuy-platform --profile prod stop api guardian`): a worker left
+running decrypts with the old key mid-rotation, and every failure reaches customers as
+an alert that their account is not being watched. The change is transactional (all rows
+or none).
 """
 import base64
 import hashlib
