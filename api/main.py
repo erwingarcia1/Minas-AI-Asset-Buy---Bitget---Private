@@ -148,12 +148,15 @@ async def health_check(request: Request):
     autobuy = await scheduler_state.status("autobuy")
     withdrawals = await scheduler_state.status("withdrawals")
     autobuy_sched = getattr(request.app.state, "autobuy_scheduler", None)
+    from api.services import guardian_state
     return {
         "status": "healthy",
         "environment": settings.api_env,
         "version": "1.0.0",
         "commit": build_commit(),   # the git commit this image was built from ("unknown" outside a stamped image)
         "dry_run": settings.autobuy_dry_run,
+        # the Guardian worker (separate container): alive = a heartbeat younger than 180 s, flag on or off
+        "guardian": await guardian_state.health(),
         "schedulers": {
             "paused": pause["paused"],           # None = Redis unreadable (the job fails closed)
             "paused_since": pause["since"],

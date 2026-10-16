@@ -5,6 +5,104 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-10-13: Guardian engine, dark (PR TBD)
+
+Second Guardian merge PR. Minas AI Guardian's read-only monitoring engine
+moves into this repository as the `guardian/` package and a worker container,
+behind `GUARDIAN_ENABLED` (default 0). Nothing is visible to customers and the
+worker only writes its heartbeat until the owner switches it on; this PR
+exists so the heavy pieces (image, schema, container) land and are proven in
+production before any feature does.
+
+### Added
+
+* `guardian/` — Guardian's engine, poller, twelve detectors, dispatch,
+  escalation, retention, limiters, breakers, read-only onboarding gates and
+  alert copy, ported with the storage swapped for Postgres: a psycopg2 wrapper
+  (`guardian/db.py`) keeps the `cursor()` contract the engine was written
+  against, with typecasters so timestamps and JSON come back in the shapes the
+  engine wrote. `?` became `%s`, `lastrowid` became `RETURNING id`, tables
+  gained the `guardian_` prefix; the detectors are untouched (one message now
+  says Guardian instead of Sentinel).
+* **Migration 030** (`030_guardian_tables`): 19 `guardian_*` tables with
+  bigint identity ids (Guardian's dedup keys survive the cutover),
+  timestamptz, jsonb and numeric columns, cascading foreign keys from the
+  account and `guardian_accounts.user_id` → `users.id`; plus
+  `users.password_reset_required` and `users.notification_preferences`
+  widened to Text. `api/models/guardian.py` mirrors the tables for the API;
+  the `User` model carries the two columns.
+* The `guardian` compose service (`autobuy_guardian`, the API image,
+  `python -m guardian.worker`, no ports, 1 GB cap, waits for the API so
+  migrations have run). Heartbeat `autobuy:guardian:heartbeat` and pause
+  switch `autobuy:guardian:paused` in Redis; `/health` gains a `guardian`
+  block (`running`, `enabled`, `paused`, `active_accounts`, heartbeat age).
+  `scripts/deploy.sh` asserts the worker was recreated on the API's image and
+  waits for a fresh heartbeat before calling the deploy done — only when the
+  checkout's compose file declares the `guardian` service, so the script stays
+  correct if it ever runs against a tree without the worker.
+* Channels on the platform's transports: customer and admin email through the
+  Resend outbox (`email_outbox.enqueue_sync`), Telegram through
+  `api/services/telegram.send_sync` (emails masked; optional
+  `GUARDIAN_TELEGRAM_CHAT_ID`), SMS via ClickSend or Twilio
+  (`CLICKSEND_*`, `TWILIO_TO_NUMBERS`). The daily MEDIUM/LOW digest runs
+  inside the worker (`alerting.digest_hour_utc`, default 08:00 UTC) instead
+  of Guardian's host cron.
+* Settings `GUARDIAN_ENABLED`, `GUARDIAN_ALLOWED_EMAILS`, `GUARDIAN_RULES_PATH`,
+  `GUARDIAN_METRICS_HOST/PORT`, `GUARDIAN_TELEGRAM_CHAT_ID`, `CLICKSEND_USERNAME`,
+  `CLICKSEND_API_KEY`, `CLICKSEND_FROM`, `CLICKSEND_TO_NUMBERS`,
+  `TWILIO_TO_NUMBERS` in `.env.example` and both compose blocks;
+  `tests/test_env_plumbing.py` now also asserts the worker's block carries
+  every api setting.
+* Dependencies: `ccxt==4.5.63` (Guardian's pin; the four read-only adapters
+  were verified against it), `PyYAML==6.0.3`, an explicit `cryptography` pin.
+* `tests/guardian/` — Guardian's engine suite on Postgres (its own conftest:
+  truncate-per-test, one throwaway test user, every transport setting blanked);
+  the suite is the proof detection did not change in the move.
+* Docs: `docs/GUARDIAN-ARCHITECTURE.md`, `GUARDIAN-SECURITY.md`,
+  `GUARDIAN-THREAT-MODEL.md`, `GUARDIAN-RETENTION.md`, a "Guardian worker"
+  section in `docs/DEPLOYMENT.md`.
+
+### Changed
+
+* `api/services/email_outbox.py`: the queued message is built by one helper
+  shared with the new synchronous entry point; the async path is unchanged.
+* `api/services/telegram.py`: `send_detailed`/`send` take an optional
+  `chat_id`; `send_sync` for a thread without an event loop.
+* CI runs on `guardian/**` changes too and measures `--cov=guardian`.
+
+### Not in this PR
+
+* No API route, page or nav entry (PR3–PR5); no live channel in production
+  (PR6 switches the flag on for internal accounts); no data migration (PR7).
+* Not ported from Guardian: its HTML dashboard and portal, CLI, operator and
+  member identities, scrypt passwords, SQLite schema, optional AI triage,
+  WebSocket monitor, deploy gate, mutation testing and git hooks.
+### Hardening (review before merge, 2026-10-16)
+
+* `scripts/deploy.sh`: the worker checks key on the checkout's compose file
+  (a newer script can run against an older tree); a rollback to a tree
+  without the worker warns and stops an orphaned `autobuy_guardian` instead
+  of leaving it running on the old image; the compose services list is read
+  once. The worker's `SKIP_MIGRATIONS` is a literal, not a knob.
+* The `User` model mirrors the two `users` columns of migration 030 and the
+  schema-mirror test compares that table too.
+* Engine: a key replacement rewrites `key_fingerprint` and refuses a key that
+  already watches another account; accounts still seeding their baseline are
+  not polled; labels fit `varchar(100)`; digest-bound and snoozed alerts no
+  longer page operators as "delivered to nobody"; an unreadable rules file
+  pages once, not every pass; the heartbeat beats at least every 60 s
+  whatever the poll interval; the scheduler thread is joined on stop and the
+  worker exits 1 when its engine dies on its own.
+* Copy and masking: no alert or page tells anyone to run a `sentinel` CLI;
+  wallet addresses, emails and phone numbers are masked in Telegram text and
+  in the worker's logs; amounts render with at most 8 decimals and never in
+  scientific notation.
+* `api/services/telegram.send_sync` holds a lock around the shared limiter
+  state, so worker threads cannot exceed the per-minute cap together.
+* Tests: the SMS-provider factory tests set `settings` (they were vacuous);
+  the breaker back-off test drives a fake clock; the root conftest pins every
+  new variable.
+
 ## [0.9.0] — 2026-10-13: Two-factor authentication and sign out everywhere (PR TBD)
 
 First of the Guardian merge PRs (`docs/GUARDIAN` plan): the platform gains the

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Enum, Index
+from sqlalchemy import Column, String, Text, Integer, Float, Boolean, DateTime, ForeignKey, Enum, Index
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -24,11 +25,14 @@ class User(Base):
     phone_number = Column(String(32), nullable=True)          # E.164
     phone_verified = Column(Boolean, nullable=False, default=False)
     device_token = Column(String(255), nullable=True)         # FCM registration token
-    notification_preferences = Column(String(500), nullable=True)  # JSON blob
+    notification_preferences = Column(Text, nullable=True)  # JSON blob; Text since migration 030
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
     # "Sign out everywhere": tokens issued before this are refused (migration 029).
     # Kept apart from password_changed_at, whose email and wallet hold are tied to a password change.
     sessions_revoked_at = Column(DateTime(timezone=True), nullable=True)
+    # Accounts created without a password (migrated Guardian members, customers an admin onboards)
+    # carry this until they set one through the reset link; nothing reads it before v0.9.2 (migration 030).
+    password_reset_required = Column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
     # 24h hold on new withdrawal destinations after a password reset/change (migration 022)
     wallet_hold_until = Column(DateTime(timezone=True), nullable=True)
     wallet_hold_reason = Column(String(40), nullable=True)   # password_reset | password_change
@@ -107,3 +111,5 @@ class WebhookEndpoint(Base):
 from .purchase import Purchase, PurchaseTransaction, Wallet  # noqa: E402,F401
 # Two-factor authentication tables (migration 029).
 from .security import UserTotp, UserTotpRecoveryCode  # noqa: E402,F401
+# Guardian read-only monitoring tables (migration 030).
+from . import guardian  # noqa: E402,F401
