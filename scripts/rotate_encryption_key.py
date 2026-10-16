@@ -63,9 +63,9 @@ def main() -> None:
             conn.execute(
                 text("UPDATE guardian_accounts SET encrypted_api_key=:k, encrypted_secret=:s, encrypted_passphrase=:p WHERE id=:id"),
                 {"id": row.id,
-                 "k": new_f.encrypt(old_f.decrypt(row.encrypted_api_key.encode())).decode(),
-                 "s": new_f.encrypt(old_f.decrypt(row.encrypted_secret.encode())).decode(),
-                 "p": new_f.encrypt(old_f.decrypt(row.encrypted_passphrase.encode())).decode()})
+                 "k": rotate(row.encrypted_api_key),
+                 "s": rotate(row.encrypted_secret),
+                 "p": rotate(row.encrypted_passphrase)})   # None for exchanges without a passphrase
         print(f"re-encrypted {len(guardian_rows)} guardian_accounts row(s)")
 
 
