@@ -18,11 +18,20 @@ def key_fingerprint(api_key: str) -> str:
     return hashlib.sha256((api_key or "").encode()).hexdigest()
 
 
+# `guardian_accounts.label` is varchar(100) (migration 030). The slug a name
+# produces is capped below that so a `-N` uniqueness suffix always fits.
+_LABEL_BASE_MAX_LENGTH = 90
+
+
 def generate_unique_label(db: Database, name: str) -> str:
     """Turn a customer name into a unique account label (slug). The label is
     the stable identifier used across the system; the full name is stored
     separately as customer_name."""
     base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-") or "customer"
+    # Capped before the lookup, so earlier labels made from the same long name
+    # are found. Unbounded, a long name failed the INSERT with a truncation
+    # error after the exchange key had already been verified.
+    base = base[:_LABEL_BASE_MAX_LENGTH].rstrip("-")
     with db.cursor() as cur:
         cur.execute("SELECT label FROM guardian_accounts WHERE label = %s OR label LIKE %s", (base, base + "-%"))
         taken = {r["label"] for r in cur.fetchall()}

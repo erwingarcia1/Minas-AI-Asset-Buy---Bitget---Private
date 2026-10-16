@@ -38,7 +38,7 @@ from guardian.crypto import CredentialCipher
 from guardian.db import Database
 from guardian.events import append_event
 from guardian.exchange import exchange_account_uid, make_client
-from guardian.onboarding import verify_read_only
+from guardian.onboarding import key_fingerprint, verify_read_only
 
 logger = logging.getLogger("guardian.keyreplacement")
 
@@ -200,12 +200,38 @@ def replace_monitoring_key(
             f"submitted key belongs to {candidate_uid}, account is {known_uid}",
         )
 
+    # One key, one account (`uq_guardian_accounts_key_fingerprint`). Checked
+    # here, after the key has proved it belongs to this exchange account, so
+    # the answer tells nobody anything about a key they could not already use;
+    # and refused rather than left to the constraint, which would surface as
+    # an exception from the UPDATE instead of a decision. The row's own
+    # fingerprint is excluded: re-submitting the key in place with a corrected
+    # secret or passphrase is allowed.
+    fingerprint = key_fingerprint(api_key)
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM guardian_accounts WHERE key_fingerprint = %s AND id <> %s",
+            (fingerprint, account_id),
+        )
+        holder = cur.fetchone()
+    if holder is not None:
+        return _refuse(
+            "key_already_monitored",
+            "That key is already being used to watch another account, so we have not changed "
+            "anything. Create a fresh read-only key for this account and try again.",
+            f"submitted key is already the monitoring key of account {holder['id']}",
+        )
+
+    # The fingerprint moves with the key. Left pointing at the retired key, it
+    # would let the new key be onboarded on a second account and refuse the
+    # retired one ever being onboarded again.
     now = datetime.now(timezone.utc).isoformat()
     with db.cursor() as cur:
         cur.execute(
             "UPDATE guardian_accounts SET encrypted_api_key = %s, encrypted_secret = %s, "
-            "encrypted_passphrase = %s, updated_at = %s WHERE id = %s",
-            (cipher.encrypt(api_key), cipher.encrypt(secret), cipher.encrypt(passphrase), now, account_id),
+            "encrypted_passphrase = %s, key_fingerprint = %s, updated_at = %s WHERE id = %s",
+            (cipher.encrypt(api_key), cipher.encrypt(secret), cipher.encrypt(passphrase), fingerprint, now,
+             account_id),
         )
 
     # Attributed to the member, because a credential change with nobody's name

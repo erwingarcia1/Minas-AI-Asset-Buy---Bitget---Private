@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from guardian.exchange import BitgetClient, TamperSignal
-from guardian.onboarding import OnboardingRejected, onboard_account, verify_read_only
+from guardian.onboarding import OnboardingRejected, generate_unique_label, onboard_account, verify_read_only
 from tests.guardian.fixtures.ccxt_responses import account_info_response
-from tests.guardian.conftest import TEST_USER_ID
+from tests.guardian.conftest import TEST_USER_ID, make_account
 
 
 def _client_with(
@@ -117,6 +117,25 @@ def test_onboard_account_persists_encrypted_on_success(db, cipher, monkeypatch):
         )
         gaps = [row["payload_json"] for row in cur.fetchall()]
     assert gaps == [], f"the baseline did not seed completely: {gaps}"
+
+
+def test_a_long_customer_name_still_yields_a_label_that_fits(db):
+    """`label` is varchar(100). An unbounded slug failed the INSERT with a
+    truncation error - after the exchange key had been verified, so the
+    customer had done everything right and the error named a database type."""
+    name = ("Customer " * 25)[:200]
+    assert len(name) == 200
+
+    label = generate_unique_label(db, name)
+    assert len(label) <= 100
+    assert label.startswith("customer-customer")
+    assert not label.endswith("-")
+
+    make_account(db, label)
+    second = generate_unique_label(db, name)
+    assert second != label
+    assert second.startswith(label)
+    assert len(second) <= 100
 
 
 def test_onboard_account_rejects_write_scope_and_persists_nothing(db, cipher, monkeypatch):

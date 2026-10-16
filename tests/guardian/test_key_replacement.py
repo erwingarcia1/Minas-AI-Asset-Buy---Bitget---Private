@@ -29,6 +29,7 @@ import pytest
 from guardian.baseline import learn_exchange_uid
 from guardian.exchange import exchange_account_uid
 from guardian.keyreplacement import replace_monitoring_key
+from guardian.onboarding import key_fingerprint
 from tests.guardian.fixtures.ccxt_responses import account_info_response
 from tests.guardian.conftest import TEST_USER_ID
 from tests.guardian.conftest import make_user
@@ -55,14 +56,14 @@ class _Alerter:
         return [p["rule"] for p in self.pages]
 
 
-def _account(db, cipher, *, uid=OUR_UID, label="acct-1", email="alice@example.com"):
+def _account(db, cipher, *, uid=OUR_UID, label="acct-1", email="alice@example.com", api_key="old-key"):
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO guardian_accounts (user_id, onboarding_source, label, exchange, topology, encrypted_api_key, encrypted_secret, "
-            "encrypted_passphrase, exchange_uid, status, onboarded_at, updated_at) "
-            "VALUES (%s, 'self', %s, 'bitget', 'independent', %s, %s, %s, %s, 'active', '2026-01-01', '2026-01-01')",
-            (make_user(db, email), label, cipher.encrypt("old-key"), cipher.encrypt("old-secret"),
-             cipher.encrypt("old-pass"), uid),
+            "encrypted_passphrase, key_fingerprint, exchange_uid, status, onboarded_at, updated_at) "
+            "VALUES (%s, 'self', %s, 'bitget', 'independent', %s, %s, %s, %s, %s, 'active', '2026-01-01', '2026-01-01')",
+            (make_user(db, email), label, cipher.encrypt(api_key), cipher.encrypt("old-secret"),
+             cipher.encrypt("old-pass"), key_fingerprint(api_key), uid),
         )
         account_id = cur.lastrowid
         cur.execute("INSERT INTO guardian_poll_state (account_id) VALUES (%s)", (account_id,))
@@ -71,13 +72,14 @@ def _account(db, cipher, *, uid=OUR_UID, label="acct-1", email="alice@example.co
 
 def _stored(db, account_id, cipher):
     with db.cursor() as cur:
-        cur.execute("SELECT encrypted_api_key, encrypted_secret, encrypted_passphrase, updated_at "
-                    "FROM guardian_accounts WHERE id = %s", (account_id,))
+        cur.execute("SELECT encrypted_api_key, encrypted_secret, encrypted_passphrase, key_fingerprint, "
+                    "updated_at FROM guardian_accounts WHERE id = %s", (account_id,))
         row = cur.fetchone()
     return {
         "api_key": cipher.decrypt(row["encrypted_api_key"]),
         "secret": cipher.decrypt(row["encrypted_secret"]),
         "passphrase": cipher.decrypt(row["encrypted_passphrase"]),
+        "key_fingerprint": row["key_fingerprint"],
         "updated_at": row["updated_at"],
     }
 
@@ -352,6 +354,67 @@ def test_a_dead_pager_does_not_undo_an_accepted_key(db, cipher, client_for):
 
     assert outcome.ok
     assert _stored(db, account_id, cipher)["api_key"] == "new-key"
+
+
+def test_a_replacement_rewrites_the_key_fingerprint(db, cipher, client_for):
+    """The fingerprint is what refuses one key being monitored twice. Left
+    pointing at the retired key, it would let the new key be onboarded on a
+    second account and refuse the retired one ever coming back."""
+    client_for()
+    account_id = _account(db, cipher)
+    assert _stored(db, account_id, cipher)["key_fingerprint"] == key_fingerprint("old-key")
+
+    outcome = replace_monitoring_key(db, cipher, account_id=account_id, api_key="new-key",
+                                     secret="new-secret", actor="alice@example.com")
+
+    assert outcome.ok, outcome.detail
+    assert _stored(db, account_id, cipher)["key_fingerprint"] == key_fingerprint("new-key")
+
+
+def test_replacing_a_key_with_itself_is_allowed(db, cipher, client_for):
+    """A corrected secret or passphrase for the key already in place matches
+    only this row's own fingerprint, and that is not a collision."""
+    client_for()
+    account_id = _account(db, cipher)
+
+    outcome = replace_monitoring_key(db, cipher, account_id=account_id, api_key="old-key",
+                                     secret="corrected-secret", actor="alice@example.com")
+
+    assert outcome.ok, outcome.detail
+    stored = _stored(db, account_id, cipher)
+    assert stored["secret"] == "corrected-secret"
+    assert stored["key_fingerprint"] == key_fingerprint("old-key")
+
+
+# --- one key, one account -----------------------------------------------------
+
+
+def test_a_key_already_monitoring_another_account_is_refused(db, cipher, client_for):
+    """Read-only, working, for the right exchange account - and already the
+    monitoring key of another row. Without the check the UPDATE dies on the
+    unique constraint, which is an exception, not a decision, and nothing is
+    said to the customer."""
+    client_for()
+    account_id = _account(db, cipher)
+    other_id = _account(db, cipher, label="acct-2", email="bob@example.com", api_key="new-key")
+    before = _stored(db, account_id, cipher)
+    alerter = _Alerter()
+
+    outcome = replace_monitoring_key(
+        db, cipher, account_id=account_id, api_key="new-key", secret="new-secret",
+        actor="alice@example.com", operator_alerter=alerter)
+
+    assert not outcome.ok
+    assert outcome.reason_code == "key_already_monitored"
+    assert "another account" in outcome.message
+    # Nothing changed on either row, nothing was recorded, nobody was paged.
+    assert _stored(db, account_id, cipher) == before
+    assert _stored(db, other_id, cipher)["api_key"] == "new-key"
+    assert _events(db, account_id) == []
+    assert alerter.pages == []
+    # The other account is somebody else's; its label stays out of both registers.
+    assert "acct-2" not in outcome.message
+    assert "acct-2" not in outcome.detail
 
 
 # --- secrets do not leak ------------------------------------------------------
