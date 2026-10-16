@@ -61,6 +61,7 @@ running ok, unless a note says otherwise.
 
 | Date | Commit | PR | What | Dump | Web dir |
 |---|---|---|---|---|---|
+| 2026-10-16 18:30 | `118c462` | #97 #98 #99 | **v0.9.1** (with **v0.9.0**): two-factor authentication (migration 029: `user_totp`, `user_totp_recovery_codes`, `users.sessions_revoked_at`; `ADMIN_MFA_REQUIRED` unset = 0) and the Guardian engine dark (migration 030: 19 `guardian_*` tables, `users.password_reset_required` default false, `notification_preferences` → text), the new `autobuy_guardian` worker on the API image (`GUARDIAN_ENABLED` unset: idle, heartbeat only), Guardian rules in CLAUDE.md. No new `.env` lines: every new setting defaults to 0 or empty. Pre: 2 active purchases, 0 due within 30 min (next 19 Oct 00:16 UTC), 6/100 connections, 2.5 GB RAM free, 22 GB disk, rollback tag `autobuy-api:v0.8.3-rollback` (99a85358). **Note:** the script that ran was the v0.8.3 `deploy.sh` on disk at invocation (the checkout was on main @ 2ac9980 and fast-forwarded to 118c462 mid-run), so the new worker checks did not execute inside the script; they were run by hand and pass: `autobuy_guardian` created 18:31:14 UTC on the same image as the API (2f832cac), `/health.guardian.running` true, heartbeat 39 s, worker commit 118c462, idle, 0 warnings. Health and BUILD_INFO (nginx and public) at 118c462, alembic 030 (029 + 030 ran at boot), seven jobs × 4 workers, both jobs ok at 18:41:23 UTC (auto-buy executed 0 / failed 0 / skipped 0; withdrawal poll confirmed 0 / failed 0 / pending 0), worker heartbeat 14 s at 18:44 UTC, unfiltered log scan clean (api 0, worker 0), token absent, rows and digests identical (43 `purchase_transactions` `af2220989055`, 34 purchases, 6 api_keys, 133 notifications, 11 users column-explicit `48dfc07c167e`), holdings identical per coin. The next deploy runs the new script. Owner smoke of 2FA (throwaway account, real authenticator) still to do. | `pre-v0.9.1-20261016T182951Z.sql.gz` (18753 B) | `52a1360e` via `--web ~/web-v0.9.1` |
 | 2026-09-22 09:47 | `fe1993d` | #36 | Audit batch A | `autobuy_db-before-batch-a-20260922T094708Z.dump` | `~/web-batch-a` |
 | 2026-09-22 13:13 | `ea781d3` | #37 | Audit batch B | `autobuy_db-before-batch-b-20260922T131100Z.dump` | `~/web-batch-b` |
 | 2026-09-22 14:15 | `f8467f6` | #38 | Audit B3, executor split | `autobuy_db-before-batch-b3-20260922T141337Z.dump` | `~/web-batch-b3` |
@@ -169,6 +170,10 @@ deploy; no deploy in the table above changed the schema.
   branch runs THAT branch's deploy script against main (seen 2026-10-14: the
   `feat/guardian-engine-dark` script's guardian check aborted the run after the
   API had already moved). `git -C ~/autobuy status` first, every time.
+- A deploy that changes `deploy.sh` itself runs the OLD script: bash reads the file
+  that was on disk when it started, and the fast-forward replaces it mid-run. New
+  checks apply from the following deploy; run them by hand once (seen 2026-10-16,
+  v0.9.1: the worker checks were done manually).
 - `feat/guardian-engine-dark` (jimroxodezi-wq) adds a Guardian worker
   container, settings, /health block and deploy/env checks (its changelog says
   0.9.1). Not merged, no PR yet; its deploy script expects an
@@ -190,9 +195,15 @@ update users set role = 'admin' where email = 'person@example.com';
 The owner account `support@minastech.ca` was promoted this way on 2026-09-22.
 Every admin action is written to the audit table.
 
-## Current known state (2026-10-14, after the v0.8.2 deploy)
+## Current known state (2026-10-16, after the v0.9.1 deploy)
 
-- Server at `608a970` = `v0.8.2`, alembic `028`, seven scheduler jobs, dry run off,
+- Server at `118c462` = `v0.9.1` (v0.9.0 included), alembic `030`, seven scheduler
+  jobs, dry run off, schedulers not paused. `autobuy_guardian` runs idle on the
+  API image (`GUARDIAN_ENABLED` unset); `ADMIN_MFA_REQUIRED` unset, no admin enrolled
+  in two-factor yet; the 2FA owner smoke (throwaway account) is pending. Rollback:
+  `autobuy-api:v0.8.3-rollback` plus `alembic downgrade 028` (drops the empty 2FA and
+  guardian tables).
+- Earlier state (2026-10-14, v0.8.2): server at `608a970`, alembic `028`, seven scheduler jobs, dry run off,
   schedulers not paused. `WITHDRAWALS_ENABLED=0` and `WITHDRAW_ALLOWED_EMAILS` are set; only
   the allowlisted owner can use withdraw mode.
 - Three active purchases, all XRP weekly accumulate: the original (10 USD, next
