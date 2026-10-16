@@ -67,9 +67,13 @@ def test_factory_falls_back_to_twilio(monkeypatch):
     assert isinstance(build_sms_channel(["+1555"]), TwilioSmsChannel)
 
 
+CLICKSEND = ("clicksend_username", "clicksend_api_key")
+TWILIO = ("twilio_account_sid", "twilio_auth_token", "twilio_from_number")
+
+
 def test_factory_none_when_unconfigured(monkeypatch):
-    for k in ("CLICKSEND_USERNAME", "CLICKSEND_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"):
-        monkeypatch.delenv(k, raising=False)
+    for attr in CLICKSEND + TWILIO:
+        monkeypatch.setattr(settings, attr, "")
     assert build_sms_channel(["+1555"]) is None
     assert build_sms_channel([]) is None
 
@@ -80,17 +84,21 @@ def test_factory_none_when_unconfigured(monkeypatch):
 # and either half of `sid and token and frm` degrading the same way. Nothing in
 # the suite configured a provider half way, so nothing noticed. The code was
 # right; there was simply nothing holding it there.
+#
+# The factory reads api.config.settings, never os.environ: a monkeypatch.setenv
+# here reaches nothing (the first port of these tests did that, and passed with
+# every credential blank). The provider is configured on the settings object.
 
 
 @pytest.mark.parametrize("present,missing", [
-    ("CLICKSEND_USERNAME", "CLICKSEND_API_KEY"),
-    ("CLICKSEND_API_KEY", "CLICKSEND_USERNAME"),
+    ("clicksend_username", "clicksend_api_key"),
+    ("clicksend_api_key", "clicksend_username"),
 ])
 def test_half_a_clicksend_credential_is_not_a_provider(monkeypatch, present, missing):
-    for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.delenv(missing, raising=False)
-    monkeypatch.setenv(present, "half")
+    for attr in TWILIO:
+        monkeypatch.setattr(settings, attr, "")
+    monkeypatch.setattr(settings, missing, "")
+    monkeypatch.setattr(settings, present, "half")
 
     assert build_sms_channel(["+1555"]) is None
 
@@ -113,15 +121,15 @@ def test_a_half_configured_clicksend_does_not_shadow_a_working_twilio(monkeypatc
     assert isinstance(build_sms_channel(["+1555"]), TwilioSmsChannel)
 
 
-@pytest.mark.parametrize("missing", ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"])
+@pytest.mark.parametrize("missing", list(TWILIO))
 def test_twilio_needs_all_three_credentials(monkeypatch, missing):
     """A lone TWILIO_FROM_NUMBER used to be enough to construct a channel with
     None for the SID and the token - a provider that exists, is chosen, and
     cannot send."""
-    monkeypatch.setattr(settings, "clicksend_username", "")
-    monkeypatch.setattr(settings, "clicksend_api_key", "")
-    for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"):
-        monkeypatch.setenv(key, "set")
-    monkeypatch.delenv(missing, raising=False)
+    for attr in CLICKSEND:
+        monkeypatch.setattr(settings, attr, "")
+    for attr in TWILIO:
+        monkeypatch.setattr(settings, attr, "set")
+    monkeypatch.setattr(settings, missing, "")
 
     assert build_sms_channel(["+1555"]) is None
