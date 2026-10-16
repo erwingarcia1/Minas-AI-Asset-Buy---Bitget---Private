@@ -37,14 +37,20 @@ with scp, and pass it with `--web`. The deploy refuses a bundle whose
    previous image tagged for rollback and fast-forwards git only.
 7. After: health commit, `BUILD_INFO` via nginx (:8080) and via the public
    host, alembic head, holdings and digest identical to the baseline, the scheduler jobs registered (`execute_purchases`, `poll_withdrawals`,
-   `drain_email_outbox`, `admin_alert_digest`, `weekly_digest`, and from
-   v0.7.4 `low_balance_check`), the
+   `drain_email_outbox`, `admin_alert_digest`, `weekly_digest`, from
+   v0.7.4 `low_balance_check` and from v0.7.7 `unified_account_check`), the
    purchase job (every 5 min) and the withdrawal poll (every 10 min) each run
    once with status ok, an unfiltered WARNING/ERROR/Traceback scan of the API
    log since the restart.
 8. Any browser check against the live site uses a throwaway account that is
    deleted afterwards with proof, and signs out at the end.
 9. `docker compose config` is only ever printed with `--no-interpolate`.
+10. From the Guardian engine deploy (v0.9.1) onwards: `autobuy_guardian` is
+    recreated on the same image as `autobuy_api`, `/health.guardian.running` is
+    true and its heartbeat is younger than 120 s, whether `GUARDIAN_ENABLED` is
+    on or off. Guardian's loops are not scheduler jobs and do not change the
+    job list in rule 7. After the cutover, `guardian_accounts` and
+    `guardian_alerts` row counts join the before/after digest.
 
 ## Deploys
 

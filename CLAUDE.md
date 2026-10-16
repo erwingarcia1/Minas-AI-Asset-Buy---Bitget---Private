@@ -24,6 +24,26 @@ history and the current state of the server.
 - No order endpoint is ever called from a read-only job, a proof script or a
   test against a real account.
 
+## Guardian (read-only monitoring)
+
+- Guardian keys are separate read-only keys in `guardian_accounts`: never the
+  purchase key, never a key that can trade, withdraw or transfer. The read-only
+  gate is server-side and fails closed; the UI only explains it.
+- Guardian code never imports a trading transport and never reaches an order,
+  withdrawal or transfer endpoint; `tests/test_guardian_isolation.py` proves
+  it, and the trading jobs never read a `guardian_*` table.
+- The engine runs in the `autobuy_guardian` container (`python -m
+  guardian.worker`, the API image, no published ports). Its loops are not
+  scheduler jobs; the deploy proves it alive through `/health.guardian.running`.
+- `GUARDIAN_ENABLED` is flipped only by the owner in `.env`. Off means nothing
+  visible and an idle worker that only writes its heartbeat.
+- Guardian copy never claims prevention: it detects and tells.
+  `tests/guardian/test_no_prevention_claims.py` and the frontend copy guard
+  enforce the wording.
+- Alerts, events and "that was me" marks are append-only records; an admin's
+  triage never touches `acknowledged_at`.
+- Times from the engine are UTC and say so.
+
 ## Test accounts and data
 
 - Never use a real customer's account for a check. Throwaway accounts are
@@ -64,7 +84,7 @@ history and the current state of the server.
   next 30 minutes (check `next_execution` of every active purchase), the
   pre-deploy dump, the baseline (health commit, alembic head, dry-run flag,
   holdings, row digest). After: health commit, served bundle, alembic,
-  holdings and digest unchanged, every scheduler job registered (six from v0.7.4), both the
+  holdings and digest unchanged, every scheduler job registered (seven from v0.7.7), both the
   purchase and withdrawal jobs run once with status ok, an unfiltered
   WARNING/ERROR scan of the log since the restart.
 - `docker compose config` output is always produced with `--no-interpolate`.
