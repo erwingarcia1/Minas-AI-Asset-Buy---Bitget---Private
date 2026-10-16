@@ -132,9 +132,16 @@ async def confirm_enrolment(db: AsyncSession, user, code: str) -> Optional[list[
     step = _totp.verify_code(_secret(row), code, at=_clock(), last_used_step=row.last_used_step)
     if step is None:
         return None
-    row.confirmed = True
-    row.confirmed_at = _now()
-    row.last_used_step = step
+    # One conditional UPDATE is the lock: two requests carrying the same code must
+    # not both confirm, or the loser would overwrite the winner's recovery codes
+    # after they were shown.
+    result = await db.execute(
+        update(UserTotp)
+        .where(UserTotp.user_id == user.id, UserTotp.confirmed.is_(False))
+        .values(confirmed=True, confirmed_at=_now(), last_used_step=step))
+    if result.rowcount != 1:
+        await db.rollback()
+        return None
     codes = await _replace_recovery_codes(db, user.id)
     await db.commit()
     return codes
@@ -179,7 +186,11 @@ async def check_recovery_code(db: AsyncSession, user, code: Optional[str]) -> bo
 
 async def check_second_factor(db: AsyncSession, user, *, code: Optional[str] = None,
                               recovery_code: Optional[str] = None) -> SecondFactorResult:
-    """Exactly one of `code` / `recovery_code`. Never raises on bad input."""
+    """Exactly one of `code` / `recovery_code`. Never raises on bad input.
+    Whitespace counts as absent, so a blank `code` beside a recovery code
+    does not shadow it."""
+    code = (code or "").strip() or None
+    recovery_code = (recovery_code or "").strip() or None
     if code:
         return SecondFactorResult(ok=await check_code(db, user, code))
     if recovery_code and await check_recovery_code(db, user, recovery_code):

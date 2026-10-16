@@ -102,7 +102,7 @@ async def test_status_starts_off(account):
 async def test_enrolment_needs_the_password_and_answers_a_secret_once(account, clock):
     async with client() as c:
         wrong = await c.post("/api/user/2fa/enrol", json={"password": "nope"}, headers=headers(account))
-        assert wrong.status_code == 401
+        assert wrong.status_code == 400, "400, not 401: the session is valid, the password is wrong, and a 401 would make the web client refresh and replay it"
         r = await c.post("/api/user/2fa/enrol", json={"password": PW}, headers=headers(account))
         assert r.status_code == 200
         body = r.json()
@@ -132,7 +132,7 @@ async def test_regenerating_recovery_codes_needs_a_current_code(account, clock, 
     async with client() as c:
         secret, old = await enrol_via_api(c, account, clock)
         bad = await c.post("/api/user/2fa/recovery-codes", json={"code": old[0]}, headers=headers(account))
-        assert bad.status_code == 401, "a recovery code cannot mint recovery codes"
+        assert bad.status_code == 400, "a recovery code cannot mint recovery codes"
         good = await c.post("/api/user/2fa/recovery-codes", json={"code": totp_at(secret, clock.now)}, headers=headers(account))
         assert good.status_code == 200
         new = good.json()["recovery_codes"]
@@ -145,8 +145,8 @@ async def test_disabling_needs_password_and_a_factor_and_notifies(account, clock
     async with client() as c:
         secret, codes = await enrol_via_api(c, account, clock)
         H = headers(account)
-        assert (await c.post("/api/user/2fa/disable", json={"password": "nope", "code": totp_at(secret, clock.now)}, headers=H)).status_code == 401
-        assert (await c.post("/api/user/2fa/disable", json={"password": PW, "code": "000000"}, headers=H)).status_code == 401
+        assert (await c.post("/api/user/2fa/disable", json={"password": "nope", "code": totp_at(secret, clock.now)}, headers=H)).status_code == 400
+        assert (await c.post("/api/user/2fa/disable", json={"password": PW, "code": "000000"}, headers=H)).status_code == 400
         assert (await c.post("/api/user/2fa/disable", json={"password": PW}, headers=H)).status_code == 422
         assert (await c.get("/api/user/2fa", headers=H)).json()["enabled"] is True
         ok = await c.post("/api/user/2fa/disable", json={"password": PW, "recovery_code": codes[0]}, headers=H)
@@ -205,3 +205,40 @@ async def test_no_secret_or_code_reaches_the_log(account, clock, caplog):
             secret, codes = await enrol_via_api(c, account, clock)
     for forbidden in (secret, *codes):
         assert forbidden not in caplog.text
+
+
+async def test_an_admin_cannot_reset_their_own_two_factor_through_the_admin_route(db, admin, clock, notices):
+    """A stolen admin session must not be able to strip its owner's second factor."""
+    async with client() as c:
+        await enrol_via_api(c, admin, clock)
+        r = await c.post(f"/api/admin/users/{admin.id}/2fa/reset", headers=headers(admin))
+        assert r.status_code == 403 and "own account" in r.json()["detail"]
+        assert (await c.get("/api/user/2fa", headers=headers(admin))).json()["enabled"] is True
+    assert (admin.email, "reset_by_admin") not in notices
+
+
+async def test_an_admin_with_two_factor_on_proves_it_before_resetting_someone_else(db, admin, account, clock, notices):
+    async with client() as c:
+        admin_secret, _ = await enrol_via_api(c, admin, clock)
+        await enrol_via_api(c, account, clock)
+        no_code = await c.post(f"/api/admin/users/{account.id}/2fa/reset", headers=headers(admin))
+        assert no_code.status_code == 400 and "authenticator" in no_code.json()["detail"]
+        wrong = await c.post(f"/api/admin/users/{account.id}/2fa/reset", json={"code": "000000"}, headers=headers(admin))
+        assert wrong.status_code == 400
+        assert (await c.get("/api/user/2fa", headers=headers(account))).json()["enabled"] is True, "nothing was removed"
+        ok = await c.post(f"/api/admin/users/{account.id}/2fa/reset",
+                          json={"code": totp_at(admin_secret, clock.now)}, headers=headers(admin))
+        assert ok.status_code == 204, ok.text
+        assert (await c.get("/api/user/2fa", headers=headers(account))).json()["enabled"] is False
+    assert (account.email, "reset_by_admin") in notices
+
+
+async def test_a_validation_error_never_echoes_the_submitted_password(account):
+    """FastAPI's default 422 body carries the submitted input; for a password field that is the password."""
+    async with client() as c:
+        r = await c.post("/api/user/2fa/disable",
+                         json={"password": "Echo-Me-Not!9", "code": "000000", "recovery_code": "AAAAA-BBBBB"},
+                         headers=headers(account))
+    assert r.status_code == 422
+    assert "Echo-Me-Not!9" not in r.text
+    assert r.json()["detail"][0]["msg"]

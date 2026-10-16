@@ -21,6 +21,7 @@ from api.routes.user import UTCModel, get_current_user
 from api.routes._deps import user_or_404
 from api.routes.admin._deps import VALID_KYC, audit, logger, require_admin  # noqa: F401
 from api.services import withdraw_gate
+from api.services.rate_limit import register_failed_login
 
 router = APIRouter()
 
@@ -203,18 +204,38 @@ async def kyc_override(
           new_status=payload.status, note=payload.note)
 
 
+class ResetTwoFactorRequest(BaseModel):
+    """The calling admin's own current authenticator code; required when two-factor is on for their account."""
+    code: Optional[str] = Field(default=None, max_length=32)
+
+
 @router.post("/users/{user_id}/2fa/reset", status_code=204)
 async def reset_two_factor(
     user_id: UUID,
     background: BackgroundTasks,
+    payload: Optional[ResetTwoFactorRequest] = None,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Support path for a lost authenticator: remove the user's two-factor
     enrolment and recovery codes so they can sign in with the password alone
-    and enrol again. Audited; the user is emailed when something was removed."""
+    and enrol again. Never for the caller's own account (a stolen admin session
+    must not strip its owner's second factor: use Settings → Security, or ask
+    another admin), and an admin who has two-factor on proves it with their
+    current code. Audited; the user is emailed when something was removed."""
+    if user_id == admin.id:
+        raise HTTPException(status_code=403,
+                            detail="You cannot reset two-factor authentication on your own account here. "
+                                   "Turn it off from Settings → Security, or ask another admin.")
     user = await user_or_404(db, user_id)
     from api.services import twofactor
+    if await twofactor.is_enabled(db, admin.id):
+        code = ((payload.code if payload else None) or "").replace(" ", "")
+        if not await twofactor.check_code(db, admin, code):
+            await register_failed_login(admin.email)   # a stolen admin session guessing codes should get loud
+            raise HTTPException(status_code=400,
+                                detail="Enter the current code from your authenticator app to reset "
+                                       "two-factor authentication for another account.")
     removed = await twofactor.admin_reset(db, user.id)
     audit(admin, "user_2fa_reset", user_id=str(user_id), had_enrolment=removed)
     if removed:

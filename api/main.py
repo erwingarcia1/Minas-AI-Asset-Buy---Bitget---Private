@@ -91,6 +91,20 @@ app.middleware("http")(platform_middleware)
 # Unhandled exceptions: JSON 500 with request id, no stack trace to the client
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
+# Validation errors: FastAPI's default body echoes the submitted input back, which for a
+# password or one-time-code field is the secret itself. Keep location and message, drop the echo.
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
+
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,

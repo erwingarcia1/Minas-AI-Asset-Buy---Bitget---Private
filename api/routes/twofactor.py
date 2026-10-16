@@ -21,6 +21,7 @@ from api.routes.user import get_current_user
 from api.services import twofactor
 from api.services.email_service import email_service
 from api.services.rate_limit import limiter, register_failed_login, user_or_ip_key
+from api.services.telegram import mask_email
 
 logger = logging.getLogger("autobuy.auth")
 
@@ -49,7 +50,7 @@ class EnrolResponse(BaseModel):
 
 
 class ConfirmRequest(BaseModel):
-    code: str = Field(max_length=16)
+    code: str = Field(max_length=32)
 
 
 class RecoveryCodesResponse(BaseModel):
@@ -58,12 +59,12 @@ class RecoveryCodesResponse(BaseModel):
 
 
 class RegenerateRequest(BaseModel):
-    code: str = Field(max_length=16)
+    code: str = Field(max_length=32)
 
 
 class DisableRequest(BaseModel):
     password: str = Field(max_length=128)
-    code: Optional[str] = Field(default=None, max_length=16)
+    code: Optional[str] = Field(default=None, max_length=32)
     recovery_code: Optional[str] = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
@@ -121,7 +122,7 @@ async def send_two_factor_notice(email: str, kind: str, when: Optional[datetime]
     html = "".join(f"<p>{line}</p>" for line in body.split("\n\n"))
     if not await email_service.queue(email, subject, html, body, template="two_factor", category="security"):
         logger.error("two-factor notice (%s) not delivered to %s: outbox unavailable and inline attempt failed",
-                     kind, email)
+                     kind, mask_email(email))
 
 
 def _client_ip(request: Request) -> str:
@@ -153,7 +154,7 @@ async def enrol(request: Request, response: Response, payload: EnrolRequest,
     it off first); starting again replaces an unconfirmed enrolment."""
     if not verify_password(payload.password, current_user.password_hash):
         await register_failed_login(current_user.email)   # a stolen session guessing the password should get loud
-        raise HTTPException(status_code=401, detail="Current password is incorrect")
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
     try:
         secret, uri = await twofactor.begin_enrolment(db, current_user)
     except twofactor.AlreadyEnabled:
@@ -190,7 +191,7 @@ async def regenerate_recovery_codes(request: Request, response: Response, payloa
     codes = await twofactor.regenerate_recovery_codes(db, current_user, payload.code)
     if codes is None:
         await register_failed_login(current_user.email)
-        raise HTTPException(status_code=401,
+        raise HTTPException(status_code=400,
                             detail="That code was not accepted. Enter the current code from your authenticator app.")
     logger.info("two_factor_codes_regenerated", extra={"user_id": str(current_user.id)})
     background.add_task(send_two_factor_notice, current_user.email, "codes_regenerated",
@@ -211,12 +212,12 @@ async def disable(request: Request, response: Response, payload: DisableRequest,
                             detail="Two-factor authentication is required for admin accounts and cannot be turned off.")
     if not verify_password(payload.password, current_user.password_hash):
         await register_failed_login(current_user.email)
-        raise HTTPException(status_code=401, detail="Current password is incorrect")
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
     if not await twofactor.is_enabled(db, current_user.id):
         raise HTTPException(status_code=400, detail="Two-factor authentication is not on for this account.")
     if not await twofactor.disable(db, current_user, code=payload.code, recovery_code=payload.recovery_code):
         await register_failed_login(current_user.email)
-        raise HTTPException(status_code=401, detail="That code was not accepted.")
+        raise HTTPException(status_code=400, detail="That code was not accepted.")
     logger.info("two_factor_disabled", extra={"user_id": str(current_user.id)})
     background.add_task(send_two_factor_notice, current_user.email, "disabled",
                         when=datetime.now(timezone.utc), ip=_client_ip(request))
