@@ -52,7 +52,7 @@ def settings_diff(before: dict, after: dict, _prefix: str = "") -> list[tuple[st
 class RulesConfigError(ValueError):
     """A rules file could not be read or parsed at all.
 
-    Raised by `sentinel validate-config`, which is where failing fast on a bad
+    Raised by `python -m guardian.validate_config`, which is where failing fast on a bad
     config belongs: before a deploy, not during one. `RulesConfig` itself never
     raises - see `_reject`."""
 
@@ -99,6 +99,10 @@ class RulesConfig:
         self._loaded = False
         self._validation_error: str | None = None
         self._rejected_at: str | None = None
+        # True while the file cannot be read at all (missing, unreadable). A
+        # file in that state has no mtime to latch on, so without this every
+        # reload would reject it afresh - see `reload`.
+        self._unreadable = False
         self.reload()
 
     # --- state an operator can see -----------------------------------------
@@ -133,8 +137,18 @@ class RulesConfig:
             try:
                 mtime = self._path.stat().st_mtime
             except OSError as exc:
-                self._reject(None, [f"cannot be read: {exc}"])
+                # Once, on the transition. Every `get()` is a reload, and a
+                # rejection stamps a fresh `rejected_at` - which is what
+                # `Engine._check_config_health` keys its page on. Rejecting on
+                # every call paged CRITICAL (operator SMS included) every
+                # scheduler pass for as long as the file stayed unreadable, and
+                # wrote an ERROR per threshold read. While it stays broken,
+                # nothing more is said; the recovery below is logged once.
+                if not self._unreadable:
+                    self._unreadable = True
+                    self._reject(None, [f"cannot be read: {exc}"])
                 return
+            self._unreadable = False
             if mtime == self._mtime:
                 return
 
@@ -199,13 +213,15 @@ class RulesConfig:
         operator page raised from `Engine._check_config_health` - which only
         became possible when G-49 landed a paging route. The decision was
         revisited because its binding constraint went away, not because the risk
-        did. Fail-fast now lives in `sentinel validate-config`, run before the
+        did. Fail-fast now lives in `python -m guardian.validate_config`, run before the
         deploy rather than during it.
 
         `self._mtime` advances even on rejection, so one bad edit produces one
         ERROR rather than one per `get()`; every read calls `reload()`, and a
         single poll cycle reads a dozen thresholds per account. The operator's
-        next edit changes the mtime again and is re-validated normally."""
+        next edit changes the mtime again and is re-validated normally. A file
+        that cannot be read has no mtime; `reload` latches that case with
+        `_unreadable` so it, too, is rejected once."""
         detail = "; ".join(problems)
         self._mtime = mtime
         self._validation_error = detail

@@ -44,6 +44,7 @@ from guardian.events import append_event
 from guardian.exchange import ExchangeClient, TamperSignal, exchange_account_uid, make_client
 from guardian.identity import is_unidentifiable
 from guardian.numeric import to_decimal
+from guardian.rules_schema import default_for
 
 logger = logging.getLogger("guardian.poller")
 
@@ -236,13 +237,25 @@ class AccountPoller:
         the customer is genuinely uninformed: every configured channel refused
         it, or none was configured for that severity at all. Paging on anything
         weaker would train an operator to ignore the channel, which costs more
-        than it buys (#57)."""
+        than it buys (#57).
+
+        Two outcomes also write `delivered_to = 0` and are neither of those. A
+        snoozed alert was withheld at the customer's request, and the row says
+        so in `snoozed_until` (guardian/snooze.py: sharing one column would turn
+        every snooze into a false report of a broken channel). A MEDIUM or LOW
+        alert routed to the digest has no immediate channel by design - the
+        daily digest delivers it from this same row. Reading only the count
+        paged CRITICAL, operator SMS included, on every one of them."""
         if self._operator_alerter is None:
             return
         with self._db.cursor() as cur:
-            cur.execute("SELECT delivered_to FROM guardian_alerts WHERE id = %s", (alert_id,))
+            cur.execute("SELECT delivered_to, snoozed_until FROM guardian_alerts WHERE id = %s", (alert_id,))
             row = cur.fetchone()
         if row is None or row["delivered_to"] > 0:
+            return
+        if row["snoozed_until"]:
+            return
+        if self._digest_bound(detection.severity):
             return
         self._operator_alerter.page(
             rule="alert_delivered_to_nobody",
@@ -261,6 +274,18 @@ class AccountPoller:
             account_id=account_id,
             dedup_scope=detection.severity,
         )
+
+    def _digest_bound(self, severity: str) -> bool:
+        """Whether the daily digest carries this severity: `alerting.routing`
+        lists `digest` for it. `build_channels` drops that entry when it
+        resolves the immediate channels, so from here a digest-bound severity
+        has the same shape as one with nothing configured - an empty list -
+        and the routing is the only place the difference is still written
+        down. Read the way `build_channels` reads it, defaults included."""
+        routed = self._rules.get("alerting", "routing", severity, default=None)
+        if not isinstance(routed, (list, tuple)) or not routed:
+            routed = default_for("alerting", "routing", severity) or []
+        return any(str(name) == "digest" for name in routed)
 
     def _acquire(self, account_id: int, calls: float) -> None:
         if self._limiter is not None:

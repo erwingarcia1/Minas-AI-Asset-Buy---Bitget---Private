@@ -19,6 +19,14 @@ from guardian.rules_schema import default_for
 
 logger = logging.getLogger("guardian.engine")
 
+# The heartbeat's own cadence, apart from the poll interval. Redis keeps a beat
+# for HEARTBEAT_TTL_S (180 s, guardian/heartbeat.py) and the deploy check wants
+# one younger than 120 s, so the pulse cannot simply follow
+# `polling.fast_loop_seconds`: a legitimate edit raising that past the TTL made
+# a working worker read as a dead one. The scheduler sleeps in slices no longer
+# than this and beats between them (`_sleep_with_heartbeat`).
+HEARTBEAT_MAX_INTERVAL_S = 60.0
+
 
 @dataclass(order=True)
 class Task:
@@ -54,9 +62,13 @@ class Engine:
         # `beat(snapshot: dict)` and `after_tick(paused: bool)`. Optional so
         # the engine tests run it bare, exactly as Guardian's did.
         self._hooks = hooks
+        # What the last scheduler pass found on the pause switch, so the beats
+        # sent between passes (`_sleep_with_heartbeat`) say what the pass said.
+        self._last_paused = False
         self._active_count = 0
         self._last_prune_at: str | None = None
         self._workers: list[threading.Thread] = []
+        self._scheduler: threading.Thread | None = None
         self._cipher = cipher
         self._rules = rules
         self._metrics = metrics
@@ -136,8 +148,15 @@ class Engine:
     # --- scheduler -----------------------------------------------------------
 
     def _active_accounts(self) -> list:
+        # An account whose baseline is still seeding is not polled: the
+        # detectors compare against stored history, and half-seeded history
+        # reads as a stranger's activity. Onboarding moves the row to
+        # 'complete' or 'incomplete' when the seed finishes, and the next
+        # scheduler pass picks it up.
         with self._db.cursor() as cur:
-            cur.execute("SELECT * FROM guardian_accounts WHERE status = 'active'")
+            cur.execute(
+                "SELECT * FROM guardian_accounts WHERE status = 'active' AND baseline_status <> 'seeding'"
+            )
             return cur.fetchall()
 
     def _schedule_cycle(self) -> None:
@@ -180,7 +199,26 @@ class Engine:
 
     def _scheduler_loop(self) -> None:
         while not self._stop.is_set():
-            self._stop.wait(self._scheduler_pass())
+            self._sleep_with_heartbeat(self._scheduler_pass())
+
+    def _sleep_with_heartbeat(self, seconds: float) -> None:
+        """Waits `seconds` for the next pass, beating every
+        HEARTBEAT_MAX_INTERVAL_S in the meantime.
+
+        The pulse used to be the pass's one beat, so its cadence was
+        `polling.fast_loop_seconds` with no ceiling, and an interval longer
+        than the heartbeat TTL read as a stale worker. A wait of one slice or
+        less is unchanged: no extra beat, the pass's own beat is the pulse.
+        `stop()` ends the wait at once, with no beat after it."""
+        deadline = time.monotonic() + seconds
+        while not self._stop.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if self._stop.wait(min(remaining, HEARTBEAT_MAX_INTERVAL_S)):
+                return
+            if deadline - time.monotonic() > 0:
+                self._beat(self._last_paused)
 
     def _scheduler_pass(self) -> float:
         """One pass, returning how long to sleep before the next. Never raises.
@@ -240,11 +278,17 @@ class Engine:
                 self._hooks.after_tick(paused)
         except Exception as exc:  # noqa: BLE001 - scheduler must survive anything
             logger.error("scheduler cycle failed: %s", exc)
-        if self._hooks is not None:
-            try:
-                self._hooks.beat(self.snapshot(paused))
-            except Exception as exc:  # noqa: BLE001 - the pulse must not kill the heart
-                logger.error("heartbeat hook failed: %s", exc)
+        self._last_paused = paused
+        self._beat(paused)
+
+    def _beat(self, paused: bool) -> None:
+        """One heartbeat through the hooks. Never raises."""
+        if self._hooks is None:
+            return
+        try:
+            self._hooks.beat(self.snapshot(paused))
+        except Exception as exc:  # noqa: BLE001 - the pulse must not kill the heart
+            logger.error("heartbeat hook failed: %s", exc)
 
     def snapshot(self, paused: bool = False) -> dict:
         """What the heartbeat carries: enough for /health and the admin page
@@ -303,7 +347,7 @@ class Engine:
                 f"{self._rules.validation_error}. Detection is running on the settings that "
                 f"validated plus built-in defaults for the rest, so the thresholds in force "
                 f"are not the ones in the file. Fix it and the next edit is picked up without "
-                f"a restart; `sentinel validate-config <path>` checks a file before you ship it."
+                f"a restart; `python -m guardian.validate_config <path>` checks a file before you ship it."
             ),
             evidence={
                 "problems": self._rules.validation_error,
@@ -399,8 +443,12 @@ class Engine:
         for w in workers:
             w.start()
         self._workers = workers
-        scheduler = threading.Thread(target=self._scheduler_loop, daemon=True, name="scheduler")
-        scheduler.start()
+        # Kept, so `join()` can wait for it. The scheduler thread runs
+        # escalation and the config health check; a SIGTERM whose join waited
+        # for the pool alone could return - after the final "stopping"
+        # heartbeat - while this thread was still mid-escalation.
+        self._scheduler = threading.Thread(target=self._scheduler_loop, daemon=True, name="scheduler")
+        self._scheduler.start()
         logger.info("engine running: %d workers", size)
         try:
             while not self._stop.is_set():
@@ -445,12 +493,16 @@ class Engine:
         self._stop.set()
 
     def join(self, timeout: float = 30.0) -> None:
-        """Wait for in-flight polls to finish after `stop()`, up to `timeout`
-        in total, so a SIGTERM lets a half-done poll record its state."""
+        """Wait for in-flight polls, and the scheduler pass in progress, to
+        finish after `stop()`, up to `timeout` in total - so a SIGTERM lets a
+        half-done poll record its state and a half-sent escalation go out."""
         deadline = time.monotonic() + timeout
-        for w in list(self._workers):
+        threads = list(self._workers)
+        if self._scheduler is not None:
+            threads.append(self._scheduler)
+        for t in threads:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            if w.is_alive():
-                w.join(remaining)
+            if t.is_alive():
+                t.join(remaining)

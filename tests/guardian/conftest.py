@@ -14,7 +14,8 @@ Guardian's own fixtures:
   rollback is not an option here.
 * `make_account` — inserts a monitored account under the one test user this
   module owns (`guardian-tests@example.com`, CLAUDE.md's local throwaway
-  convention).
+  convention), with its baseline `complete` as onboarding leaves it; pass
+  `baseline_status` to say otherwise.
 * `cipher`, `rules` — as Guardian's.
 * `safe_settings` (autouse) — every transport setting blanked, so nothing
   here can reach Telegram, Resend, ClickSend or Twilio; a test that wants a
@@ -125,14 +126,17 @@ def rules(tmp_path):
     return RulesConfig(rules_path)
 
 
-def make_account(db, label="acct-1", *, user_id=TEST_USER_ID, exchange="bitget"):
+def make_account(db, label="acct-1", *, user_id=TEST_USER_ID, exchange="bitget", baseline_status="complete"):
+    """An onboarded account. Its baseline is `complete` unless the test says
+    otherwise: that is where `onboard_account` leaves a row, and the scheduler
+    does not poll one still `seeding` (the column's default)."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO guardian_accounts "
             "(user_id, label, exchange, topology, encrypted_api_key, encrypted_secret, encrypted_passphrase, "
-            "onboarding_source, onboarded_at, updated_at) "
-            "VALUES (%s, %s, %s, 'independent', 'x', 'y', 'z', 'self', '2026-01-01', '2026-01-01')",
-            (user_id, label, exchange),
+            "baseline_status, onboarding_source, onboarded_at, updated_at) "
+            "VALUES (%s, %s, %s, 'independent', 'x', 'y', 'z', %s, 'self', '2026-01-01', '2026-01-01')",
+            (user_id, label, exchange, baseline_status),
         )
         return cur.lastrowid
 

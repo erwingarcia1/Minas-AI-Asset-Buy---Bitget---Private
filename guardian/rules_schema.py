@@ -314,7 +314,7 @@ def prune_invalid(data, spec=SPEC):
 
     Used when the process must run on a file it can't fully accept - see
     `RulesConfig._reject`. Never used to decide *whether* a file is valid;
-    `validate` does that, and it is what `sentinel validate-config` reports.
+    `validate` does that, and it is what `python -m guardian.validate_config` reports.
     """
     if not isinstance(data, dict):
         return {}

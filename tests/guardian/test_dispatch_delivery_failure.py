@@ -264,3 +264,81 @@ def test_no_configured_channel_at_all_also_pages(db, cipher):
     poller._emit(account_id, "nochannels", _detection())
 
     assert len(recent_operator_pages(db)) == 1
+
+
+# --- but not when the row says the delivery was withheld on purpose ----------
+
+def test_a_digest_bound_severity_does_not_page(db, cipher):
+    """MEDIUM and LOW route to the daily digest (`alerting.routing` in
+    rules.yaml), so `build_channels` hands dispatch an empty list for them and
+    `delivered_to` is 0 by design: the digest delivers them from the same row.
+    That is not "nobody was told" - and reading only the count paged CRITICAL,
+    operator SMS included, for every MEDIUM and LOW detection on every
+    account."""
+    from guardian.alerts.operator import OperatorAlerter, recent_operator_pages
+
+    account_id = _account(db, "digest")
+    alerter = OperatorAlerter(db, {"CRITICAL": [Recording()]}, RulesConfig(SHIPPED_RULES))
+    poller = AccountPoller(db, cipher, RulesConfig(SHIPPED_RULES),
+                           {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []},
+                           operator_alerter=alerter)
+
+    poller._emit(account_id, "digest", _detection(rule="abnormal_fee_spend", severity="MEDIUM"))
+    poller._emit(account_id, "digest", _detection(rule="baseline_drift_new_deposit_source", severity="LOW"))
+
+    assert recent_operator_pages(db) == []
+    with db.cursor() as cur:
+        cur.execute("SELECT severity, delivered_to FROM guardian_alerts ORDER BY id")
+        rows = cur.fetchall()
+    assert [(r["severity"], r["delivered_to"]) for r in rows] == [("MEDIUM", 0), ("LOW", 0)], (
+        "the rows the digest reads are still written"
+    )
+
+
+def test_a_snoozed_alert_does_not_page(db, cipher):
+    """A snooze withholds delivery at the customer's request, and the row says
+    so in `snoozed_until`. That is a different fact from reaching nobody
+    (guardian/snooze.py), and reading only `delivered_to` conflated them."""
+    from guardian.alerts.dispatch import _dedup_key
+    from guardian.alerts.operator import OperatorAlerter, recent_operator_pages
+    from guardian.snooze import snooze_alert
+
+    account_id = _account(db, "snoozed")
+    detection = _detection()
+    assert snooze_alert(db, account_id, _dedup_key(account_id, detection), detection.rule, 1,
+                        "customer", severity="CRITICAL") is not None
+    channel = Recording()
+    alerter = OperatorAlerter(db, {"CRITICAL": [Recording()]}, RulesConfig(SHIPPED_RULES))
+    poller = AccountPoller(db, cipher, RulesConfig(SHIPPED_RULES),
+                           {"CRITICAL": [channel], "HIGH": [], "MEDIUM": [], "LOW": []},
+                           operator_alerter=alerter)
+
+    poller._emit(account_id, "snoozed", detection)
+
+    assert channel.sent == [], "the snooze held"
+    assert recent_operator_pages(db) == []
+    with db.cursor() as cur:
+        cur.execute("SELECT delivered_to, snoozed_until FROM guardian_alerts")
+        row = cur.fetchone()
+    assert row["delivered_to"] == 0 and row["snoozed_until"] is not None
+
+
+def test_a_severity_routed_to_a_channel_that_is_missing_still_pages(db, cipher, tmp_path):
+    """The digest exemption is about the routing, not the severity. A MEDIUM
+    routed to Telegram with Telegram unconfigured is an alert delivered
+    nowhere, which is exactly the page's case."""
+    from guardian.alerts.operator import OperatorAlerter, recent_operator_pages
+
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text("alerting:\n  routing:\n    MEDIUM: [telegram]\n")
+    rules = RulesConfig(rules_path)
+    account_id = _account(db, "routedaway")
+    alerter = OperatorAlerter(db, {"CRITICAL": [Recording()]}, rules)
+    poller = AccountPoller(db, cipher, rules,
+                           {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []},
+                           operator_alerter=alerter)
+
+    poller._emit(account_id, "routedaway", _detection(rule="abnormal_fee_spend", severity="MEDIUM"))
+
+    pages = recent_operator_pages(db)
+    assert len(pages) == 1 and "MEDIUM" in pages[0]["message"]

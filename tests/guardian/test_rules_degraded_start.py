@@ -20,12 +20,13 @@ away, not because the risk did.
 
 So: never refuse. Use every setting in the file that validates, fall back to
 defaults for the ones that don't, and raise a CRITICAL operator page saying so.
-`sentinel validate-config` is where fail-fast lives now - before the deploy,
+`python -m guardian.validate_config` is where fail-fast lives now - before the deploy,
 not during it.
 """
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from guardian.config import RulesConfig
@@ -314,3 +315,92 @@ def test_a_failing_health_check_does_not_kill_the_scheduler(db, cipher, tmp_path
 
     engine._check_config_health = boom
     engine._scheduler_tick()  # must not raise
+
+
+# --- a file that cannot be read is one problem, not one per pass -------------
+
+VALID = 'detectors:\n  off_market:\n    max_deviation_pct: "25"\n'
+
+
+def test_an_unreadable_file_pages_once_not_every_pass(db, cipher, tmp_path):
+    """A missing or unreadable file has no mtime to latch on, so every reload -
+    and every threshold read is one - rejected it afresh with a new
+    `rejected_at`. The health check keys its page on that stamp, so the worker
+    paged CRITICAL, operator SMS included, every scheduler pass for as long as
+    the file was gone."""
+    from guardian.alerts.operator import OperatorAlerter, recent_operator_pages
+
+    path = tmp_path / "rules.yaml"
+    _write(path, VALID, 1_000_000)
+    rules = RulesConfig(path)
+    channel = Recording()
+    engine = Engine(db, cipher, rules, {},
+                    operator_alerter=OperatorAlerter(db, {"CRITICAL": [channel]}, rules))
+
+    path.unlink()
+    for _ in range(10):
+        rules.get_decimal("detectors", "off_market", "max_deviation_pct")  # the reads a poll makes
+        engine._scheduler_tick()
+
+    pages = recent_operator_pages(db)
+    assert len(pages) == 1 and len(channel.sent) == 1
+    assert "cannot be read" in pages[0]["message"]
+    assert rules.get_decimal("detectors", "off_market", "max_deviation_pct") == 25, (
+        "the last valid configuration stays in force"
+    )
+
+
+def test_an_unreadable_file_is_logged_once_and_so_is_its_return(tmp_path, caplog):
+    path = tmp_path / "rules.yaml"
+    _write(path, VALID, 1_000_000)
+    rules = RulesConfig(path)
+    caplog.set_level(logging.INFO, logger="guardian.config")
+
+    path.unlink()
+    for _ in range(20):
+        assert rules.is_valid is False
+    assert len([r for r in caplog.records if r.levelno >= logging.ERROR]) == 1, (
+        "one ERROR on the transition, then quiet while it stays broken"
+    )
+
+    _write(path, VALID.replace('"25"', '"30"'), 2_000_000)
+    for _ in range(20):
+        assert rules.is_valid is True
+    assert rules.get_decimal("detectors", "off_market", "max_deviation_pct") == 30, (
+        "recovery is the file on disk, not the values kept while it was gone"
+    )
+    assert len([r for r in caplog.records if "valid again" in r.getMessage()]) == 1
+    assert len([r for r in caplog.records if r.levelno >= logging.ERROR]) == 1
+
+
+def test_a_file_that_comes_back_broken_is_a_new_problem(db, cipher, tmp_path):
+    """Latching the unreadable state must not swallow the next, different
+    mistake: a file restored with a typo in it is news."""
+    from guardian.alerts.operator import OperatorAlerter, recent_operator_pages
+
+    path = tmp_path / "rules.yaml"
+    _write(path, VALID, 1_000_000)
+    rules = RulesConfig(path)
+    engine = Engine(db, cipher, rules, {},
+                    operator_alerter=OperatorAlerter(db, {"CRITICAL": [Recording()]}, rules))
+
+    path.unlink()
+    engine._check_config_health()
+    _write(path, 'detectors:\n  off_market:\n    max_deviation_pct: "ten"\n', 2_000_000)
+    engine._check_config_health()
+    engine._check_config_health()
+
+    pages = recent_operator_pages(db)
+    assert len(pages) == 2
+    assert "max_deviation_pct" in pages[0]["message"] and "cannot be read" in pages[1]["message"]
+
+
+def test_a_file_missing_at_startup_is_picked_up_when_it_appears(tmp_path):
+    path = tmp_path / "rules.yaml"
+    rules = RulesConfig(path)
+    assert rules.is_valid is False
+
+    _write(path, VALID, 1_000_000)
+
+    assert rules.is_valid is True
+    assert rules.get_decimal("detectors", "off_market", "max_deviation_pct") == 25
