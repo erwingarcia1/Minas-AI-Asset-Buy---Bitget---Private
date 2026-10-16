@@ -131,3 +131,31 @@ def test_health_unauthenticated_and_empty_bodies(server):
         assert client.system.health_check()["status"] == "healthy"
         assert "authorization" not in server.calls[0].headers
         assert client.auto_buy.cancel_purchase("p1") is None
+
+
+def test_login_two_factor_account_returns_challenge_without_storing_tokens(server):
+    (server
+     .on("POST", "/api/auth/login", lambda r: json_response(
+         {"mfa_required": True, "mfa_token": "pending-1", "expires_in": 300}, 202))
+     .on("POST", "/api/auth/login/mfa", lambda r: json_response(TOKENS)
+         if body_of(r) == {"mfa_token": "pending-1", "code": "123456"} else json_response({"detail": "Invalid code"}, 401)))
+    changes = []
+    client = AutoBuyClient("http://api.test", transport=server.transport, on_tokens_changed=changes.append)
+
+    challenge = client.login("a@b.co", "Str0ng!Passw0rd")
+    assert challenge == {"mfa_required": True, "mfa_token": "pending-1", "expires_in": 300}
+    assert client.tokens is None and changes == []
+
+    pair = client.login_mfa(challenge["mfa_token"], code="123456")
+    assert pair == TOKENS and client.tokens == TOKENS and changes == [TOKENS]
+    assert "authorization" not in server.calls[1].headers
+
+
+def test_login_mfa_recovery_code_body_and_missing_factor(server):
+    server.on("POST", "/api/auth/login/mfa", lambda r: json_response(TOKENS))
+    client = AutoBuyClient("http://api.test", transport=server.transport)
+    client.login_mfa("pending-1", recovery_code="abcd-efgh")
+    assert body_of(server.calls[0]) == {"mfa_token": "pending-1", "recovery_code": "abcd-efgh"}
+    with pytest.raises(ValueError):
+        client.login_mfa("pending-1")
+    assert len(server.calls) == 1

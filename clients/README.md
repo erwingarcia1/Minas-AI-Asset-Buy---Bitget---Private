@@ -17,6 +17,18 @@ Every client provides:
 - **Examples** (`examples/basic.*`): register → login → create purchase → list transactions → dashboard stats → refresh → logout.
 - **Unit tests** against a mocked server (no network): `pytest` / `npm test`.
 
+## Two-factor accounts
+
+For an account with two-factor authentication on, `POST /api/auth/login`
+answers `202` with `{ mfa_required: true, mfa_token, expires_in }` instead of a
+token pair. The `login()` helper returns that body as-is and stores nothing;
+check `mfa_required` on the result and finish the sign-in with
+`login_mfa(mfa_token, code=...)` / `loginMfa(mfaToken, { code })` (or a
+`recovery_code`) within `expires_in` seconds. That second call returns the
+normal token pair and stores it. The result of `login()` is typed as
+`TokenResponse | MfaRequiredResponse` in every SDK; the TypeScript and
+JavaScript packages also export an `isMfaRequired()` type guard.
+
 ## Regenerating after an API change
 
 ```bash

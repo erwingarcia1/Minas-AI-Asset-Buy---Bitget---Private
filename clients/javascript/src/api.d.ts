@@ -34,6 +34,7 @@ import type {
   LiftWalletHold,
   LoginRequest,
   MfaLoginRequest,
+  MfaRequiredResponse,
   PerformanceResponse,
   PlatformStats,
   PortfolioSeriesResponse,
@@ -97,7 +98,7 @@ export declare class AuthApi {
   /** Register — `POST /api/auth/register` */
   register(body: RegisterRequest): Promise<UserOut>;
   /** Login — `POST /api/auth/login` */
-  login(body: LoginRequest): Promise<TokenResponse>;
+  login(body: LoginRequest): Promise<TokenResponse | MfaRequiredResponse>;
   /** Login Mfa — `POST /api/auth/login/mfa` */
   loginMfa(body: MfaLoginRequest): Promise<TokenResponse>;
   /** Logout All — `POST /api/auth/logout-all` */

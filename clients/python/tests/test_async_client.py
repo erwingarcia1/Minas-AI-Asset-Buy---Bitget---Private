@@ -62,3 +62,18 @@ async def test_async_logout(server):
     await client.logout()
     assert body_of(server.calls[0]) == {"refresh_token": "ref-1"}
     assert client.tokens is None
+
+
+async def test_async_login_two_factor_then_login_mfa(server):
+    (server
+     .on("POST", "/api/auth/login", lambda r: json_response(
+         {"mfa_required": True, "mfa_token": "pending-1", "expires_in": 300}, 202))
+     .on("POST", "/api/auth/login/mfa", lambda r: json_response(TOKENS)
+         if body_of(r) == {"mfa_token": "pending-1", "code": "123456"} else json_response({"detail": "Invalid code"}, 401)))
+    changes = []
+    async with AsyncAutoBuyClient("http://api.test", transport=server.async_transport,
+                                  on_tokens_changed=changes.append) as client:
+        challenge = await client.login("a@b.co", "pw")
+        assert challenge["mfa_required"] is True and client.tokens is None and changes == []
+        pair = await client.login_mfa(challenge["mfa_token"], code="123456")
+        assert pair == TOKENS and client.tokens == TOKENS and changes == [TOKENS]

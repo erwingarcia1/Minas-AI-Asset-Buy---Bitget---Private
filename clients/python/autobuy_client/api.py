@@ -37,6 +37,7 @@ from .types import (
     LiftWalletHold,
     LoginRequest,
     MfaLoginRequest,
+    MfaRequiredResponse,
     PerformanceResponse,
     PlatformStats,
     PortfolioSeriesResponse,
@@ -126,7 +127,7 @@ class AuthApi:
         """Register — ``POST /api/auth/register``."""
         return self._http.request("POST", "/api/auth/register", auth=False, body=body)
 
-    def login(self, body: LoginRequest) -> TokenResponse:
+    def login(self, body: LoginRequest) -> Union[TokenResponse, MfaRequiredResponse]:
         """Login — ``POST /api/auth/login``."""
         return self._http.request("POST", "/api/auth/login", auth=False, body=body)
 
@@ -177,7 +178,7 @@ class AsyncAuthApi:
         """Register — ``POST /api/auth/register``."""
         return await self._http.request("POST", "/api/auth/register", auth=False, body=body)
 
-    async def login(self, body: LoginRequest) -> TokenResponse:
+    async def login(self, body: LoginRequest) -> Union[TokenResponse, MfaRequiredResponse]:
         """Login — ``POST /api/auth/login``."""
         return await self._http.request("POST", "/api/auth/login", auth=False, body=body)
 

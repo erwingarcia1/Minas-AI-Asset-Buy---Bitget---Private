@@ -44,7 +44,7 @@ export class AuthApi {
   /**
    * Login — `POST /api/auth/login`
    * @param {import('./types.js').LoginRequest} body
-   * @returns {Promise<import('./types.js').TokenResponse>}
+   * @returns {Promise<import('./types.js').TokenResponse | import('./types.js').MfaRequiredResponse>}
    */
   login(body) {
     return this.http.request("POST", "/api/auth/login", { body, auth: false });
