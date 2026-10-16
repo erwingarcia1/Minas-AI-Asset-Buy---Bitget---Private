@@ -18,6 +18,7 @@ export default function UserManagement() {
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [holdReason, setHoldReason] = useState("");
+  const [resetCode, setResetCode] = useState("");   // the admin's own authenticator code; the server needs it while their account has two-factor on
 
   async function unsuspend(u: AdminUserRow) {
     setNotice(null);
@@ -35,13 +36,13 @@ export default function UserManagement() {
     try {
       if (pending.kind === "delete") await adminAPI.removeUser(pending.user.id, typed);
       else if (pending.kind === "lift_hold") await adminAPI.liftWalletHold(pending.user.id, typed, holdReason.trim());
-      else if (pending.kind === "reset_2fa") await adminAPI.resetTwoFactor(pending.user.id);
+      else if (pending.kind === "reset_2fa") await adminAPI.resetTwoFactor(pending.user.id, resetCode.trim() || undefined);
       else await adminAPI.suspend(pending.user.id);
       setNotice(pending.kind === "delete" ? `${pending.user.email} deleted.`
         : pending.kind === "lift_hold" ? `Wallet-change hold lifted for ${pending.user.email}; they have been emailed.`
         : pending.kind === "reset_2fa" ? `Two-factor authentication reset for ${pending.user.email}; they have been emailed.`
         : `${pending.user.email} suspended.`);
-      setHoldReason("");
+      setHoldReason(""); setResetCode("");
       setPending(null);
       await reload();
     } catch (err) {
@@ -84,7 +85,7 @@ export default function UserManagement() {
                       <button className="btn-secondary !py-1" onClick={() => { setDialogError(null); setHoldReason(""); setPending({ kind: "lift_hold", user: u }); }}>Lift wallet hold</button>
                     )}
                     {u.totp_enabled && (
-                      <button className="btn-secondary !py-1" onClick={() => { setDialogError(null); setPending({ kind: "reset_2fa", user: u }); }}>Reset 2FA</button>
+                      <button className="btn-secondary !py-1" onClick={() => { setDialogError(null); setResetCode(""); setPending({ kind: "reset_2fa", user: u }); }}>Reset 2FA</button>
                     )}
                     <button className="btn-danger !py-1" onClick={() => { setDialogError(null); setPending({ kind: "delete", user: u }); }}>Delete</button>
                   </td>
@@ -114,6 +115,13 @@ export default function UserManagement() {
             <div>
               <label className="label" htmlFor="hold-reason">How did the customer prove their identity?</label>
               <input id="hold-reason" className="input" value={holdReason} onChange={(e) => setHoldReason(e.target.value)} placeholder="e.g. video call with ID, ticket #4711" />
+            </div>
+          ) : pending.kind === "reset_2fa" ? (
+            <div>
+              <label className="label" htmlFor="reset-2fa-code">Your authenticator code</label>
+              <input id="reset-2fa-code" className="input font-mono tracking-widest" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={7}
+                     aria-describedby="reset-2fa-code-help" value={resetCode} onChange={(e) => setResetCode(e.target.value)} placeholder="123456" />
+              <p id="reset-2fa-code-help" className="mt-1 text-xs text-slate-500">Needed when two-factor is on for your own account.</p>
             </div>
           ) : undefined}
           onConfirm={(typed) => void confirmPending(typed)}

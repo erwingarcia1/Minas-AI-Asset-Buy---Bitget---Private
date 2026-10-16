@@ -147,8 +147,11 @@ export const adminAPI = {
   /** Support override for the 24h wallet-change hold; `confirm` must equal the user's email. */
   liftWalletHold: (id: string, confirm: string, reason: string) =>
     api.post(`/admin/users/${id}/lift-wallet-hold`, { confirm_email: confirm, reason }),
-  /** Support path for a lost authenticator: removes the enrolment and recovery codes; the user is emailed. */
-  resetTwoFactor: (id: string) => api.post(`/admin/users/${id}/2fa/reset`),
+  /** Support path for a lost authenticator: removes the enrolment and recovery codes; the user is emailed.
+   *  `code` is the calling admin's own authenticator code: required (400 otherwise) while their account has
+   *  two-factor on, ignored when it is off. An admin can never reset their own account (403). */
+  resetTwoFactor: (id: string, code?: string) =>
+    api.post(`/admin/users/${id}/2fa/reset`, code ? { code: code.replace(/\s+/g, "") } : {}),
   transactions: (params: { status_filter?: string; user_id?: string; limit?: number; offset?: number } = {}) =>
     data<{ items: AdminTxRow[]; total: number }>(api.get("/admin/transactions", { params })),
   alerts: () => data<AdminAlert[]>(api.get("/admin/alerts")),
