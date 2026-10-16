@@ -25,7 +25,9 @@ class _EscalationDetection:
 
 class Escalator:
     """Re-fires CRITICAL alerts that nobody acknowledged within the
-    configured window. Acknowledge with: sentinel ack <alert_id>."""
+    configured window. Acknowledging happens in the AutoBuy app under
+    Guardian (the pages arrive with PR4); there is no CLI on this platform,
+    and the copy below must never send anyone to one."""
 
     def __init__(self, channels: list[AlertChannel], unacknowledged_minutes: int,
                  operator_alerter=None, contact_router=None):
@@ -70,7 +72,7 @@ class Escalator:
                 confidence=row["confidence"],
                 message=(
                     f"CRITICAL alert #{row['id']} has not been acknowledged. "
-                    f"Original: {row['message']} -- acknowledge with: sentinel ack {row['id']}"
+                    f"Original: {row['message']} -- acknowledge it in the AutoBuy app under Guardian."
                 ),
                 evidence={"original_alert_id": row["id"]},
             )

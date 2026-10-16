@@ -5,9 +5,20 @@ from datetime import datetime, timedelta, timezone
 
 from guardian.alerts.base import AlertMessage
 from guardian.alerts.email import OutboxEmailChannel, email_configured
-from guardian.alerts.sms import build_sms_channel
+from guardian.alerts.sms import build_sms_channel, mask_phone
 
 logger = logging.getLogger("guardian.alerts.contact")
+
+
+def _masked_emails(emails) -> str:
+    """Addresses for a log line, masked the way the platform masks them
+    everywhere else (two characters and the domain)."""
+    from api.services.telegram import mask_email
+    return ", ".join(mask_email(e) for e in emails)
+
+
+def _masked_phones(phones) -> str:
+    return ", ".join(mask_phone(p) for p in phones)
 
 
 class ContactRouter:
@@ -192,7 +203,7 @@ class ContactRouter:
                     # greylisting retry. A *rising rate* is a broken SMTP
                     # config, and that is metric-and-alarm shaped, not
                     # page-shaped. Do not re-litigate this without the metric.
-                    logger.warning("per-account email to %s failed: %s", emails, exc)
+                    logger.warning("per-account email to %s failed: %s", _masked_emails(emails), exc)
 
         if phones:
             self._send_sms(detection, alert, account_label, phones, account_id, alert_id, auditable)
@@ -232,7 +243,7 @@ class ContactRouter:
             # (#58), and this one additionally leaves an `sms_deliveries` row
             # with status='failed' - a queryable record, which is more than the
             # email path has.
-            logger.warning("per-account SMS to %s failed: %s", phones, exc)
+            logger.warning("per-account SMS to %s failed: %s", _masked_phones(phones), exc)
             for phone in phones:
                 self._record_sms(
                     account_id, alert_id, detection.rule, "failed",

@@ -24,6 +24,14 @@ def format_sms_body(alert: AlertMessage, max_len: int = SMS_MAX_LEN) -> str:
     return prefix + detail + action
 
 
+def mask_phone(phone) -> str:
+    """A phone number for a log line or an error message: its last two digits
+    only. CLAUDE.md masks customer contact details in anything that leaves the
+    system, and the worker log leaves it."""
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    return f"…{digits[-2:]}" if digits else "…"
+
+
 def build_sms_channel(recipients: list[str]) -> AlertChannel | None:
     """Return an SMS channel for `recipients` based on configured env, or None
     if no SMS provider is set. ClickSend is preferred when its credentials are

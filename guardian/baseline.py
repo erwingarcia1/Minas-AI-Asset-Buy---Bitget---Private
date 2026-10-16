@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from guardian.db import Database
 from guardian.exchange import ExchangeClient, exchange_account_uid
 from guardian.identity import fill_identity, transfer_identity, withdrawal_identity
-from guardian.numeric import to_decimal
+from guardian.numeric import plain, to_decimal
 
 logger = logging.getLogger("guardian.baseline")
 
@@ -117,7 +117,11 @@ def latest_balance_snapshot_at(db: Database, account_id: int) -> tuple[dict[str,
             (account_id, account_id),
         )
         rows = cur.fetchall()
-    balances = {row["coin"]: to_decimal(row["quantity"]) for row in rows}
+    # `plain` takes off the padding numeric(38,18) adds on the way back
+    # (Decimal("1.000000000000000000"), Decimal("0E-18")). The value is
+    # untouched, so the detectors compute exactly what they did; what changes
+    # is how a drop reads in the alert text they build from these.
+    balances = {row["coin"]: plain(to_decimal(row["quantity"])) for row in rows}
     snapshot_at = rows[0]["snapshot_at"] if rows else None
     return balances, snapshot_at
 

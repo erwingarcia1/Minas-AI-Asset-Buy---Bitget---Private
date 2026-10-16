@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from guardian import net
 from guardian.alerts.base import AlertChannel, AlertMessage
-from guardian.alerts.sms import SMS_MAX_LEN, format_sms_body
+from guardian.alerts.sms import SMS_MAX_LEN, format_sms_body, mask_phone
 
 # Verified against ClickSend's official docs + Python/PHP SDKs (2026-07-05):
 # POST https://rest.clicksend.com/v3/sms/send, HTTP Basic auth (username + API
@@ -59,9 +59,12 @@ class ClickSendSmsChannel(AlertChannel):
             raise RuntimeError("ClickSend returned SUCCESS with no message results")
         failed = [m for m in results if m.get("status") != "SUCCESS"]
         if failed:
+            # This text ends up in the worker log (contact.py, dispatch.py) and
+            # in an sms_deliveries row, so the number is masked here, at the
+            # one place it is written.
             raise RuntimeError(
                 f"ClickSend failed to queue {len(failed)} message(s): "
-                f"{failed[0].get('status')} (to {failed[0].get('to')})"
+                f"{failed[0].get('status')} (to {mask_phone(failed[0].get('to'))})"
             )
         # Response messages come back in request order; prefer ClickSend's own
         # `to` field, falling back to the requested number by index.

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from decimal import Decimal
+
+from guardian.numeric import format_amount
 
 
 def portal_url() -> str:
@@ -145,6 +148,16 @@ _NOTICE_SUBJECTS = {
 # get one; the rest arrive unadorned so the prefix keeps its meaning.
 _SUBJECT_PREFIX = {"CRITICAL": "Urgent: ", "HIGH": "Please check: "}
 
+
+def _evidence_value(value):
+    """An evidence value as a person reads it. Only real numbers are formatted
+    (at most 8 decimals, no trailing zeros, never E-notation); a string that
+    merely looks numeric may be an order id and is left exactly as it is."""
+    if isinstance(value, (Decimal, float)):
+        return format_amount(value)
+    return value
+
+
 _FOOTER = (
     "Minas AI Guardian watches this account and tells you what it sees. "
     "It never moves funds and never places trades."
@@ -181,7 +194,7 @@ class AlertMessage:
         """Operator format: rule names, confidence and raw evidence, all of
         which the operator needs and none of which a customer should receive.
         Unchanged - Telegram, SMS and the ops email channel all read this."""
-        evidence_lines = "\n".join(f"  {k}: {v}" for k, v in self.evidence.items())
+        evidence_lines = "\n".join(f"  {k}: {_evidence_value(v)}" for k, v in self.evidence.items())
         return (
             f"🛡 MINAS AI GUARDIAN\n"
             f"[{self.severity}] {self.rule} - {self.account_label}\n"

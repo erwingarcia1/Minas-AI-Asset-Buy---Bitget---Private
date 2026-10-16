@@ -18,7 +18,7 @@ def detect_tamper(consecutive_auth_failures: int, threshold: int) -> list[Detect
                 severity="HIGH",
                 confidence="high",
                 message=(
-                    f"Sentinel's own read-only key failed authentication/permission checks "
+                    f"Guardian's own read-only key failed authentication/permission checks "
                     f"{consecutive_auth_failures} times in a row - it may have been deleted "
                     f"or had its permissions changed"
                 ),
