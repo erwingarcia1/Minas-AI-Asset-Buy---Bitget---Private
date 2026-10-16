@@ -22,6 +22,7 @@ from api.services import twofactor
 import hashlib
 import json
 import hmac
+import asyncio
 import logging
 import secrets
 
@@ -139,7 +140,7 @@ class MfaRequiredResponse(BaseModel):
 
 class MfaLoginRequest(BaseModel):
     mfa_token: str = Field(min_length=20, max_length=2048)
-    code: Optional[str] = Field(default=None, max_length=16)
+    code: Optional[str] = Field(default=None, max_length=32)
     recovery_code: Optional[str] = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
@@ -449,12 +450,16 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    await clear_failed_logins(payload.email)
     if await twofactor.is_enabled(db, user.id):
+        # The password alone does not finish this sign-in, so it does not clear the
+        # failed-login counter either: wrong codes at /login/mfa count into the same
+        # lockout, and re-posting the password must not reset it between guesses.
         logger.info("login awaiting second factor", extra={"user_id": str(user.id)})
         return JSONResponse(status_code=status.HTTP_202_ACCEPTED,
                             content=MfaRequiredResponse(mfa_token=make_mfa_token(user),
                                                         expires_in=int(MFA_PENDING_TTL.total_seconds())).model_dump())
+    await clear_failed_logins(payload.email)
+    await _wait_out_revocation_second(user)
     return _start_session(response, str(user.id))
 
 
@@ -469,6 +474,19 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
 MFA_USED_PREFIX = "mfa-used:"
 MFA_ATTEMPTS_PREFIX = "mfa-attempts:"
 MFA_MAX_ATTEMPTS = 5
+
+
+async def _wait_out_revocation_second(user: User) -> None:
+    """A JWT iat has one-second resolution and a token is refused when iat < the
+    cutoff (last password change or "sign out everywhere"). A session minted later
+    in the same second as that cutoff would be dead on arrival, so wait for the
+    next whole second first (at most one second, and only in that one case)."""
+    cutoff = token_cutoff(user)
+    if cutoff is None:
+        return
+    wait = (cutoff.replace(microsecond=0) + timedelta(seconds=1) - datetime.now(timezone.utc)).total_seconds()
+    if wait > 0:
+        await asyncio.sleep(min(wait, 1.0))
 
 
 def make_mfa_token(user: User) -> str:
@@ -567,6 +585,7 @@ async def login_mfa(request: Request, response: Response, payload: MfaLoginReque
         background.add_task(send_two_factor_notice, user.email, "recovery_code_used",
                             when=datetime.now(timezone.utc), ip=_client_ip(request),
                             remaining=verdict.recovery_codes_remaining)
+    await _wait_out_revocation_second(user)
     return _start_session(response, str(user.id))
 
 

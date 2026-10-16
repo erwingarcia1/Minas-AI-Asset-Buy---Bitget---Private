@@ -69,3 +69,17 @@ async def test_a_session_started_afterwards_works_and_other_users_are_untouched(
     finally:
         await db.delete(other)
         await db.commit()
+
+
+async def test_a_sign_in_right_after_logout_all_is_not_dead_on_arrival(db, account):
+    """JWT iat is whole seconds: a token minted later in the same second as the revocation
+    would compare as older than the cutoff. Sign-in waits out that second."""
+    async with client() as c:
+        first = await c.post("/api/auth/login", json={"email": account.email, "password": PW})
+        token = first.json()["access_token"]
+        gone = await c.post("/api/auth/logout-all", headers={"Authorization": f"Bearer {token}"})
+        assert gone.status_code == 204
+        second = await c.post("/api/auth/login", json={"email": account.email, "password": PW})
+        assert second.status_code == 200
+        me = await c.get("/api/user/profile", headers={"Authorization": f"Bearer {second.json()['access_token']}"})
+        assert me.status_code == 200, me.text

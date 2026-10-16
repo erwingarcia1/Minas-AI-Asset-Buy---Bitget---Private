@@ -246,3 +246,44 @@ async def test_nothing_secret_reaches_the_log(db, account, clock, caplog):
     text = caplog.text
     for forbidden in (secret, token, code, codes[0]):
         assert forbidden not in text
+
+
+async def test_reposting_the_password_does_not_reset_the_lockout_counter(db, account, clock):
+    """The password alone does not finish a sign-in with two-factor on, so it must not clear
+    the failed-login counter: otherwise anyone holding the password could guess codes for
+    ever by re-posting it between batches."""
+    await enable(db, account, clock)
+    async with client() as c:
+        token = (await c.post("/api/auth/login", json={"email": account.email, "password": PW})).json()["mfa_token"]
+        for _ in range(4):
+            assert (await c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": "000000"})).status_code == 401
+        again = await c.post("/api/auth/login", json={"email": account.email, "password": PW})
+        assert again.status_code == 202, "the password is still right; the counter is simply not reset"
+        fifth = await c.post("/api/auth/login/mfa", json={"mfa_token": again.json()["mfa_token"], "code": "000000"})
+        assert fifth.status_code == 401
+        locked = await c.post("/api/auth/login", json={"email": account.email, "password": PW})
+        assert locked.status_code == 429, "four wrong codes, a re-posted password and a fifth wrong code lock the account"
+
+
+async def test_a_completed_sign_in_clears_the_counter(db, account, clock):
+    secret, _ = await enable(db, account, clock)
+    async with client() as c:
+        token = (await c.post("/api/auth/login", json={"email": account.email, "password": PW})).json()["mfa_token"]
+        for _ in range(3):
+            assert (await c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": "000000"})).status_code == 401
+        done = await c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": totp_at(secret, clock.now)})
+        assert done.status_code == 200, done.text
+        clock.advance(STEP)
+        token = (await c.post("/api/auth/login", json={"email": account.email, "password": PW})).json()["mfa_token"]
+        for _ in range(4):
+            assert (await c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": "000000"})).status_code == 401
+        assert (await c.post("/api/auth/login", json={"email": account.email, "password": PW})).status_code == 202, \
+            "a clean slate after the completed sign-in: four wrong codes do not lock"
+
+
+async def test_a_blank_code_beside_a_recovery_code_does_not_shadow_it(db, account, clock):
+    _, codes = await enable(db, account, clock)
+    async with client() as c:
+        token = (await c.post("/api/auth/login", json={"email": account.email, "password": PW})).json()["mfa_token"]
+        r = await c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": "  ", "recovery_code": codes[0]})
+    assert r.status_code == 200, r.text
