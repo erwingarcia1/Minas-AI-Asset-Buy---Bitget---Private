@@ -47,7 +47,7 @@ describe("Security settings: two-factor authentication", () => {
     expect(screen.getByRole("status")).toHaveTextContent("shown only once");
     fireEvent.click(screen.getByRole("button", { name: "I have saved them" }));
     await waitFor(() => expect(screen.queryByTestId("recovery-codes")).not.toBeInTheDocument());
-    expect(screen.getByTestId("two-factor-status")).toHaveTextContent("on");
+    expect(screen.getByTestId("two-factor-status")).toHaveTextContent("Two-factor authentication: on");
   });
 
   it("a wrong code during enrolment shows the message and keeps the step", async () => {
@@ -83,6 +83,7 @@ describe("Security settings: two-factor authentication", () => {
     expect(screen.getByRole("button", { name: "Turn off two-factor" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "pw" } });
     fireEvent.click(screen.getByRole("button", { name: "Use a recovery code instead" }));
+    expect(screen.getByLabelText("Recovery code")).toHaveAttribute("maxlength", "23");   // XXXXX-XXXXX-XXXXX-XXXXX fits; the 14-character codes below still work
     fireEvent.change(screen.getByLabelText("Recovery code"), { target: { value: "AAAA-BBBB-0001" } });
     fireEvent.click(screen.getByRole("button", { name: "Turn off two-factor" }));
     await waitFor(() => expect(twoFactorAPI.disable).toHaveBeenCalledWith("pw", { recovery_code: "AAAA-BBBB-0001" }));

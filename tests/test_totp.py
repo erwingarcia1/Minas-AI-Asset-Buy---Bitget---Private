@@ -227,3 +227,15 @@ def test_the_secret_is_not_derived_from_the_email():
 
     assert a != b
     assert time.time() > 0  # nothing time-derived either
+
+
+def test_recovery_codes_are_eighty_bits_in_four_readable_groups():
+    """48 bits under one unsalted SHA-256 could be brute-forced offline from a copy of the
+    database in hours; 80 bits cannot. Codes issued at the older length hash the same way."""
+    from api.services.totp import hash_recovery_code
+    for code in generate_recovery_codes():
+        groups = code.split("-")
+        assert len(groups) == 4 and all(len(g) == 5 for g in groups), code
+        flat = code.replace("-", "")
+        assert len(flat) == 20 and all(ch in "0123456789ABCDEF" for ch in flat)
+    assert hash_recovery_code("abcd-ef01-2345") == hash_recovery_code("ABCDEF012345")

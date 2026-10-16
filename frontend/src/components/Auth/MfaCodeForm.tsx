@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Alert } from "@/components/Common";
 import type { MfaFactor } from "@/types";
+import { RECOVERY_CODE_MAX_LENGTH, RECOVERY_CODE_PLACEHOLDER } from "@/utils/validation";
 
 interface Props {
   onSubmit: (factor: MfaFactor) => Promise<void>;
@@ -37,8 +38,8 @@ export function MfaCodeForm({ onSubmit, onBack }: Props) {
         <label className="label" htmlFor="mfa_code">{useRecovery ? "Recovery code" : "Authenticator code"}</label>
         <input id="mfa_code" name="mfa_code" className="input font-mono tracking-widest" type="text" autoFocus
                inputMode={useRecovery ? "text" : "numeric"} autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false}
-               maxLength={useRecovery ? 16 : 7} value={value} onChange={(e) => setValue(e.target.value)}
-               placeholder={useRecovery ? "XXXX-XXXX-XXXX" : "123456"} />
+               maxLength={useRecovery ? RECOVERY_CODE_MAX_LENGTH : 7} value={value} onChange={(e) => setValue(e.target.value)}
+               placeholder={useRecovery ? RECOVERY_CODE_PLACEHOLDER : "123456"} />
         <p className="mt-1 text-xs text-slate-500">
           {useRecovery ? "Each recovery code works once. You will be emailed when one is used."
                        : "The code changes every 30 seconds. This sign-in expires after five minutes."}

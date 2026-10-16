@@ -70,13 +70,17 @@ def generate_recovery_codes(count: int = RECOVERY_CODE_COUNT) -> list[str]:
     """Single-use codes that bypass the second factor entirely.
 
     Which makes them exactly as valuable as the password, so they are long
-    enough to be worth nothing to a guesser. Short friendly codes are how a
-    recovery feature becomes the easiest way in. Grouped with a hyphen only so
-    a human can read one off a piece of paper without losing their place."""
+    enough to be worth nothing to a guesser online or to anyone holding a copy
+    of the database: 80 bits of `secrets` output, so the single unsalted SHA-256
+    they are stored under cannot be brute-forced offline either (48 bits could
+    be, in hours on one GPU). Short friendly codes are how a recovery feature
+    becomes the easiest way in. Grouped with a hyphen only so a human can read
+    one off a piece of paper without losing their place. Codes issued at the
+    older 48-bit length still verify: the hash is of the normalised string."""
     codes = []
     for _ in range(count):
-        raw = secrets.token_hex(6).upper()  # 12 hex chars, 48 bits
-        codes.append(f"{raw[:4]}-{raw[4:8]}-{raw[8:]}")
+        raw = secrets.token_hex(10).upper()  # 20 hex chars, 80 bits
+        codes.append("-".join(raw[i:i + 5] for i in range(0, 20, 5)))
     return codes
 
 
@@ -161,7 +165,7 @@ def hash_recovery_code(code: str) -> str:
     """Recovery codes are stored hashed, like passwords - a database read must
     not yield a way past the second factor.
 
-    SHA-256 rather than scrypt: these are 48 bits of `secrets` output with no
+    SHA-256 rather than scrypt: these are 80 bits of `secrets` output with no
     dictionary to attack, so a work factor would buy nothing and cost a second
     on every login attempt. Normalised first so a customer typing it back with
     or without the hyphens, in either case, still gets in."""

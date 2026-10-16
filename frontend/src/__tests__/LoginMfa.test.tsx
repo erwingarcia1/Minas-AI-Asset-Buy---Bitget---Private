@@ -93,6 +93,21 @@ describe("Login with a second factor", () => {
     expect(authAPI.loginMfa).toHaveBeenCalledWith("pending-1", { recovery_code: "aaaa-bbbb-cccc" });
   });
 
+  it("a 23-character recovery code (XXXXX-XXXXX-XXXXX-XXXXX) fits the field and is sent whole", async () => {
+    vi.mocked(authAPI.login).mockResolvedValue({ kind: "mfa", mfaToken: "pending-1", expiresIn: 300 } as never);
+    mount();
+    await submitPassword();
+    expect(await screen.findByLabelText("Authenticator code")).toHaveAttribute("maxlength", "7");
+    fireEvent.click(screen.getByRole("button", { name: "Use a recovery code instead" }));
+    const field = screen.getByLabelText("Recovery code");
+    expect(field).toHaveAttribute("maxlength", "23");   // jsdom never truncates a programmatic value, so the attribute is the proof the browser will not either
+    expect(field).toHaveAttribute("placeholder", "XXXXX-XXXXX-XXXXX-XXXXX");
+    fireEvent.change(field, { target: { value: "0a1b2-3c4d5-6e7f8-9a0b1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByText("dashboard page");
+    expect(authAPI.loginMfa).toHaveBeenCalledWith("pending-1", { recovery_code: "0a1b2-3c4d5-6e7f8-9a0b1" });
+  });
+
   it("a rejected code shows the server's message and stays on the step", async () => {
     vi.mocked(authAPI.login).mockResolvedValue({ kind: "mfa", mfaToken: "pending-1", expiresIn: 300 } as never);
     vi.mocked(authAPI.loginMfa).mockRejectedValue(new Error("That code was not accepted. Check the time on your phone and enter the current code."));

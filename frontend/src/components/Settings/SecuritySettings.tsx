@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import type { MfaFactor, TwoFactorEnrolment } from "@/types";
 import { saveBlob } from "@/utils/download";
 import { fmtDate } from "@/utils/format";
+import { RECOVERY_CODE_MAX_LENGTH } from "@/utils/validation";
 
 type Msg = { kind: "error" | "success" | "info"; text: string } | null;
 type View = "idle" | "password" | "enrolling" | "codes" | "regenerate" | "disable" | "sign-out-everywhere";
@@ -193,7 +194,7 @@ const SecuritySettings = forwardRef<HTMLElement, { highlight?: boolean }>(functi
                 <input id="tf-disable-password" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
               <div><label className="label" htmlFor="tf-disable-code">{useRecovery ? "Recovery code" : "Authenticator code"}</label>
                 <input id="tf-disable-code" className="input font-mono tracking-widest" type="text" inputMode={useRecovery ? "text" : "numeric"} autoComplete="one-time-code"
-                       maxLength={useRecovery ? 16 : 7} value={code} onChange={(e) => setCode(e.target.value)} />
+                       maxLength={useRecovery ? RECOVERY_CODE_MAX_LENGTH : 7} value={code} onChange={(e) => setCode(e.target.value)} />
                 <button type="button" className="mt-1 text-xs text-brand-600 hover:underline" onClick={() => { setUseRecovery((v) => !v); setCode(""); }}>
                   {useRecovery ? "Use my authenticator app instead" : "Use a recovery code instead"}
                 </button></div>
