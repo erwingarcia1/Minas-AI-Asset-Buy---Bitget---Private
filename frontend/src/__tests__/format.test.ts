@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtAmount, fmtCrypto, fmtPrice } from "@/utils/format";
+import { fmtAmount, fmtCrypto, fmtPrice, fmtUtc } from "@/utils/format";
 
 describe("crypto amount formatting", () => {
   it("shows at most 8 decimals and trims trailing zeros, never exponent notation", () => {
@@ -38,5 +38,19 @@ describe("fmtAmount: separators, at most 2 decimals from 1,000 coins", () => {
     expect(fmtAmount(999.99999999)).toBe("999.99999999");
     expect(fmtAmount(0.000196803)).toBe("0.0001968");
     expect(fmtCrypto(2391772, "PEPE")).toBe("2,391,772 PEPE");
+  });
+});
+
+describe("fmtUtc: Guardian times on a fixed UTC clock that says so", () => {
+  it("formats zoned stamps, takes a bare stamp as UTC, and dashes for nothing", () => {
+    expect(fmtUtc("2026-10-19T14:03:27Z")).toBe("2026-10-19 14:03 UTC");
+    expect(fmtUtc("2026-10-19T14:03:27+00:00")).toBe("2026-10-19 14:03 UTC");
+    expect(fmtUtc("2026-10-19T16:03:27+02:00")).toBe("2026-10-19 14:03 UTC");
+    expect(fmtUtc("2026-10-19T14:03:27")).toBe("2026-10-19 14:03 UTC");           // the engine writes UTC without a zone
+    expect(fmtUtc("2026-10-19T14:03:27.123456Z")).toBe("2026-10-19 14:03 UTC");
+    expect(fmtUtc("2026-01-05T03:07:00Z")).toBe("2026-01-05 03:07 UTC");           // zero-padded
+    expect(fmtUtc(null)).toBe("—");
+    expect(fmtUtc(undefined)).toBe("—");
+    expect(fmtUtc("not a date")).toBe("—");
   });
 });

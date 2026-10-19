@@ -38,3 +38,13 @@ export const fmtRunTime = (iso: string | null | undefined) => {
   const utc = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
   return `${day} at ${time} ET (${utc} UTC)`;
 };
+
+/** Times that come from the Guardian engine: a fixed UTC clock that says so ("2026-10-19 14:03 UTC").
+ *  A stamp without a zone is taken as UTC, which is what the engine writes. */
+export const fmtUtc = (iso: string | null | undefined) => {
+  if (!iso) return "—";
+  const d = new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : `${iso}Z`);
+  if (Number.isNaN(d.getTime())) return "—";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
+};

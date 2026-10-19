@@ -47,6 +47,11 @@ export interface UserProfile {
   wallet_hold_reason?: "password_reset" | "password_change" | string | null;
   /** Private beta: may this user create or switch withdraw-immediately purchases? Server-enforced; the UI hides the controls. */
   withdrawals_allowed?: boolean;
+  /** Guardian (read-only exchange monitoring) is visible to this user: the flag is on and, when an allowlist
+   *  is set, the user is on it. Server-enforced: every /api/guardian route answers 404 otherwise. */
+  guardian_enabled?: boolean;
+  /** Two-factor authentication is on; an email change then also needs an authenticator code. */
+  mfa_enabled?: boolean;
 }
 
 export type KycStatus = "pending" | "verified" | "rejected";
@@ -477,4 +482,72 @@ export interface PublicMeta {
   exchanges: string[];
   support_email: string;
   server_ip: string;
+  /** The raw GUARDIAN_ENABLED flag (no allowlist): only decides whether the login page shows the migration hint. */
+  guardian_enabled?: boolean;
+}
+
+// ---- Guardian: read-only exchange monitoring (/api/guardian/*, 404 while the feature is off) ----
+export type GuardianExchange = "bitget" | "bybit" | "okx" | "binance";
+/** independent = the customer's own exchange account; sub_account = a sub-account of a bigger one. */
+export type GuardianTopology = "independent" | "sub_account";
+export type GuardianAccountStatus = "active" | "tamper_suspected" | "disabled";
+/** seeding = the first snapshot is still being taken (the engine does not check the account yet). */
+export type GuardianBaselineStatus = "seeding" | "complete" | "incomplete";
+
+/** One monitored exchange account. Never carries key material or the key fingerprint. */
+export interface GuardianAccount {
+  id: number;
+  label: string;
+  name: string | null;                 // = customer_name
+  exchange: GuardianExchange | string;
+  topology: GuardianTopology;
+  account_mode: "classic" | "unified" | null;
+  status: GuardianAccountStatus;
+  baseline_status: GuardianBaselineStatus;
+  exchange_uid: string | null;
+  sms_alerts_enabled: boolean;
+  alert_phone: string | null;
+  alert_email_secondary: string | null;
+  alert_phone_secondary: string | null;
+  telegram_handle: string | null;
+  created_at: string;                  // = onboarded_at
+  updated_at: string;
+  /** The engine's last successful check of this account, UTC; null until the first one. */
+  last_success_at: string | null;
+}
+
+/** POST /api/guardian/accounts. The key must be a separate read-only key, never an AutoBuy purchase key. */
+export interface GuardianAccountCreate {
+  exchange: GuardianExchange;
+  api_key: string;
+  api_secret: string;
+  passphrase?: string;                 // Bitget and OKX only
+  name: string;                        // 1-80 characters
+  topology?: GuardianTopology;         // default independent
+  alert_phone?: string;
+  alert_email_secondary?: string;
+  alert_phone_secondary?: string;
+  telegram_handle?: string;
+  sms_alerts_enabled?: boolean;        // default false
+}
+
+/** PUT /api/guardian/accounts/{id}/key: a refusal is a 400 whose detail is the plain-language message. */
+export interface GuardianKeyReplace {
+  api_key: string;
+  api_secret: string;
+  passphrase?: string;
+}
+
+export interface GuardianKeyReplaceResult {
+  ok: boolean;
+  message: string;
+}
+
+/** PATCH /api/guardian/accounts/{id}: contact overrides and the SMS switch. */
+export interface GuardianAccountUpdate {
+  alert_phone?: string | null;
+  alert_email_secondary?: string | null;
+  alert_phone_secondary?: string | null;
+  telegram_handle?: string | null;
+  sms_alerts_enabled?: boolean;
 }

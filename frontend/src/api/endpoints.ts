@@ -7,7 +7,8 @@ import type {
   QuickStats, RecurringProjection, ReportPerformance, Timeline, TokenResponse, Transaction, TransactionList,
   TransactionStats, UserProfile, VolatilityEntry, Webhook, WebhookCreated,
  RetryWithdrawalResult, NotificationPreferences, AdminPurchaseRow, PurchaseReview, PortfolioSeries, SeriesRange, PublicMeta,
- MfaFactor, MfaRequiredResponse, RecoveryCodes, TwoFactorEnrolment, TwoFactorStatus } from "@/types";
+ MfaFactor, MfaRequiredResponse, RecoveryCodes, TwoFactorEnrolment, TwoFactorStatus,
+ GuardianAccount, GuardianAccountCreate, GuardianAccountUpdate, GuardianKeyReplace, GuardianKeyReplaceResult } from "@/types";
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data);
 
@@ -61,7 +62,14 @@ export const notificationAPI = {
 
 export const userAPI = {
   profile: () => data<UserProfile>(api.get("/user/profile")),
-  updateProfile: (email: string) => data<UserProfile>(api.put("/user/profile", { email })),
+  /** An email change needs the current password and, with two-factor on, an authenticator code (400 with a
+   *  plain-language detail otherwise). Empty values are left out of the body. */
+  updateProfile: (email: string, auth: { current_password?: string; code?: string } = {}) =>
+    data<UserProfile>(api.put("/user/profile", {
+      email,
+      ...(auth.current_password ? { current_password: auth.current_password } : {}),
+      ...(auth.code ? { code: auth.code.replace(/\s+/g, "") } : {}),
+    })),
   sendVerification: (email: string) =>
     data<EmailSentResponse>(api.post("/email/send-verification", { email })),
   exchangeKeys: () => data<ApiKey[]>(api.get("/exchange/keys")),
@@ -174,4 +182,22 @@ export const marketAPI = {
 /** Anonymous facts for the landing page and setup guide (coins, exchanges, support address, server IP). */
 export const publicAPI = {
   meta: () => data<PublicMeta>(api.get("/public/meta")),
+};
+
+/** Guardian, read-only exchange monitoring: the monitored-accounts subset. Every path answers 404 while the
+ *  feature is off for this user (flag off, or an allowlist without them); an account that is not the caller's
+ *  is a 404 as well. Responses never carry key material. */
+export const guardianAPI = {
+  accounts: () => data<GuardianAccount[]>(api.get("/guardian/accounts")),
+  account: (id: number) => data<GuardianAccount>(api.get(`/guardian/accounts/${id}`)),
+  /** 201 with the new row (baseline still seeding); 400 = refused with a plain-language reason (a purchase key,
+   *  a key that can trade, the ten-account cap), 409 = that exchange account is already monitored. 3/minute. */
+  addAccount: (body: GuardianAccountCreate) => data<GuardianAccount>(api.post("/guardian/accounts", body)),
+  /** The new key is checked (read-only, same exchange account) before it replaces the old one; 400 = refused. 3/minute. */
+  replaceKey: (id: number, body: GuardianKeyReplace) => data<GuardianKeyReplaceResult>(api.put(`/guardian/accounts/${id}/key`, body)),
+  updateAccount: (id: number, body: GuardianAccountUpdate) => data<GuardianAccount>(api.patch(`/guardian/accounts/${id}`, body)),
+  disable: (id: number) => data<GuardianAccount>(api.post(`/guardian/accounts/${id}/disable`)),
+  enable: (id: number) => data<GuardianAccount>(api.post(`/guardian/accounts/${id}/enable`)),
+  /** 204: the key is deleted and monitoring ends; the row and its alert history are kept. */
+  remove: (id: number) => api.delete(`/guardian/accounts/${id}`),
 };

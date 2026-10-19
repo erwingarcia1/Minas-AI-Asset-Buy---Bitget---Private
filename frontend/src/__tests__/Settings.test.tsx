@@ -1,12 +1,13 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { AxiosError } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Settings from "@/pages/Settings";
 
 vi.mock("@/api/endpoints", () => ({
   authAPI: { changePassword: vi.fn() },
   userAPI: { exchangeKeys: vi.fn(), addExchangeKey: vi.fn(), verifyExchangeKey: vi.fn(), deleteExchangeKey: vi.fn(), sendVerification: vi.fn(),
-             supportedExchanges: vi.fn().mockResolvedValue(["bitget"]) },
+             supportedExchanges: vi.fn().mockResolvedValue(["bitget"]), updateProfile: vi.fn() },
   reportsAPI: { performance: vi.fn().mockResolvedValue({ has_data: false }) },
   publicAPI: { meta: vi.fn().mockResolvedValue({ coins: ["BTC"], exchanges: ["bitget"], support_email: "support@example.com", server_ip: "203.0.113.7" }) },
   notificationAPI: { preferences: vi.fn(), update: vi.fn() },
@@ -104,7 +105,7 @@ describe("Settings: exchange key fields stay out of autofill and password manage
     expect(secret).toHaveClass("secret-masked");
     expect(screen.getByRole("button", { name: "Show API secret" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save key" })).toHaveAttribute("type", "button");
-    expect(container.querySelectorAll('input[type="password"]')).toHaveLength(2);
+    expect(container.querySelectorAll('input[type="password"]')).toHaveLength(3);   // change email (current) + change password (current, new)
     // the change-password form is untouched: real password fields with proper autocomplete, inside a form
     const current = container.querySelector('input[autocomplete="current-password"]') as HTMLInputElement;
     const next = container.querySelector('input[autocomplete="new-password"]') as HTMLInputElement;
@@ -204,7 +205,7 @@ describe("Settings: email notifications", () => {
     const weekly = await screen.findByLabelText(/Weekly summary/);
     expect(weekly).toBeChecked();
     expect(screen.getByTestId("always-on")).toHaveTextContent(/password reset, password changed, purchase failed, withdrawal failed/);
-    expect(screen.queryByLabelText(/purchase failed|password/i)).toBeNull();   // no toggle for always-on emails
+    expect(within(screen.getByRole("region", { name: "Email notifications" })).queryByLabelText(/purchase failed|password/i)).toBeNull();   // no toggle for always-on emails
     fireEvent.click(weekly);
     await waitFor(() => expect(notificationAPI.update).toHaveBeenCalledWith({ email_weekly_summary: false }));
     await waitFor(() => expect(screen.getByLabelText(/Weekly summary/)).not.toBeChecked());
@@ -241,5 +242,70 @@ describe("Settings: wallet-change hold", () => {
     await screen.findByText("Exchange API keys");
     expect(screen.queryByTestId("wallet-hold")).toBeNull();
     delete authUser.wallet_hold_until;
+  });
+});
+
+/** What axios hands back for a FastAPI error: the real errorMessage() must surface `detail` untouched. */
+function http(status: number, detail: string) {
+  return new AxiosError("Request failed", "ERR_BAD_REQUEST", undefined, undefined, { status, statusText: "", headers: {}, config: {} as never, data: { detail } });
+}
+
+describe("Settings: change email", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(userAPI.exchangeKeys).mockResolvedValue([] as never);
+    vi.mocked(notificationAPI.preferences).mockResolvedValue(PREFS as never);
+  });
+
+  it("sends the new address with the current password; no code field while two-factor is off", async () => {
+    vi.mocked(userAPI.updateProfile).mockResolvedValue({ ...authUser, email: "new@example.com" } as never);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Change email");
+    expect(screen.queryByLabelText("Authenticator code")).toBeNull();
+    const button = screen.getByRole("button", { name: "Update email" });
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("New email"), { target: { value: "New@Example.com" } });
+    const password = screen.getByLabelText("Current password");
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveAttribute("autocomplete", "current-password");
+    expect(password.closest("form")).toBe(screen.getByTestId("change-email-form"));
+    fireEvent.change(password, { target: { value: "Sess-Passw0rd!1" } });
+    fireEvent.click(button);
+    await waitFor(() => expect(userAPI.updateProfile).toHaveBeenCalledWith("new@example.com", { current_password: "Sess-Passw0rd!1" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Email changed to new@example.com. Sign in with it from now on.");
+    expect(screen.getByLabelText("New email")).toHaveValue("");
+    expect(screen.getByLabelText("Current password")).toHaveValue("");
+  });
+
+  it("with two-factor on, asks for an authenticator code and sends it as code", async () => {
+    authUser.mfa_enabled = true;
+    vi.mocked(userAPI.updateProfile).mockResolvedValue({ ...authUser, email: "new@example.com" } as never);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Change email");
+    fireEvent.change(screen.getByLabelText("New email"), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "pw" } });
+    expect(screen.getByRole("button", { name: "Update email" })).toBeDisabled();   // the code is required too
+    const code = screen.getByLabelText("Authenticator code");
+    expect(code).toHaveAttribute("autocomplete", "one-time-code");
+    fireEvent.change(code, { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update email" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter the six-digit code");
+    expect(userAPI.updateProfile).not.toHaveBeenCalled();
+    fireEvent.change(code, { target: { value: "123 456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update email" }));
+    await waitFor(() => expect(userAPI.updateProfile).toHaveBeenCalledWith("new@example.com", { current_password: "pw", code: "123456" }));
+    delete authUser.mfa_enabled;
+  });
+
+  it("shows the server's reason word for word on a 400 and keeps what was typed", async () => {
+    vi.mocked(userAPI.updateProfile).mockRejectedValue(http(400, "That password was not accepted. Check it and try again."));
+    render(<MemoryRouter><Settings /></MemoryRouter>);
+    await screen.findByText("Change email");
+    fireEvent.change(screen.getByLabelText("New email"), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update email" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That password was not accepted. Check it and try again.");
+    expect(userAPI.updateProfile).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("New email")).toHaveValue("new@example.com");
   });
 });

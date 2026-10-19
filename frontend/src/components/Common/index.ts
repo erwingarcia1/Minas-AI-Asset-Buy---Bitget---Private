@@ -6,3 +6,4 @@ export { StatusBadge } from "./StatusBadge";
 export { default as SecretInput } from "./SecretInput";
 export { BetaTicker } from "./BetaTicker";
 export { CopyButton } from "./CopyButton";
+export { FeatureRoute } from "./FeatureRoute";

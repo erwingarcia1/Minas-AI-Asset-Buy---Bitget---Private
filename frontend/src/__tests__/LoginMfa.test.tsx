@@ -7,6 +7,7 @@ import { useAuthStore } from "@/store/authStore";
 vi.mock("@/api/endpoints", () => ({
   authAPI: { login: vi.fn(), loginMfa: vi.fn() },
   userAPI: { profile: vi.fn() },
+  publicAPI: { meta: vi.fn(() => new Promise(() => undefined)) },   // never answers: no Guardian hint and no stray state update here
 }));
 vi.mock("@/api/client", () => ({
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : "Request failed"),

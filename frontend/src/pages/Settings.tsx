@@ -8,8 +8,10 @@ import Integrations from "@/components/Settings/Integrations";
 import Reports from "@/components/Settings/Reports";
 import { useAsync } from "@/hooks/useAsync";
 import { useAuth } from "@/hooks/useAuth";
-import { passwordProblem } from "@/utils/validation";
+import { useGuardian } from "@/hooks/useGuardian";
+import { isEmail, passwordProblem } from "@/utils/validation";
 import { capitalize, fmtDate } from "@/utils/format";
+import MonitoringKeys from "@/components/Settings/MonitoringKeys";
 import NotificationSettings from "@/components/Settings/NotificationSettings";
 import SecuritySettings from "@/components/Settings/SecuritySettings";
 import WalletHoldNotice from "@/components/Common/WalletHoldNotice";
@@ -22,23 +24,32 @@ const PERMISSION_LABELS: Record<string, string> = {
 };
 
 export default function Settings() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshProfile } = useAuth();
+  const guardian = useGuardian();   // cosmetic: the server answers 404 on every Guardian route while the feature is off
   const location = useLocation();
   const notificationsRef = useRef<HTMLElement | null>(null);
   const securityRef = useRef<HTMLElement | null>(null);
+  const monitoringRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    // the "unsubscribe" link in emails lands on /settings/notifications; security emails link to /settings/security
+    // the "unsubscribe" link in emails lands on /settings/notifications; security emails link to /settings/security;
+    // the Guardian sidebar entry and its emails land on /settings/monitoring
     if (location.pathname.endsWith("/notifications") && typeof notificationsRef.current?.scrollIntoView === "function") notificationsRef.current.scrollIntoView({ block: "start" });
     if (location.pathname.endsWith("/security") && typeof securityRef.current?.scrollIntoView === "function") securityRef.current.scrollIntoView({ block: "start" });
-  }, [location.pathname]);
+    if (location.pathname.endsWith("/monitoring") && typeof monitoringRef.current?.scrollIntoView === "function") monitoringRef.current.scrollIntoView({ block: "start" });
+  }, [location.pathname, guardian]);
   const keys = useAsync(() => userAPI.exchangeKeys());
   const supported = useAsync(() => userAPI.supportedExchanges().catch(() => ["bitget"]));
   const meta = useAsync(() => publicAPI.meta().catch(() => null));
   const [pwMsg, setPwMsg] = useState<Msg>(null);
   const [mailMsg, setMailMsg] = useState<Msg>(null);
   const [keyMsg, setKeyMsg] = useState<Msg>(null);
+  const [emailMsg, setEmailMsg] = useState<Msg>(null);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
   const [exchange, setExchange] = useState("bitget");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
@@ -58,6 +69,22 @@ export default function Settings() {
       setCurrent(""); setNext("");
       setTimeout(() => void logout(), 1500);
     } catch (err) { setPwMsg({ kind: "error", text: errorMessage(err) }); }
+  }
+
+  async function changeEmail(e: FormEvent) {
+    // alerts and sign-in follow the account email, so the server wants the password (and a code with two-factor on)
+    e.preventDefault();
+    setEmailMsg(null);
+    if (!isEmail(newEmail)) return setEmailMsg({ kind: "error", text: "Enter a valid email address" });
+    if (user!.mfa_enabled && emailCode.replace(/\s+/g, "").length !== 6) return setEmailMsg({ kind: "error", text: "Enter the six-digit code from your authenticator app" });
+    setEmailBusy(true);
+    try {
+      const updated = await userAPI.updateProfile(newEmail.trim().toLowerCase(), { current_password: emailPassword, ...(user!.mfa_enabled ? { code: emailCode.replace(/\s+/g, "") } : {}) });
+      await refreshProfile().catch(() => undefined);   // the profile call failing does not undo the change
+      setEmailMsg({ kind: "success", text: `Email changed to ${updated.email}. Sign in with it from now on.` });
+      setNewEmail(""); setEmailPassword(""); setEmailCode("");
+    } catch (err) { setEmailMsg({ kind: "error", text: errorMessage(err) }); }
+    finally { setEmailBusy(false); }
   }
 
   async function sendVerification() {
@@ -195,6 +222,26 @@ export default function Settings() {
             <SecretInput id="exchange_credential_private" name="exchange_credential_private" label="API secret" value={apiSecret} onChange={setApiSecret} /></div>
           <div className="sm:col-span-2"><button className="btn-primary" type="button" disabled={!apiKey || !apiSecret} onClick={() => void addKey()}>Save key</button></div>
         </div>
+      </section>
+
+      {guardian && <MonitoringKeys ref={monitoringRef} highlight={location.pathname.endsWith("/monitoring")} />}
+
+      <section className="card space-y-4" aria-labelledby="change-email-title">
+        <h2 id="change-email-title" className="font-semibold">Change email</h2>
+        <p className="text-sm text-slate-600">Sign-in and security notices follow this address, so the change needs your current password{user.mfa_enabled ? " and an authenticator code" : ""}.</p>
+        {emailMsg && <Alert kind={emailMsg.kind}>{emailMsg.text}</Alert>}
+        <form onSubmit={changeEmail} className="grid gap-3 sm:grid-cols-2" noValidate data-testid="change-email-form">
+          <div><label className="label" htmlFor="new-email">New email</label>
+            <input id="new-email" className="input" type="email" autoComplete="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} /></div>
+          <div><label className="label" htmlFor="email-current-password">Current password</label>
+            <input id="email-current-password" className="input" type="password" autoComplete="current-password" value={emailPassword} onChange={(e) => setEmailPassword(e.target.value)} /></div>
+          {user.mfa_enabled && (
+            <div><label className="label" htmlFor="email-code">Authenticator code</label>
+              <input id="email-code" className="input font-mono tracking-widest" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={7}
+                     value={emailCode} onChange={(e) => setEmailCode(e.target.value)} placeholder="123456" /></div>
+          )}
+          <div className="sm:col-span-2"><button className="btn-primary" type="submit" disabled={emailBusy || !newEmail || !emailPassword || (user.mfa_enabled === true && !emailCode)}>Update email</button></div>
+        </form>
       </section>
 
       <section className="card space-y-4">
