@@ -190,6 +190,15 @@ nothing else about Guardian lands here.
 * `scripts/rotate_encryption_key.py` also re-encrypts
   `api_keys.encrypted_passphrase` — a pre-existing gap: a rotation would have
   left every Bitget passphrase under the old key and stopped every buy.
+## [0.8.3] — 2026-10-16: active-time clock, upcoming buys (PR #95)
+
+### Added
+
+* The Dashboard shows a live "AutoBuy active for N days, HH:MM:SS" clock,
+  counted from the account's registration date.
+* The Transactions page lists the upcoming buys (active schedules' next
+  runs, soonest first, Eastern with the UTC clock in brackets) above the
+  history they will appear in.
 
 ## [0.8.2] — 2026-10-14: plain-English failure text, Funding hint (PR #93)
 
