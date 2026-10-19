@@ -12,10 +12,12 @@ from datetime import datetime, timezone
 from typing import Literal, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic_core import PydanticCustomError
 
 __all__ = [
-    "SECRET_COLUMNS", "GuardianAccountCreate", "GuardianAccountOut", "GuardianAccountUpdate", "GuardianExchange",
-    "GuardianKeyReplace", "GuardianKeyReplaceResult", "GuardianTopology", "account_out",
+    "PASSPHRASE_EXCHANGES", "PASSPHRASE_REQUIRED", "SECRET_COLUMNS", "GuardianAccountCreate", "GuardianAccountOut",
+    "GuardianAccountUpdate", "GuardianExchange", "GuardianKeyReplace", "GuardianKeyReplaceResult", "GuardianTopology",
+    "account_out", "needs_passphrase",
 ]
 
 # The engine's SUPPORTED_EXCHANGES and migration 030's check constraints, spelled
@@ -28,6 +30,17 @@ GuardianTopology = Literal["independent", "sub_account"]
 SECRET_COLUMNS = frozenset({"encrypted_api_key", "encrypted_secret", "encrypted_passphrase", "key_fingerprint"})
 
 _OPTIONAL_TEXT = ("alert_phone", "alert_email_secondary", "alert_phone_secondary", "telegram_handle")
+
+# Exchanges whose API keys come with a passphrase that every signed request
+# needs. Without it the exchange refuses the key, which the engine can only
+# report as "not read-only"; the body says what is missing instead.
+PASSPHRASE_EXCHANGES = frozenset({"bitget", "okx"})
+PASSPHRASE_REQUIRED = ("This exchange needs the key's passphrase as well. Copy it from the exchange's key page "
+                       "and try again.")
+
+
+def needs_passphrase(exchange: str) -> bool:
+    return exchange in PASSPHRASE_EXCHANGES
 
 
 def _stripped(value):
@@ -43,15 +56,17 @@ def _blank_to_none(value):
 
 class GuardianAccountCreate(BaseModel):
     """POST /api/guardian/accounts. The key must be a separate read-only key,
-    never an AutoBuy purchase key; Bitget and OKX keys also need their
-    passphrase."""
+    never an AutoBuy purchase key; a Bitget or OKX key also needs its
+    passphrase, and the body is refused with `PASSPHRASE_REQUIRED` without
+    it, before the exchange is asked."""
 
     model_config = ConfigDict(extra="forbid")
 
     exchange: GuardianExchange
     api_key: str = Field(min_length=1, max_length=256)
     api_secret: str = Field(min_length=1, max_length=256)
-    passphrase: Optional[str] = Field(default=None, max_length=128)
+    # validate_default: the check below must run for an omitted passphrase too
+    passphrase: Optional[str] = Field(default=None, max_length=128, validate_default=True)
     name: str = Field(min_length=1, max_length=80, description="How the customer calls this account; the label is derived from it")
     topology: GuardianTopology = "independent"
     alert_phone: Optional[str] = Field(default=None, max_length=32)
@@ -62,6 +77,17 @@ class GuardianAccountCreate(BaseModel):
 
     _strip = field_validator("api_key", "api_secret", "name", mode="before")(_stripped)
     _blank = field_validator("passphrase", *_OPTIONAL_TEXT, mode="before")(_blank_to_none)
+
+    @field_validator("passphrase")
+    @classmethod
+    def _passphrase_the_exchange_needs(cls, value: Optional[str], info) -> Optional[str]:
+        """`exchange` is declared first, so it is validated by the time this
+        runs; when it failed it is absent from `info.data` and its own error
+        speaks alone. The message is the customer's, so it is raised as a
+        custom error and not prefixed with "Value error"."""
+        if needs_passphrase(info.data.get("exchange", "")) and not value:
+            raise PydanticCustomError("passphrase_required", PASSPHRASE_REQUIRED)
+        return value
 
 
 class GuardianKeyReplace(BaseModel):
@@ -76,6 +102,12 @@ class GuardianKeyReplace(BaseModel):
 
     _strip = field_validator("api_key", "api_secret", mode="before")(_stripped)
     _blank = field_validator("passphrase", mode="before")(_blank_to_none)
+
+    def missing_passphrase_for(self, exchange: str) -> bool:
+        """Does this body lack a passphrase the account's exchange needs? The
+        exchange is the account's, not the body's, so the route asks with the
+        row's value and refuses with `PASSPHRASE_REQUIRED`."""
+        return needs_passphrase(exchange) and not self.passphrase
 
 
 class GuardianKeyReplaceResult(BaseModel):

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -23,7 +23,7 @@ from api.models import User
 from api.services import twofactor
 from api.services.email_service import email_service
 from api.services.email_templates import render
-from api.services.rate_limit import register_failed_login
+from api.services.rate_limit import is_locked_out, limiter, register_failed_login, user_or_ip_key
 from api.services.telegram import mask_email
 
 logger = logging.getLogger("autobuy.user")
@@ -33,6 +33,11 @@ router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 VALID_KYC_STATUSES = {"pending", "verified", "rejected"}
+
+# Refusals of an email change (v0.9.2), in plain words: what happened and what to do.
+NEED_PASSWORD = "Enter your current password to change the email address on this account."
+NEED_CODE = "Enter the current code from your authenticator app to change the email address."
+CODE_REFUSED = "That code was not accepted. Wait for the next code in your authenticator app and try again."
 
 
 class UTCModel(BaseModel):
@@ -163,14 +168,16 @@ async def _full_profile(db: AsyncSession, user: User) -> UserProfile:
     return out
 
 
-async def send_email_changed_notice(old_email: str, new_email: str, when: datetime) -> None:
+async def send_email_changed_notice(old_email: str, new_email: str, when: datetime, user_id=None) -> None:
     """Security notice to the address that was replaced. Never optional and
     never affects the change itself; queued through the outbox (security
-    category). The new address appears masked."""
+    category) against the account it concerns. The new address appears
+    masked."""
     stamp = when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     html, text = render("email_changed", new_email_masked=mask_email(new_email), when=stamp)
     subject = f"The email address on your {settings.app_name} account was changed"
-    if not await email_service.queue(old_email, subject, html, text, template="email_changed", category="security"):
+    if not await email_service.queue(old_email, subject, html, text, template="email_changed", category="security",
+                                     user_id=user_id):
         logger.error("email change notice not delivered to %s: outbox unavailable and inline attempt failed",
                      mask_email(old_email))
 
@@ -185,7 +192,10 @@ async def get_profile(current_user: User = Depends(get_current_user), db: AsyncS
 
 
 @router.put("/profile", response_model=UserProfile)
+@limiter.limit("5/minute", key_func=user_or_ip_key)
 async def update_profile(
+    request: Request,
+    response: Response,
     payload: ProfileUpdateRequest,
     background: BackgroundTasks,
     current_user: User = Depends(get_current_user),
@@ -194,19 +204,27 @@ async def update_profile(
     """Update the authenticated user's email address. Security notices go to
     that address, so changing it needs `current_password`, plus the current
     authenticator `code` when two-factor authentication is on, and the
-    previous address is told about the change. KYC status is owned by the KYC
-    flow and is not writable here."""
+    previous address is told about the change. A wrong password or code
+    counts towards the sign-in lockout, and a locked account is refused with
+    429 exactly as at /api/auth/login. 5 a minute. KYC status is owned by the
+    KYC flow and is not writable here."""
     if payload.email is None:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     new_email = payload.email.lower()
     if new_email != current_user.email:
         old_email = current_user.email
+        locked_for = await is_locked_out(old_email)
+        if locked_for:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Account locked after repeated failed logins. Try again in {locked_for // 60 + 1} minutes.",
+                headers={"Retry-After": str(locked_for)},
+            )
         if not payload.current_password:
-            raise HTTPException(status_code=400,
-                                detail="Enter your current password to change the email address on this account.")
+            raise HTTPException(status_code=400, detail=NEED_PASSWORD)
         if not verify_password(payload.current_password, current_user.password_hash):
-            await register_failed_login(current_user.email)
+            await register_failed_login(old_email)   # a stolen session guessing the password should get loud
             raise HTTPException(status_code=400, detail="Current password is incorrect")
         existing = await db.execute(select(User).where(User.email == new_email))
         if existing.scalar_one_or_none() is not None:
@@ -214,9 +232,11 @@ async def update_profile(
         if await twofactor.is_enabled(db, current_user.id):
             # check_code spends the 30-second step, so a code seen here cannot be replayed into a sign-in
             code = (payload.code or "").strip()
-            if not code or not await twofactor.check_code(db, current_user, code):
-                raise HTTPException(status_code=400,
-                                    detail="Enter the current code from your authenticator app to change the email address.")
+            if not code:
+                raise HTTPException(status_code=400, detail=NEED_CODE)
+            if not await twofactor.check_code(db, current_user, code):
+                await register_failed_login(old_email)   # a wrong code counts, as it does at /login/mfa
+                raise HTTPException(status_code=400, detail=CODE_REFUSED)
         changed_at = utc_now()
         current_user.email = new_email
         current_user.updated_at = to_db_datetime(changed_at)
@@ -224,7 +244,7 @@ async def update_profile(
         await db.refresh(current_user)
         logger.info("email_changed", extra={"user_id": str(current_user.id),
                                             "from": mask_email(old_email), "to": mask_email(new_email)})
-        background.add_task(send_email_changed_notice, old_email, new_email, changed_at)
+        background.add_task(send_email_changed_notice, old_email, new_email, changed_at, user_id=current_user.id)
         return await _full_profile(db, current_user)
 
     current_user.updated_at = to_db_datetime(utc_now())

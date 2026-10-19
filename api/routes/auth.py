@@ -464,7 +464,9 @@ async def login(request: Request, response: Response, payload: LoginRequest, bac
         verify_password(payload.password, user.password_hash)
         logger.info("login refused: password not set yet", extra={"user_id": str(user.id)})
         await register_failed_login(payload.email)
-        background.add_task(guardian_identity.maybe_send_activation, user)
+        if not user.suspended:
+            # a suspended account is refused the same way and gets no link, as at /forgot-password
+            background.add_task(guardian_identity.maybe_send_activation, user)
         return _refused(invalid)
     if user is None or not verify_password(payload.password, user.password_hash):
         logger.warning("failed login attempt", extra={"email": payload.email.lower()})
@@ -644,12 +646,30 @@ async def logout_all(request: Request, response: Response, current_user: User = 
     return out
 
 
+# Tokens that name an account without being a credential. The bearer guard
+# (api/routes/user.py) refuses them; /verify says `valid: false` for the same
+# ones, so a client cannot mistake a sign-in step or a set-password link for a
+# session. A password-reset token lives seven days when it is issued as an
+# activation link (api/services/guardian_identity.py). The email-verification
+# token stays `valid: true`: its page uses /verify to learn whose link it is.
+_NOT_A_CREDENTIAL = frozenset({"mfa_pending", "password_reset"})
+
+
+def _token_type(token: str) -> Optional[str]:
+    try:
+        return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm]).get("type")
+    except JWTError:
+        return None
+
+
 @router.post("/verify", response_model=VerifyResponse)
 @limiter.limit("10/minute")
 async def verify(request: Request, response: Response, payload: VerifyRequest):
-    """Verify an access token; returns validity and the user id it belongs to."""
+    """Verify an access token; returns validity and the user id it belongs to.
+    `valid: false` for the two-factor pending token and for a password-reset
+    token (the set-password link included): neither is a credential."""
     data = verify_token(payload.token)
-    if data is None or data.user_id is None:
+    if data is None or data.user_id is None or _token_type(payload.token) in _NOT_A_CREDENTIAL:
         return VerifyResponse(valid=False)
     return VerifyResponse(valid=True, user_id=data.user_id)
 

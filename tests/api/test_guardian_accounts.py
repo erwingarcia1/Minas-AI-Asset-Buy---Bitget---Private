@@ -33,7 +33,7 @@ from api.routes.guardian import (
     PURCHASE_KEY_REFUSED,
     TOO_MANY_ACCOUNTS,
 )
-from api.schemas.guardian import SECRET_COLUMNS, GuardianAccountOut, account_out
+from api.schemas.guardian import PASSPHRASE_REQUIRED, SECRET_COLUMNS, GuardianAccountCreate, GuardianAccountOut, account_out
 from api.services import guardian_bridge
 from api.services.crypto import decrypt_value, encrypt_value
 from guardian import keyreplacement as engine_keyreplacement
@@ -43,8 +43,10 @@ from tests.api.conftest import auth_headers
 from tests.guardian.fixtures.ccxt_responses import account_info_response
 from tests.guardian.test_onboarding import _client_with
 
-READ_ONLY = "spot_account_r,spot_order_r"
-TRADE = "spot_account_r,spot_trade_w"
+# Bitget authority codes confirmed on live keys (api/services/bitget_permissions.py): the
+# read-only gate accepts only confirmed codes, so a made-up one is refused by name.
+READ_ONLY = "stor"          # Spot -> Read
+TRADE = "stor,stow"         # Spot -> Read plus Spot -> Trade
 UID = "12345"
 
 BODY = {"exchange": "bitget", "api_key": "guardian-ro-key-1", "api_secret": "guardian-ro-secret-1",
@@ -145,11 +147,16 @@ async def other(db):
 @pytest.fixture
 async def tidy(db, user, other):
     """Every guardian_accounts row of the two test users (and, by cascade,
-    its events and poll state) is removed after the test, whatever the engine
-    wrote through its own connection, and the removal is checked."""
+    its events and poll state), and every operator page about one of those
+    accounts, is removed after the test, whatever the engine wrote through
+    its own connection, and the removal is checked. Pages go first: their
+    account_id is ON DELETE SET NULL, so removing the account would only
+    orphan them."""
     yield
     await db.rollback()
     for u in (user, other):
+        await db.execute(text("DELETE FROM guardian_operator_pages WHERE account_id IN "
+                              "(SELECT id FROM guardian_accounts WHERE user_id = :uid)"), {"uid": u.id})
         await db.execute(text("DELETE FROM guardian_accounts WHERE user_id = :uid"), {"uid": u.id})
     await db.commit()
     left = (await db.execute(text("SELECT count(*) FROM guardian_accounts WHERE user_id IN (:a, :b)"),
@@ -179,6 +186,19 @@ async def count_for(db, user):
     n = (await db.execute(text("SELECT count(*) FROM guardian_accounts WHERE user_id = :uid"), {"uid": user.id})).scalar_one()
     await db.commit()
     return n
+
+
+async def pages_of(db, account_id):
+    """The operator pages about one account, oldest first: what the engine
+    recorded for Minas through the bridge's pager."""
+    rows = (await db.execute(text("SELECT rule, severity, message, evidence_json, delivered_to FROM guardian_operator_pages "
+                                  "WHERE account_id = :id ORDER BY id"), {"id": account_id})).mappings().all()
+    await db.commit()
+    out = []
+    for r in rows:
+        evidence = r["evidence_json"]
+        out.append({**dict(r), "evidence_json": json.loads(evidence) if isinstance(evidence, str) else evidence})
+    return out
 
 
 async def make_purchase_key(db, user, api_key):
@@ -231,12 +251,38 @@ async def test_every_path_answers_404_when_the_caller_is_not_on_the_allowlist(us
     assert exchange.builds == []
 
 
-async def test_an_anonymous_caller_gets_401_whatever_the_flag(exchange, monkeypatch):
-    for flag in (True, False):
-        monkeypatch.setattr(settings, "guardian_enabled", flag)
-        async with fresh() as c:
-            r = await c.get("/api/guardian/accounts")
-        assert r.status_code == 401, flag
+async def test_while_the_flag_is_off_an_anonymous_caller_gets_404_like_a_missing_path(exchange, monkeypatch):
+    """The flag is checked before the credentials: nobody is asked to sign in
+    for a feature that is off, and a probe cannot tell it from a path that
+    does not exist."""
+    monkeypatch.setattr(settings, "guardian_enabled", False)
+    async with fresh() as c:
+        missing = await c.get("/api/guardian/nothing-here")
+        assert missing.status_code == 404
+        for method, path, body in ALL_PATHS:
+            r = await c.request(method, path.format(id=1), json=body)
+            assert (r.status_code, r.json()) == (404, {"detail": "Not found"}), (method, path, r.text)
+            assert "www-authenticate" not in r.headers, "no request to sign in for a feature that is off"
+    assert exchange.builds == []
+
+
+async def test_with_the_flag_on_an_anonymous_caller_gets_401_on_every_path(guardian_on, exchange):
+    async with fresh() as c:
+        for method, path, body in ALL_PATHS:
+            r = await c.request(method, path.format(id=1), json=body)
+            assert r.status_code == 401 and r.headers.get("www-authenticate") == "Bearer", (method, path, r.text)
+    assert exchange.builds == []
+
+
+def test_the_path_lists_cover_every_route_of_the_router():
+    """The 404 and 401 sweeps above are only as good as these lists: every
+    route registered on the router is in ALL_PATHS, and every per-account one
+    in PER_ACCOUNT_PATHS."""
+    from api.routes.guardian import router
+    registered = {(method, "/api/guardian" + route.path) for route in router.routes for method in route.methods}
+    listed = {(method, path.replace("{id}", "{account_id}")) for method, path, _ in ALL_PATHS}
+    assert listed == registered
+    assert PER_ACCOUNT_PATHS == [entry for entry in ALL_PATHS if "{id}" in entry[1]]
 
 
 # --- adding an account ---------------------------------------------------------
@@ -270,6 +316,7 @@ async def test_adding_an_account_answers_201_with_the_account_and_no_key_materia
     assert [e["event_type"] for e in events] == ["customer_added"]
     assert events[0]["actor"] == f"user:{user.id}"
     assert exchange.builds == [BODY["api_key"]] * 2, "one client for the read-only gate, one for the seed"
+    assert await pages_of(db, body["id"]) == [], "a clean onboarding pages nobody"
 
 
 async def test_contact_fields_and_the_sms_switch_are_stored_at_creation(guardian_on, exchange, user, db, tidy):
@@ -295,6 +342,10 @@ async def test_a_partial_baseline_is_recorded_as_incomplete_with_the_gap(guardia
     events = await events_of(db, row["id"])
     gaps = [e for e in events if e["event_type"] == "baseline_seed_incomplete"]
     assert len(gaps) == 1 and gaps[0]["payload_json"]["what"] == "closed_orders"
+    # Minas is told, through the table the worker writes: the engine pages through the bridge's pager
+    pages = await pages_of(db, row["id"])
+    assert [p["rule"] for p in pages] == ["account_onboarded_with_partial_baseline"] and pages[0]["severity"] == "HIGH"
+    assert pages[0]["evidence_json"]["gaps"][0]["what"] == "closed_orders" and pages[0]["delivered_to"] == 0
 
 
 async def test_a_failed_seed_never_leaves_the_row_seeding(guardian_on, exchange, user, db, tidy):
@@ -312,6 +363,11 @@ async def test_a_failed_seed_never_leaves_the_row_seeding(guardian_on, exchange,
     assert len(failed) == 1 and "RuntimeError" in failed[0]["payload_json"]["error"]
     for secret in (BODY["api_key"], BODY["api_secret"], BODY["passphrase"]):
         assert secret not in json.dumps(events)
+    pages = await pages_of(db, row["id"])
+    assert [p["rule"] for p in pages] == ["account_baseline_seed_failed"] and pages[0]["severity"] == "HIGH"
+    assert "Re-run the seed" in pages[0]["message"]
+    for secret in (BODY["api_key"], BODY["api_secret"], BODY["passphrase"]):
+        assert secret not in json.dumps(pages)
 
 
 async def test_a_purchase_key_is_refused_before_the_exchange_is_asked(guardian_on, exchange, user, db, tidy):
@@ -373,8 +429,26 @@ async def test_a_key_that_can_trade_is_refused_with_the_plain_message(guardian_o
     async with fresh() as c:
         r = await c.post("/api/guardian/accounts", json={**BODY, "api_key": "guardian-trade-key"}, headers=auth_headers(user))
     assert (r.status_code, r.json()["detail"]) == (400, NOT_READ_ONLY_MESSAGE)
-    assert "spot_trade_w" not in r.text and "authorit" not in r.text, "the technical reason stays in the log"
+    assert "'stow'" not in r.text and "authorit" not in r.text, "the technical reason stays in the log"
     assert await count_for(db, user) == 0
+
+
+async def test_a_bitget_or_okx_key_without_its_passphrase_is_refused_before_the_exchange_is_asked(guardian_on, exchange, user, db, tidy):
+    """Without the passphrase the exchange refuses every signed request, which
+    the engine could only report as "not read-only". The body says what is
+    missing, in the customer's words, and the key is never echoed."""
+    without = {k: v for k, v in BODY.items() if k != "passphrase"}
+    async with fresh() as c:
+        for body in (without, {**without, "passphrase": ""}, {**without, "passphrase": "   "}, {**without, "exchange": "okx"}):
+            r = await c.post("/api/guardian/accounts", json=body, headers=auth_headers(user))
+            assert r.status_code == 422, (body, r.text)
+            errors = r.json()["detail"]
+            assert [e["msg"] for e in errors] == [PASSPHRASE_REQUIRED] and errors[0]["loc"] == ["body", "passphrase"], errors
+            assert BODY["api_key"] not in r.text and BODY["api_secret"] not in r.text
+    assert exchange.builds == [] and await count_for(db, user) == 0
+    # the schema knows which exchanges: a Bybit or Binance key has no passphrase and passes without one
+    for exchange_name in ("bybit", "binance"):
+        assert GuardianAccountCreate(**{**without, "exchange": exchange_name}).passphrase is None
 
 
 async def test_adding_is_limited_to_three_a_minute(guardian_on, exchange, user, db, tidy):

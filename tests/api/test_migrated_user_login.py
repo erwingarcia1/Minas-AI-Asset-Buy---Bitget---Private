@@ -216,3 +216,37 @@ async def test_nothing_secret_reaches_the_log(provisioned, sent, caplog):
     text = caplog.text
     for forbidden in (link_token(sent[0]["text"]), GUESS, provisioned.password_hash, provisioned.email):
         assert forbidden not in text
+
+
+# --------------------------------------------------------------------------- suspended, and the token's standing
+
+async def test_a_suspended_provisioned_user_is_refused_the_same_way_and_gets_no_email(db, provisioned, ordinary, sent):
+    """The refusal is identical (nothing tells a suspended account apart);
+    the set-password link is not sent, as /forgot-password does not send a
+    reset link to a suspended account and the link resolver would refuse it."""
+    from api.services.redis_client import get_redis
+    provisioned.suspended = True
+    await db.commit()
+    async with fresh_client() as c:
+        wrong = await c.post("/api/auth/login", json={"email": ordinary.email, "password": GUESS})
+        refused = await c.post("/api/auth/login", json={"email": provisioned.email, "password": GUESS})
+    assert (refused.status_code, refused.json()) == (wrong.status_code, wrong.json()) == (401, {"detail": "Invalid email or password"})
+    assert refused.headers.get_list("set-cookie") == []
+    assert sent == [], "no activation email for a suspended account"
+    assert await get_redis().exists(guardian_identity.ACTIVATION_SENT_PREFIX + str(provisioned.id)) == 0, "not even throttled: never attempted"
+    assert await get_redis().get(f"login-fails:{provisioned.email}") == "1", "still counted like a wrong password"
+
+
+async def test_verify_answers_valid_false_for_a_set_password_token(provisioned):
+    """A set-password link names an account for seven days; it is not a
+    credential, so /verify says so, as it does for the two-factor pending
+    token, and the bearer guard refuses it. The link still does its own job."""
+    from api.routes.auth import make_password_reset_token
+    activation = link_token(guardian_identity.activation_link(provisioned))
+    ordinary_reset = make_password_reset_token(provisioned)
+    async with fresh_client() as c:
+        for token in (activation, ordinary_reset):
+            r = await c.post("/api/auth/verify", json={"token": token})
+            assert r.status_code == 200 and r.json() == {"valid": False, "user_id": None}, r.text
+            assert (await c.get("/api/user/profile", headers={"Authorization": f"Bearer {token}"})).status_code == 401
+        assert (await c.post("/api/auth/reset-password/validate", json={"token": activation})).json() == {"valid": True}

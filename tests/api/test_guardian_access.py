@@ -3,8 +3,9 @@
 The decision lives in api/services/guardian_access.py and is made server-side:
 flag off hides Guardian from everyone, flag on with an empty allowlist shows it
 to everyone, and an allowlist is compared lower-case. A user who cannot see it
-gets 404 "Not found" from the router dependency, and the profile reports the
-same decision for the UI.
+gets 404 "Not found" from the router dependency, the flag is checked before
+the credentials (flag off: 404 for an anonymous caller too, nobody is asked to
+sign in), and the profile reports the same decision for the UI.
 """
 import uuid
 
@@ -14,7 +15,7 @@ from fastapi import Depends, FastAPI
 from api.config import settings
 from api.models import User
 from api.routes.user import get_current_user
-from api.services.guardian_access import guardian_visible, require_guardian_enabled
+from api.services.guardian_access import guardian_visible, require_guardian_enabled, require_guardian_flag
 from tests.api.conftest import auth_headers
 
 
@@ -72,6 +73,34 @@ async def test_the_dependency_answers_404_not_found_when_hidden(monkeypatch):
         monkeypatch.setattr(settings, "guardian_allowed_emails_csv", "")
         r = await c.get("/g")
         assert r.status_code == 200 and r.json() == {"ok": True}
+
+
+async def test_the_flag_is_checked_before_the_credentials(monkeypatch):
+    """Flag off: 404 for everyone and no request to sign in, so a probe cannot
+    tell a feature that is off from a path that does not exist. Flag on: an
+    anonymous caller gets the usual 401. Both the router-level order and the
+    dependency's own parameter order give this."""
+    app = FastAPI()
+
+    @app.get("/g", dependencies=[Depends(require_guardian_flag), Depends(require_guardian_enabled)])
+    async def guarded():
+        return {"ok": True}
+
+    @app.get("/h", dependencies=[Depends(require_guardian_enabled)])
+    async def guarded_by_the_dependency_alone():
+        return {"ok": True}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        monkeypatch.setattr(settings, "guardian_enabled", False)
+        for path in ("/g", "/h"):
+            r = await c.get(path)
+            assert (r.status_code, r.json()) == (404, {"detail": "Not found"}), (path, r.text)
+            assert "www-authenticate" not in r.headers, path
+        monkeypatch.setattr(settings, "guardian_enabled", True)
+        monkeypatch.setattr(settings, "guardian_allowed_emails_csv", "")
+        for path in ("/g", "/h"):
+            r = await c.get(path)
+            assert r.status_code == 401 and r.headers.get("www-authenticate") == "Bearer", (path, r.text)
 
 
 async def test_the_dependency_returns_the_user_when_visible(monkeypatch):

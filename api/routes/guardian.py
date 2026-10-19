@@ -8,11 +8,21 @@ the engine's. The engine (`guardian/`) owns every rule about an account; these
 routes check who is asking, hand the request to the engine through
 `api/services/guardian_bridge.py` and map the answer to HTTP.
 
-Every route hangs off `require_guardian_enabled`: while the feature is off, or
-the caller is not on the allowlist, every path here is 404 "Not found", as if
-it did not exist. An account that is not the caller's is 404 on every path
-for the same reason. Responses are built from `GuardianAccountOut`, which has
-no field for key material or for the key fingerprint.
+Every route hangs off two router dependencies, in this order:
+`require_guardian_flag` answers 404 "Not found" to everyone, signed in or not,
+while the feature is off, before any credential is looked at; then
+`require_guardian_enabled` needs the signed-in user and answers the same 404
+when the caller is not on the allowlist. An account that is not the caller's
+is 404 on every path for the same reason. Responses are built from
+`GuardianAccountOut`, which has no field for key material or for the key
+fingerprint.
+
+Engine calls go through `bridge.run_db`, which hands the engine its database
+on the bridge thread (never from the event loop), and the engine records its
+operator pages (a replacement key for a different account, no recorded account
+id to check one against, a partial or failed baseline) through
+`bridge.operator_pager()`: when a refusal tells the customer Minas has been
+told, a `guardian_operator_pages` row says so.
 
 Adding an account verifies the key against the exchange's own permission
 report during the request and takes the account's first snapshot (its
@@ -45,17 +55,19 @@ from api.schemas.guardian import (
     GuardianAccountUpdate,
     GuardianKeyReplace,
     GuardianKeyReplaceResult,
+    PASSPHRASE_REQUIRED,
     account_out,
 )
 from api.services import guardian_bridge as bridge
 from api.services.crypto import InvalidToken, decrypt_value
-from api.services.guardian_access import NOT_FOUND, require_guardian_enabled
+from api.services.guardian_access import NOT_FOUND, require_guardian_enabled, require_guardian_flag
 from api.services.rate_limit import limiter, user_or_ip_key
 from guardian import accounts as engine_accounts
+from guardian.crypto import redact_secrets
 
 logger = logging.getLogger("autobuy.guardian")
 
-router = APIRouter(dependencies=[Depends(require_guardian_enabled)])
+router = APIRouter(dependencies=[Depends(require_guardian_flag), Depends(require_guardian_enabled)])
 
 MAX_ACCOUNTS = 10
 
@@ -92,7 +104,7 @@ def _not_found() -> HTTPException:
 async def _own_account(user: User, account_id: int) -> dict:
     """The caller's account row, or 404. Not theirs, removed and non-existent
     are one answer on purpose: nobody learns whether an id exists."""
-    row = await bridge.run(engine_accounts.account_for_user, bridge.db(), user.id, account_id)
+    row = await bridge.run_db(engine_accounts.account_for_user, user.id, account_id)
     if row is None:
         raise _not_found()
     return row
@@ -121,13 +133,16 @@ def _is_fingerprint_collision(exc: psycopg2.IntegrityError) -> bool:
 
 async def _seed_in_background(account_id: int, actor: str) -> None:
     """The second half of adding an account: the baseline, taken after the
-    201 went out. The engine marks the row 'complete' or 'incomplete' and
-    never leaves it 'seeding'; this only keeps the log honest, with the
-    account id and nothing else."""
+    201 went out, on the bridge's own seeding thread so a slow exchange never
+    holds a request thread. The engine marks the row 'complete' or
+    'incomplete', never leaves it 'seeding', and pages Minas about a partial
+    or failed seed through the bridge's operator pager; this only keeps the
+    log honest, with the account id and nothing else."""
     from guardian.onboarding import seed_account_baseline
 
     try:
-        outcome = await bridge.run(seed_account_baseline, bridge.db(), bridge.cipher(), account_id, actor=actor)
+        outcome = await bridge.run_db_background(seed_account_baseline, bridge.cipher(), account_id, actor=actor,
+                                                 operator_alerter=bridge.operator_pager())
     except Exception as exc:  # noqa: BLE001 - the row's state is the engine's job; the log line is ours
         logger.error("guardian account %s: baseline seeding raised %s", account_id, type(exc).__name__)
         return
@@ -151,32 +166,33 @@ async def add_account(
     """Start watching an exchange account with a separate read-only key.
 
     The key is checked against the exchange's own permission report before
-    anything is stored. Refused with 400 and a plain message: an eleventh
-    account, one of the caller's AutoBuy purchase keys, and a key that can
-    trade, withdraw or transfer (or cannot read the account). Refused with
-    409: an exchange account this user already watches (the message names the
+    anything is stored. A Bitget or OKX key without its passphrase is refused
+    as a body error (422) with a plain message before the exchange is asked.
+    Refused with 400 and a plain message: an eleventh account, one of the
+    caller's AutoBuy purchase keys, and a key that can trade, withdraw or
+    transfer (or cannot read the account). Refused with 409: an exchange account this user already watches (the message names the
     existing account). On success the account is stored with its first
     snapshot still being taken (`baseline_status: seeding`), which finishes in
     the background; the response never carries key material. 3 a minute."""
     from guardian.onboarding import AlreadyMonitored, OnboardingRejected, generate_unique_label, onboard_account
 
-    gdb = bridge.db()
-    if await bridge.run(engine_accounts.count_live_accounts, gdb, current_user.id) >= MAX_ACCOUNTS:
+    if await bridge.run_db(engine_accounts.count_live_accounts, current_user.id) >= MAX_ACCOUNTS:
         raise HTTPException(status_code=400, detail=TOO_MANY_ACCOUNTS)
     if await _is_purchase_key(db, current_user, payload.api_key):
         logger.info("guardian: a purchase key was offered as a monitoring key and refused",
                     extra={"user_id": str(current_user.id)})
         raise HTTPException(status_code=400, detail=PURCHASE_KEY_REFUSED)
     actor = _actor(current_user)
-    label = await bridge.run(generate_unique_label, gdb, payload.name)
+    label = await bridge.run_db(generate_unique_label, payload.name)
     try:
-        result = await bridge.run(
-            onboard_account, gdb, bridge.cipher(),
+        result = await bridge.run_db(
+            onboard_account, bridge.cipher(),
             label=label, topology=payload.topology, api_key=payload.api_key, secret=payload.api_secret,
             passphrase=payload.passphrase or "", exchange=payload.exchange, user_id=current_user.id, source="self",
             actor=actor, customer_name=payload.name, alert_phone=payload.alert_phone,
             alert_email_secondary=payload.alert_email_secondary, alert_phone_secondary=payload.alert_phone_secondary,
             telegram_handle=payload.telegram_handle, sms_alerts_enabled=payload.sms_alerts_enabled, seed=False,
+            operator_alerter=bridge.operator_pager(),
         )
     except AlreadyMonitored as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -199,7 +215,7 @@ async def list_accounts(current_user: User = Depends(require_guardian_enabled)):
     """The caller's monitored accounts, oldest first, each with the engine's
     last successful check (`last_success_at`, UTC, null until the first).
     Removed accounts are not listed."""
-    rows = await bridge.run(engine_accounts.accounts_for_user, bridge.db(), current_user.id)
+    rows = await bridge.run_db(engine_accounts.accounts_for_user, current_user.id)
     return [account_out(row) for row in rows]
 
 
@@ -224,24 +240,33 @@ async def replace_key(
 
     The new key must be read-only AND belong to the same exchange account as
     the old one (a valid read-only key for a different account would leave
-    the real one unwatched); one of the caller's AutoBuy purchase keys is
-    refused before the exchange is asked. A refusal is 400 with a plain
-    message and nothing is changed. On success monitoring continues with the
-    new key on the next check and the change is recorded on the account's
-    activity. 3 a minute."""
+    the real one unwatched); a Bitget or OKX account needs the new key's
+    passphrase too, and one of the caller's AutoBuy purchase keys is refused,
+    both before the exchange is asked. A refusal is 400 with a plain message
+    and nothing is changed; the refusals the engine pages Minas about (a key
+    for a different account, no recorded account id to check one against)
+    are recorded. On success monitoring continues with the new key on the
+    next check and the change is recorded on the account's activity. 3 a
+    minute."""
     from guardian.keyreplacement import replace_monitoring_key
 
-    await _own_account(current_user, account_id)
+    account = await _own_account(current_user, account_id)
+    if payload.missing_passphrase_for(account["exchange"]):
+        raise HTTPException(status_code=400, detail=PASSPHRASE_REQUIRED)
     if await _is_purchase_key(db, current_user, payload.api_key):
         logger.info("guardian account %s: a purchase key was offered as the replacement key and refused", account_id)
         raise HTTPException(status_code=400, detail=PURCHASE_KEY_REFUSED)
-    outcome = await bridge.run(
-        replace_monitoring_key, bridge.db(), bridge.cipher(),
+    outcome = await bridge.run_db(
+        replace_monitoring_key, bridge.cipher(),
         account_id=account_id, api_key=payload.api_key, secret=payload.api_secret,
-        passphrase=payload.passphrase or "", actor=_actor(current_user),
+        passphrase=payload.passphrase or "", actor=_actor(current_user), operator_alerter=bridge.operator_pager(),
     )
     if not outcome.ok:
-        logger.info("guardian account %s: replacement key refused (%s)", account_id, outcome.reason_code)
+        # The engine's detail names the check that failed and what the exchange answered. It is
+        # written for this line, never for the customer; the key material is scrubbed from it here
+        # as well, so no exchange error text can carry it into the log.
+        logger.warning("guardian account %s: replacement key refused (%s): %s", account_id, outcome.reason_code,
+                       redact_secrets(outcome.detail, payload.api_key, payload.api_secret, payload.passphrase))
         raise HTTPException(status_code=400, detail=outcome.message)
     logger.info("guardian account %s: monitoring key replaced", account_id)
     return GuardianKeyReplaceResult(ok=True, message=outcome.message)
@@ -263,8 +288,7 @@ async def update_account(
     if not changes:
         raise HTTPException(status_code=400, detail=NOTHING_TO_UPDATE)
     try:
-        row = await bridge.run(engine_accounts.update_contacts, bridge.db(), account_id,
-                               actor=_actor(current_user), **changes)
+        row = await bridge.run_db(engine_accounts.update_contacts, account_id, actor=_actor(current_user), **changes)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return account_out(row)
@@ -277,7 +301,7 @@ async def disable_account(account_id: int, current_user: User = Depends(require_
     Recorded on the account's activity."""
     await _own_account(current_user, account_id)
     try:
-        row = await bridge.run(engine_accounts.set_status, bridge.db(), account_id, "disabled", actor=_actor(current_user))
+        row = await bridge.run_db(engine_accounts.set_status, account_id, "disabled", actor=_actor(current_user))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return account_out(row)
@@ -290,7 +314,7 @@ async def enable_account(account_id: int, current_user: User = Depends(require_g
     account's activity."""
     await _own_account(current_user, account_id)
     try:
-        row = await bridge.run(engine_accounts.set_status, bridge.db(), account_id, "active", actor=_actor(current_user))
+        row = await bridge.run_db(engine_accounts.set_status, account_id, "active", actor=_actor(current_user))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return account_out(row)
@@ -303,6 +327,6 @@ async def delete_account(account_id: int, current_user: User = Depends(require_g
     (and the removal is added to it), but the account no longer appears in
     this API. The same key may be added again later as a new account."""
     await _own_account(current_user, account_id)
-    await bridge.run(engine_accounts.scrub_and_delete, bridge.db(), account_id, actor=_actor(current_user))
+    await bridge.run_db(engine_accounts.scrub_and_delete, account_id, actor=_actor(current_user))
     logger.info("guardian account %s removed by its owner; key material scrubbed, history kept", account_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
