@@ -152,6 +152,17 @@ class Settings(BaseSettings):
     # Detection thresholds. Shipped inside the image next to the package; a host file can override it.
     guardian_rules_path: str = os.getenv("GUARDIAN_RULES_PATH") or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guardian", "rules.yaml")
+
+    @field_validator("guardian_rules_path", mode="before")
+    @classmethod
+    def _empty_rules_path_means_the_shipped_file(cls, value):
+        """docker-compose passes GUARDIAN_RULES_PATH through as an empty string when the
+        server .env does not set it; pydantic-settings keeps that '' over the Python default,
+        and RulesConfig('') would open '.' and crash the worker the moment the flag is on.
+        Empty means the rules file baked into the image."""
+        if value is None or not str(value).strip():
+            return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guardian", "rules.yaml")
+        return value
     # The worker's Prometheus exposition, on the compose network only (no port is published).
     guardian_metrics_host: str = os.getenv("GUARDIAN_METRICS_HOST") or "0.0.0.0"  # nosec B104 - container bind
     guardian_metrics_port: int = int(os.getenv("GUARDIAN_METRICS_PORT") or "9109")
