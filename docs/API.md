@@ -77,6 +77,14 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
   Every access and refresh token issued before now is refused
   (`users.sessions_revoked_at`, the same check as a password change), the
   caller's own included; both cookies are cleared. Always 204.
+- **Accounts awaiting activation (v0.9.2).** An account created without a
+  password (a member migrated from Minas AI Guardian, a customer an admin
+  onboards) carries `users.password_reset_required`. Until the customer sets
+  a password through the seven-day set-password link (the ordinary
+  `POST /api/auth/reset-password`, which clears the flag), `POST /api/auth/login`
+  and `/login/mfa` answer the ordinary 401 `Invalid email or password` for it,
+  with the same lockout counter and timing as a wrong password, and quietly
+  re-send the activation email, at most once an hour per account.
 - `POST /api/auth/verify` answers `valid: false` for the MFA pending token
   (it identifies nobody until the second factor is given); the bearer guard
   refuses it too.
@@ -92,8 +100,9 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 | Module | Endpoints |
 |---|---|
 | auth (`/api/auth`) | `POST /register` · `/login` (200, or 202 `mfa_required` when two-factor is on) · `/login/mfa` · `/logout-all` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password/validate` (`{token}` → 200 `{valid: true}` / 400 `{valid: false}`, does not consume the token) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
-| user (`/api/user`) | `GET/PUT /profile` · `GET /{user_id}` |
+| user (`/api/user`) | `GET/PUT /profile` (`GET` carries `guardian_enabled`, whether Guardian is visible to this account: the flag AND the allowlist, decided server-side, and `mfa_enabled`; changing `email` with `PUT` needs `current_password`, plus the current authenticator `code` when two-factor is on, 400 otherwise, and the previous address is emailed about the change) · `GET /{user_id}` |
 | security (`/api/user/2fa`, v0.9.0) | `GET /` (`{enabled, enrolled_at, recovery_codes_remaining, pending_enrolment}`) · `POST /enrol` (`{password}` → `{secret, otpauth_uri}`, shown once; 400 wrong password; 409 when already on; nothing is in force until confirmed) · `POST /confirm` (`{code}` → `{recovery_codes[10]}`, shown once; 400 wrong code) · `POST /recovery-codes` (`{code}` from the authenticator, never a recovery code → a new set; the old set stops working) · `POST /disable` (`{password, code \| recovery_code}` → 204; 400 wrong password or code; 403 for admins while `ADMIN_MFA_REQUIRED=1`). Every change emails the account (security category). Admin: `totp_enabled` on `GET /api/admin/users`, `POST /api/admin/users/{id}/2fa/reset` (support path for a lost authenticator; body `{code}` = the caller's own current authenticator code, required when the caller has two-factor on; never the caller's own account, 403; audited, the user is emailed). With `ADMIN_MFA_REQUIRED=1` every admin route answers 403 `{"error": "mfa_required_for_admin"}` until the admin has enrolled |
+| guardian (`/api/guardian`, v0.9.2) | Read-only monitoring of the customer's own exchange accounts through a **separate read-only key** (never an AutoBuy purchase key). It detects and tells; it never trades, withdraws or transfers. Every path answers 404 `Not found` while `GUARDIAN_ENABLED` is off or the caller is not in `GUARDIAN_ALLOWED_EMAILS` (when set), and for another user's or a removed account. `POST /accounts` (3/min; `{exchange: bitget \| bybit \| okx \| binance, api_key, api_secret, passphrase?, name (1-80), topology: independent \| sub_account, alert_phone?, alert_email_secondary?, alert_phone_secondary?, telegram_handle?, sms_alerts_enabled (default false)}` → 201 the account; the key is verified against the exchange's own permission report, so one that can trade, withdraw or transfer, or cannot read the account, is refused 400 with a plain message, as is one of the caller's purchase keys (400) and the eleventh account (400); 409 when the same exchange account is already watched (the message names the existing account) or the same key is already in use; the first snapshot, the baseline, is taken in the background and the account shows `baseline_status: seeding` until it is done) · `GET /accounts` · `GET /accounts/{id}` · `PUT /accounts/{id}/key` (3/min; `{api_key, api_secret, passphrase?}` → `{ok: true, message}`; the new key must be read-only AND belong to the same exchange account, else 400 with the message and nothing changes) · `PATCH /accounts/{id}` (`alert_phone`, `alert_email_secondary`, `alert_phone_secondary`, `telegram_handle` (null clears), `sms_alerts_enabled`) · `POST /accounts/{id}/disable` · `POST /accounts/{id}/enable` · `DELETE /accounts/{id}` (204: monitoring stops and the key material is scrubbed; the row and its alert/event history are kept, the account is no longer listed). Responses never carry key material or the key fingerprint; `created_at`, `updated_at` and `last_success_at` (the engine's last successful check, null until the first) are UTC. See "Guardian" below |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
 | auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; `blockchain_network` is the exchange's chain name (`BTC`, `ERC20`, `TRC20`, `SOL`, `ArbitrumOne`, …; defaults to the coin's native chain); any wallet is validated against that chain's address format and rejected if it is a known burn/unspendable address; on Bitget the pair, minimum order, chain and (for autobuy) the minimum withdrawal are checked live, see "Bitget market data") · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, `travel_rule_info`, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `POST /{id}/retry-withdrawal` (withdrawal_failed / needs_info only: re-sends the last filled buy's coins, never buys again) · `DELETE /{id}` (cancel, history kept) |
 | wallets (`/api/wallets`) | `POST /` (`blockchain_network` = exchange chain name; the address format must match the chain family: bitcoin mainnet only, EVM `0x…`, Solana base58, Tron `T…`, XRP Ledger `r…`/`X…`, Stellar `G…`/`M…`; tag chains also take `destination_type` + `memo`, see "Destination tag / memo") · `GET /?blockchain_network=` · `DELETE /{id}` |
@@ -103,7 +112,7 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 | market (`/api/v2/market`) | `GET /coins/{coin}?amount_usd=` — the coin's Bitget USDT pair (online, minimum order, taker fee) and every withdrawal chain with fee, minimum, precision, address family and, when `amount_usd` is given, the fee in USD, the estimated coins received and whether the amount clears the minimum withdrawal (`meets_minimum`) |
 | exchange (`/api/exchange`) | `GET /supported` (exchanges this deployment accepts keys for, from `SUPPORTED_EXCHANGES`, default `bitget`; other exchanges are rejected with 422 `exchange_not_supported`) · `POST/GET /keys` · `DELETE /keys/{id}` · `POST /keys/{id}/verify` — one harmless authenticated call (Bitget account info); the key records `verification_status` (pending \| verified \| failed), a readable `verification_error` (never credentials), `verified_at`, `last_checked_at`, `withdrawal_enabled` (warn the user; the executor still requires `verified`), the reported `permissions` and `extra_permissions`. Bitget codes confirmed from its "Edit API key" screen: `stow` Spot → Trade (required; missing → `no_trade_permission` "Spot trading permission is required"), `smow` Margin → Trade, `taxw` Taxation → Search, `p2pw` P2P → Search, `wtow` Wallet → Transfer (internal, not an external withdrawal) — these four are `extra_permissions` (non-blocking warning). Any other code, including whatever Bitget uses for Withdraw, is still reported as withdrawal possible (`withdrawal_enabled: null`) until confirmed |
 | transactions (`/api/transactions`) | `GET /` · `/{id}` · `/crypto/{crypto}` · `/status/{status}` · `/stats/summary` — every Auto-Buy execution attempt (purchase_transactions): fill price, cost, fees, exchange, order id, and for withdrawals the address, network, fee and tx hash. `status` is pending \| completed \| failed |
-| public (`/api/public`) | `GET /meta` (anonymous, Cache-Control 5 min, 60/minute per IP): `{coins, exchanges, support_email, server_ip}` for the landing page and setup guide; nothing else from settings |
+| public (`/api/public`) | `GET /meta` (anonymous, Cache-Control 5 min, 60/minute per IP): `{coins, exchanges, support_email, server_ip, guardian_enabled}` for the landing page, the setup guide and the sign-in hint; `guardian_enabled` is the raw `GUARDIAN_ENABLED` flag (the allowlist is not consulted and never exposed); nothing else from settings |
 | Unified Trading accounts supported (v0.8.0) | key rows carry `account_mode` (classic / unified / unknown); verification stores it; `POST /api/v2/purchases` with `purchase_type: autobuy` on a Unified key answers 403 `unified_account_withdraw`; one-off `python -m api.tasks.reverify_unified` after the deploy |
 | Unified Trading accounts (v0.7.7) | `POST /api/exchange/keys/{id}/verify`: Bitget 40085 answers `verified: false`, `result: unified_account`, with the customer message; purchase rows carry `exchange_key_error` (the key's last verification problem, null while verified); daily job `unified_account_check` |
 | schedule anchor (v0.7.5.1) | `purchases.schedule_anchor` (migration 027): next run = first anchor + k × period after now; set on create and on a frequency edit (`PUT` with `frequency` resets it and schedules one period from the edit); execution, failure, pause and resume never move it |
@@ -133,8 +142,8 @@ verified users.** `kyc_status` cannot be set through the profile API.
 | 400 | Request conflicts with state (duplicate email, nothing to update) |
 | 401 | Missing/invalid/expired/revoked token, or wrong credentials (including a wrong two-factor code at sign-in; a wrong password or code on `/api/user/2fa/*` is 400, so clients do not refresh and replay it) |
 | 403 | Not allowed: admin role required, `csrf_failed`, the withdraw gate, or `mfa_required_for_admin` (an admin without two-factor while `ADMIN_MFA_REQUIRED=1`) |
-| 404 | Not found — including other users' resources (no existence leaks) |
-| 409 | Two-factor authentication is already on (`POST /api/user/2fa/enrol`) |
+| 404 | Not found — including other users' resources (no existence leaks), and every `/api/guardian` path while Guardian is off or hidden from the caller |
+| 409 | Two-factor authentication is already on (`POST /api/user/2fa/enrol`); the exchange account or the key is already being watched (`POST /api/guardian/accounts`) |
 | 413 | Body over 1MB |
 | 422 | Validation failure (amounts, crypto allow-list, addresses, password policy, duplicate active schedule) |
 | 429 | Rate limit or account lockout — honor `Retry-After` |
@@ -145,6 +154,7 @@ verified users.** `kyc_status` cannot be set through the profile API.
 login/register 5/min · login/mfa 5/min (per IP; plus five attempts per pending token) ·
 logout-all 5/min · verify/refresh/logout 10/min · key verification 3/min ·
 2fa enrol/disable 5/min · 2fa confirm 10/min · 2fa recovery-codes 3/min ·
+guardian add account 3/min · guardian replace key 3/min ·
 purchase creation 20/min · transaction listing 30/min · dashboard 10/min ·
 default 60/min. Login lockout: 5 failed attempts (passwords or two-factor
 codes) → 15 minutes.
@@ -289,6 +299,52 @@ for `email sent: id=…`.
 publish the DNS records, wait for "Verified"), change `RESEND_FROM_EMAIL`
 (and `RESEND_REPLY_TO` if needed) in the server's `.env`, then
 `docker compose --profile prod up -d api`.
+
+## Guardian (read-only exchange monitoring, v0.9.2)
+
+Guardian watches a customer's exchange account through a **separate
+read-only API key** and tells them when something changes. It detects and
+tells: it has no power to stop, block or reverse anything, and no Guardian
+code can reach an order, withdrawal or transfer endpoint
+(`tests/test_guardian_isolation.py` proves it). The engine runs in the
+`autobuy_guardian` container; the API only manages the accounts it watches.
+
+- **Visibility.** `GUARDIAN_ENABLED` switches the feature on for the
+  deployment and `GUARDIAN_ALLOWED_EMAILS` (comma-separated, compared
+  lower-case; empty = everyone) narrows it during the private roll-out. The
+  decision is server-side and fails closed: a user who cannot see Guardian
+  gets 404 `Not found` from every `/api/guardian` path, as if it did not
+  exist (an anonymous caller gets the usual 401 first). `GET /api/user/profile`
+  reports the same decision as `guardian_enabled` (flag AND allowlist) so the
+  UI can show or hide the pages; `GET /api/public/meta` reports the raw flag
+  only, for the sign-in page's hint, and never the allowlist.
+- **Keys.** A monitoring key must be read-only and separate from the AutoBuy
+  purchase key. `POST /api/guardian/accounts` verifies it against the
+  exchange's own permission report (Bitget through the confirmed permission
+  table in `api/services/bitget_permissions.py`, Bybit `readOnly`, OKX
+  `read_only`, Binance `apiRestrictions`) and refuses anything that can trade,
+  withdraw or transfer, anything it cannot read the account with, and a key
+  that matches one of the caller's `api_keys` rows (compared as sha256 digests
+  of the plaintexts; the submitted key is never logged or stored when
+  refused). A replacement key (`PUT …/key`) must also belong to the **same**
+  exchange account (`exchange_uid`, recorded at onboarding): a valid read-only
+  key for a different account would leave the real one unwatched while the
+  page said "watching". Refusals are 400 with a plain-language `detail`; the
+  technical reason goes to the log only.
+- **Records.** Adding an account, changing where its alerts go (recorded by
+  field name only, never the values), replacing its key, switching it off or
+  on and removing it each append a `guardian_events` row attributed to the
+  user (`user:<id>`). Removing an account (`DELETE`) disables it and scrubs
+  the key material; the row and its alert/event history are kept and the
+  account no longer appears in the API. All Guardian times are UTC.
+- **Email changes.** Alerts go to `users.email`, so `PUT /api/user/profile`
+  with a new `email` needs `current_password` and, when two-factor is on,
+  the current authenticator `code` (400 otherwise; a wrong password counts
+  towards the login lockout). The previous address is emailed about the
+  change, with the new address masked.
+- **Accounts awaiting activation.** See "Authentication": an account
+  created without a password cannot sign in until it has set one through
+  the seven-day link, and every attempt re-sends that link at most hourly.
 
 ## Client SDKs
 

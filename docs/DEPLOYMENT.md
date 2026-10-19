@@ -318,6 +318,10 @@ platform` builds, recreates and verifies it with the API:
   back to 500 characters: Postgres refuses the downgrade if any row holds a
   longer blob (nothing writes one before the Guardian toggles land in PR4), so
   the schema stays at 030 and the operator trims or exports first.
+- From v0.9.2 the API reaches the engine for the monitoring-key routes through a
+  two-thread bridge (`api/services/guardian_bridge.py`), so those routes add at
+  most two Postgres connections per API worker (eight on the box), opened on
+  first use and kept for the process lifetime.
 - Both checks key on the checkout's `docker-compose.yml` declaring the
   `guardian` service. `deploy.sh` runs from the file on disk at invocation, so
   a newer script can run against an older tree; without the service the worker

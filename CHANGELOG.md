@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] — 2026-10-19: Guardian monitoring keys and the identity bridge (PR TBD)
+
+Third Guardian merge PR. Customers can register a separate read-only exchange
+key for Guardian to watch, and accounts created without a password (migrated
+Guardian members, admin-onboarded customers) get a safe activation path.
+Everything stays behind `GUARDIAN_ENABLED` and `GUARDIAN_ALLOWED_EMAILS`:
+with the flag off every Guardian path answers 404. No migration.
+
+### Added
+
+* `/api/guardian/accounts`: add a monitoring key (Bitget, Bybit, OKX,
+  Binance; the server-side read-only gate fails closed, a customer's own
+  AutoBuy purchase key is refused, the same exchange account cannot be
+  watched twice, ten accounts per user), list, replace the key, change the
+  alert contacts and the SMS switch (off by default), pause and resume,
+  remove (the key is deleted, the history is kept). Baseline seeding runs in
+  the background; an account is not polled while it seeds and a failed seed
+  marks it `incomplete` instead of leaving it stranded.
+* Settings → "Guardian: exchange monitoring" (`/settings/monitoring`), a
+  "Guardian" entry in the sidebar and a sign-in hint for Guardian customers,
+  all only when the feature is on for the account.
+* Identity bridge: `provision_user` creates an account with an unusable
+  password and `password_reset_required`; such an account signing in gets the
+  same generic failure as a wrong password, a failed-login count and an
+  activation email with a 7-day set-password link at most once an hour;
+  completing the reset clears the flag.
+* `GET /api/user/profile` reports `guardian_enabled` and `mfa_enabled`;
+  `GET /api/public/meta` reports `guardian_enabled`.
+* `tests/test_guardian_isolation.py` proves the isolation rules in CLAUDE.md.
+
+### Changed
+
+* Changing the account email needs the current password and, with
+  two-factor on, the authenticator code; the previous address is told.
+* The Bitget permission tables moved verbatim to the leaf module
+  `api/services/bitget_permissions.py` (the exchange client re-exports them).
+  Guardian's Bitget gate uses the platform's confirmed table, which fixes the
+  false rejection of the read codes `taxw`/`p2pw`.
+* The API reaches the engine through a two-thread bridge, so Guardian routes
+  add at most two Postgres connections per API worker.
+
+### Known limits
+
+* A Bitget Unified Trading account cannot be watched yet: Guardian's Bitget
+  client reads the Classic (v2) endpoints, so a Unified key is refused with a
+  message saying so. Unified support is a follow-up.
+* A monitored account is attributed to its owner by user id in events; the
+  operator pages that the engine would raise for a wrong-account replacement
+  or a partial baseline are not recorded through the API until PR5 wires an
+  operator alerter.
+
 ## [0.9.1] — 2026-10-13: Guardian engine, dark (PR TBD)
 
 Second Guardian merge PR. Minas AI Guardian's read-only monitoring engine
