@@ -32,82 +32,15 @@ LEGACY_CLIENTS = {
 _LegacyClient = _LegacyBinance
 
 
-# Bitget reports a key's permissions in /api/v2/spot/account/info "authorities".
-# Bitget reports a key's permissions as short codes in `authorities`
-# (GET /api/v2/spot/account/info). Confirmed from Bitget's "Edit API key"
-# screen on 2026-09-11:
-#   stow = Spot -> Trade            (REQUIRED for purchases; a Read-write key)
-#   stor = Spot -> Read             (a READ-ONLY key with Spot ticked: it authenticates and
-#                                    reads balances, but every order fails with 40014.
-#                                    Seen live on 2026-10-06; rejected since v0.7.4.1)
-#   smow = Margin -> Trade          (spot margin; not needed)
-#   taxw = Taxation -> Search       (read trading history; not needed)
-#   p2pw = P2P -> Search            (read merchant info; not needed)
-#   wtow = Wallet -> Transfer       (internal transfers between the user's own
-#                                    Bitget accounts; NOT an external withdrawal)
-# plus the documented words readonly / read / trade / withdraw / transfer.
-# The code Bitget uses for external Withdraw is still unconfirmed, so ANY other
-# code is treated as "withdrawal possible" until it has been confirmed.
-BITGET_TRADE_TOKENS = {"trade", "stow"}
-BITGET_READ_ONLY_TOKENS = {"stor"}      # Spot -> Read: the key is Read-only, orders are refused (40014)
-BITGET_WITHDRAW_TOKENS = {"withdraw"}
-# recognised, harmless for withdrawals, but more than AutoBuy needs
-BITGET_EXTRA_TOKENS = {"smow", "taxw", "p2pw", "wtow", "transfer"}
-BITGET_EXTRA_LABELS = {"smow": "Margin trade", "taxw": "Taxation search", "p2pw": "P2P search",
-                       "wtow": "Wallet transfer (internal)", "transfer": "Transfer (internal)"}
-BITGET_KNOWN_TOKENS = BITGET_TRADE_TOKENS | BITGET_READ_ONLY_TOKENS | BITGET_WITHDRAW_TOKENS | BITGET_EXTRA_TOKENS | {"readonly", "read"}
-
-
-# Unified Trading Account (v3) key permissions, from /api/v3/account/info (docs read 2026-10-08):
-#   permType   read-only | read-and-write
-#   permissions uta_trade (trade), uta_mgt (account management/read), withdraw, copy_futures_*
-UTA_TRADE_TOKENS = {"uta_trade"}
-UTA_WITHDRAW_TOKENS = {"withdraw"}
-UTA_KNOWN_TOKENS = UTA_TRADE_TOKENS | UTA_WITHDRAW_TOKENS | {"uta_mgt", "copy_futures_position", "copy_futures_order"}
-
-
-def interpret_unified_permissions(perms: list, perm_type) -> dict:
-    """{can_trade, can_withdraw, permissions_known, unconfirmed, extra, read_only} for a Unified key."""
-    tokens = {p.strip().lower() for p in perms if p}
-    read_only = str(perm_type or "").lower() in ("read-only", "readonly", "read_only")
-    trade = bool(tokens & UTA_TRADE_TOKENS) and not read_only
-    withdraw = bool(tokens & UTA_WITHDRAW_TOKENS)
-    unconfirmed = sorted(tokens - UTA_KNOWN_TOKENS)
-    return {"can_trade": trade, "can_withdraw": withdraw, "permissions_known": bool(tokens) or bool(perm_type),
-            "unconfirmed": unconfirmed, "extra": sorted(tokens & {"copy_futures_position", "copy_futures_order"}),
-            "read_only": read_only,
-            # Management -> Read (uta_mgt) is REQUIRED on a Unified key: the balance reads (/api/v3/account/assets) need it
-            "management_read": "uta_mgt" in tokens}
-
-
-def interpret_bitget_authorities(auths: list) -> dict:
-    """{can_trade, can_withdraw, permissions_known, unconfirmed, extra} from
-    Bitget's authorities list.
-
-    can_trade is True with stow/trade, else False (spot trading is required).
-    can_withdraw is True with the documented "withdraw", False when every code
-    is recognised and none grants withdrawal, and None ("possible" — treat as
-    enabled) when the list is empty or carries codes not yet confirmed.
-    ``unconfirmed`` lists those codes; ``extra`` lists recognised codes the
-    platform does not need (margin, transfer, taxation/P2P search).
-    """
-    tokens = {a.strip().lower() for a in auths if a}
-    unconfirmed = sorted(tokens - BITGET_KNOWN_TOKENS)
-    extra = sorted(tokens & BITGET_EXTRA_TOKENS)
-    if not tokens:
-        return {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": [], "read_only": False}
-    trade = bool(tokens & BITGET_TRADE_TOKENS)
-    withdraw = bool(tokens & BITGET_WITHDRAW_TOKENS)
-    read_only = bool(tokens & BITGET_READ_ONLY_TOKENS) and not trade   # Spot -> Read without Spot -> Trade
-    fully_understood = not unconfirmed
-    return {
-        "read_only": read_only,
-        "can_trade": False if read_only else (True if trade else (False if fully_understood else None)),
-        "can_withdraw": True if withdraw else (False if fully_understood else None),
-        "permissions_known": trade or withdraw or fully_understood,
-        "unconfirmed": unconfirmed,
-        "extra": extra,
-    }
+# The Bitget permission tables and their interpreters live in
+# api/services/bitget_permissions.py since v0.9.2: Guardian's onboarding gate
+# shares them and may not import this module (it carries the trading
+# transport). Re-exported so every existing importer keeps working.
+from api.services.bitget_permissions import (  # noqa: F401
+    BITGET_EXTRA_LABELS, BITGET_EXTRA_TOKENS, BITGET_KNOWN_TOKENS, BITGET_READ_ONLY_TOKENS, BITGET_TRADE_TOKENS,
+    BITGET_WITHDRAW_TOKENS, UTA_KNOWN_TOKENS, UTA_TRADE_TOKENS, UTA_WITHDRAW_TOKENS, interpret_bitget_authorities,
+    interpret_unified_permissions,
+)
 
 
 class ExchangeClientError(Exception):
