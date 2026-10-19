@@ -60,6 +60,10 @@ ADMIN_EVENT_TYPES = (
     "member_two_factor_enabled",
     "member_two_factor_disabled",
     "monitoring_key_replaced",
+    "account_enabled",
+    "account_disabled",
+    "account_deleted",
+    "baseline_seed_failed",
 )
 
 # How each reads to a customer. The dashboard shows event_type; this page is
@@ -74,6 +78,10 @@ ADMIN_EVENT_LABELS = {
     "member_two_factor_enabled": "Two-factor turned on",
     "member_two_factor_disabled": "Two-factor turned off",
     "monitoring_key_replaced": "Monitoring key replaced",
+    "account_enabled": "Monitoring resumed",
+    "account_disabled": "Monitoring paused",
+    "account_deleted": "Account removed from monitoring (history kept)",
+    "baseline_seed_failed": "Baseline could not be read from the exchange",
 }
 
 

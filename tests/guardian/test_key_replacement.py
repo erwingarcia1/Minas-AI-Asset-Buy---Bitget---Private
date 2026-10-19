@@ -602,3 +602,18 @@ def test_the_slow_loop_does_not_overwrite_an_id_it_disagrees_with(db, cipher, mo
 
     assert _recorded_uid(db, account_id) == OUR_UID
     assert "different account id" in caplog.text
+
+
+def test_a_unified_bitget_replacement_key_is_refused_with_the_unified_message(db, cipher, monkeypatch):
+    from unittest.mock import MagicMock
+    from guardian.keyreplacement import replace_monitoring_key
+    from tests.guardian.conftest import make_account
+    account_id = make_account(db, "uta-replace")
+    with db.cursor() as cur:   # the identity check needs a recorded uid; the Unified refusal must come first
+        cur.execute("UPDATE guardian_accounts SET exchange_uid = %s WHERE id = %s", ("uid-uta-1", account_id))
+    client = MagicMock()
+    client.fetch_balance = MagicMock(side_effect=Exception('bitget {"code":"40085","msg":"Unified Account mode"}'))
+    monkeypatch.setattr("guardian.keyreplacement.make_client", lambda *a, **k: client)
+    outcome = replace_monitoring_key(db, cipher, account_id=account_id, api_key="uta-k", secret="s", passphrase="p", actor="user:test")
+    assert outcome.ok is False and outcome.reason_code == "unified_not_supported"
+    assert "Unified Trading" in outcome.message

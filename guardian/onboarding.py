@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from guardian.crypto import CredentialCipher
+from api.services.bitget_permissions import guardian_bitget_read_only
+from guardian.crypto import CredentialCipher, redact_secrets
 from guardian.db import Database
 from guardian.events import append_event
-from guardian.exchange import SUPPORTED_EXCHANGES, ExchangeClient, TamperSignal, make_client
+from guardian.exchange import SUPPORTED_EXCHANGES, ExchangeClient, TamperSignal, exchange_account_uid, make_client
+
+logger = logging.getLogger("guardian.onboarding")
 
 
 def key_fingerprint(api_key: str) -> str:
@@ -21,6 +25,9 @@ def key_fingerprint(api_key: str) -> str:
 # `guardian_accounts.label` is varchar(100) (migration 030). The slug a name
 # produces is capped below that so a `-N` uniqueness suffix always fits.
 _LABEL_BASE_MAX_LENGTH = 90
+
+# `guardian_accounts.customer_name` is varchar(255).
+_CUSTOMER_NAME_MAX_LENGTH = 255
 
 
 def generate_unique_label(db: Database, name: str) -> str:
@@ -42,15 +49,17 @@ def generate_unique_label(db: Database, name: str) -> str:
         i += 1
     return f"{base}-{i}"
 
-# Bitget's Get-Account-Info response includes an `authorities` field, confirmed
-# (Phase 0 audit, docs/phase0-capability-audit.md) to carry per-module
-# read/write permission codes such as 'coor' (read) / 'coow' (write) - an 'r'
-# suffix for read, a 'w' suffix for write. The exact full enum of module
-# prefixes was NOT verified against a live key. Because of that, this check is
-# deliberately conservative and fails CLOSED: any authority token that isn't
-# unambiguously read-only, or a response we can't parse at all, is rejected
-# rather than assumed safe.
-_WRITE_KEYWORDS = ("trade", "withdraw", "transfer", "write")
+
+# Bitget's read-only verdict comes from the platform's confirmed permission
+# table (api/services/bitget_permissions.py, shared with key verification on
+# the trading side) since v0.9.2. Guardian's own gate accepted only codes
+# ending in 'r' and refused everything ending in 'w', which turned away the
+# read scopes `taxw` (Taxation -> Search) and `p2pw` (P2P -> Search) that an
+# honest read-only key carries, and it had no notion of a Unified Trading
+# Account key (permType / permissions from /api/v3/account/info). The table
+# fixes both and still fails CLOSED on an empty list and on codes nobody has
+# confirmed. See `_bitget_payload_read_only` for how the payload's shape says
+# which kind of key answered.
 
 # Bybit v5: the `permissions` object on query-api lists SCOPES (which endpoint
 # groups the key can access), NOT write grants - Bybit's own apikey-info docs
@@ -64,8 +73,54 @@ _WRITE_KEYWORDS = ("trade", "withdraw", "transfer", "write")
 _BYBIT_WRITE_TOKENS = ("withdraw",)
 
 
+# What a customer reads when a key is refused: what happened and what to do.
+# The technical reason (which code, which field) goes to the log and to
+# `OnboardingRejected.reason`, never to the screen - the person reading the
+# screen may be doing so over an attacker's shoulder, and "authority token
+# 'stow'" helps nobody but us.
+NOT_READ_ONLY_MESSAGE = (
+    "That key was refused because it is not read-only, or because we could not read the account "
+    "with it. Create a new key on the exchange with read permission only - no trading, no "
+    "withdrawals, no transfers - and try again."
+)
+# Bitget answers 40085 ("You are in Unified Account mode, and the Classic Account API is
+# not supported") to a Classic (v2) call made with a Unified Trading account's key. Guardian's
+# Bitget client reads the v2 endpoints, so such a key cannot be watched yet; the customer is
+# told that plainly instead of the generic "not read-only" refusal.
+BITGET_UNIFIED_REFUSAL_CODE = "40085"
+UNIFIED_REASON_PREFIX = "unified_account:"
+UNIFIED_NOT_SUPPORTED_MESSAGE = (
+    "This Bitget key belongs to a Unified Trading account, which Guardian cannot watch yet: "
+    "it reads the Classic account endpoints. Use a key from a Classic account for now; "
+    "Unified support is coming."
+)
+
+ALREADY_MONITORED_MESSAGE = (
+    "This exchange account is already being watched as {label}. Add a different account, or "
+    "replace the key on the existing one."
+)
+
+
 class OnboardingRejected(Exception):
-    """Raised when a candidate API key cannot be verified as read-only."""
+    """Raised when a candidate API key cannot be verified as read-only, or
+    the account may not be added for another reason the customer can act on.
+
+    `str(exc)` is the plain-language message for the customer; `reason` is
+    the technical detail for the log."""
+
+    def __init__(self, message: str, reason: str = ""):
+        super().__init__(message)
+        self.reason = reason
+
+
+class AlreadyMonitored(OnboardingRejected):
+    """The same exchange account (same owner, same exchange, same exchange
+    uid) is already watched by a row that is not disabled. `label` names
+    that row, so the customer can find it."""
+
+    def __init__(self, message: str, label: str):
+        super().__init__(message, reason=f"exchange account already monitored as '{label}'")
+        self.label = label
 
 
 @dataclass
@@ -74,35 +129,44 @@ class OnboardingResult:
     label: str
 
 
+@dataclass
+class _Verdict:
+    """What the two-step read-only check found. `payload` is the inner
+    account-info dict (the exchange uid and the account mode are read from
+    it) and `account_mode` is 'classic' / 'unified' for a Bitget key when the
+    payload's shape says so, else None."""
+
+    ok: bool
+    reason: str
+    payload: object = None
+    account_mode: str | None = None
+
+
 def _bitget_read_only(authorities: object) -> tuple[bool, str]:
-    if authorities is None:
-        return False, "account-info response had no 'authorities' field - cannot verify scope"
-
-    if isinstance(authorities, str):
-        tokens = [t.strip() for t in authorities.replace(";", ",").split(",") if t.strip()]
-    elif isinstance(authorities, (list, tuple)):
-        tokens = [str(t).strip() for t in authorities if str(t).strip()]
-    else:
-        return False, f"unrecognized 'authorities' field type: {type(authorities).__name__}"
-
-    if not tokens:
-        return False, "'authorities' field was empty - cannot verify scope"
-
-    for token in tokens:
-        lowered = token.lower()
-        if any(keyword in lowered for keyword in _WRITE_KEYWORDS):
-            return False, f"authority token '{token}' indicates non-read-only scope"
-        if lowered.endswith("r"):
-            continue
-        if lowered.endswith("w"):
-            return False, f"authority token '{token}' has Bitget's documented write-scope suffix"
-        return False, f"authority token '{token}' doesn't match a recognized read-only pattern - failing closed"
-
-    return True, "all authority tokens matched a read-only ('...r' suffix) pattern"
+    """Classic Bitget key: the verdict comes from the shared permission table."""
+    return guardian_bitget_read_only(authorities)
 
 
 # Kept as a backwards-compatible alias (existing tests import this name).
 _looks_read_only = _bitget_read_only
+
+
+def _bitget_payload_read_only(payload: object) -> tuple[bool, str, str | None]:
+    """Bitget account-info payload -> (ok, reason, account_mode).
+
+    A Unified Trading Account answers /api/v3/account/info with `permType`
+    and `permissions`; a Classic account answers /api/v2/spot/account/info
+    with `authorities`. The shape tells the mode and the table decides the
+    verdict. A payload that is neither fails closed and has no mode."""
+    if not isinstance(payload, dict):
+        return False, f"account-info response had unexpected type: {type(payload).__name__}", None
+    perm_type = payload.get("permType", payload.get("perm_type"))
+    if perm_type is not None:
+        permissions = payload.get("permissions", payload.get("authorities"))
+        ok, reason = guardian_bitget_read_only(permissions, perm_type=perm_type)
+        return ok, reason, "unified"
+    ok, reason = _bitget_read_only(payload.get("authorities"))
+    return ok, reason, ("classic" if "authorities" in payload else None)
 
 
 def _bybit_read_only(data: object) -> tuple[bool, str]:
@@ -191,6 +255,51 @@ def _binance_read_only(data: object) -> tuple[bool, str]:
     return True, "Binance enableReading=true and all write flags are false"
 
 
+def _is_unified_refusal(exc: BaseException) -> bool:
+    """Bitget's 40085: a Classic (v2) endpoint called with a Unified Trading account's key."""
+    return BITGET_UNIFIED_REFUSAL_CODE in str(exc)
+
+
+def _verify(client: ExchangeClient, exchange: str) -> _Verdict:
+    """The check behind `verify_read_only`, keeping the account-info payload
+    so onboarding can read the exchange uid and the account mode from the
+    same response instead of asking the exchange twice."""
+    try:
+        client.fetch_balance()
+    except TamperSignal as exc:
+        if _is_unified_refusal(exc):
+            return _Verdict(False, f"{UNIFIED_REASON_PREFIX} balance read refused with {BITGET_UNIFIED_REFUSAL_CODE}")
+        return _Verdict(False, f"balance read failed - key may be invalid or lacks account-read scope: {exc}")
+    except Exception as exc:  # fail closed: any surprise here is a rejection
+        if _is_unified_refusal(exc):
+            return _Verdict(False, f"{UNIFIED_REASON_PREFIX} balance read refused with {BITGET_UNIFIED_REFUSAL_CODE}")
+        return _Verdict(False, f"balance read raised an unexpected error: {exc}")
+
+    try:
+        info = client.fetch_account_info()
+    except TamperSignal as exc:
+        if _is_unified_refusal(exc):
+            return _Verdict(False, f"{UNIFIED_REASON_PREFIX} key-metadata call refused with {BITGET_UNIFIED_REFUSAL_CODE}")
+        return _Verdict(False, f"key-metadata call failed: {exc}")
+    except Exception as exc:  # fail closed
+        if _is_unified_refusal(exc):
+            return _Verdict(False, f"{UNIFIED_REASON_PREFIX} key-metadata call refused with {BITGET_UNIFIED_REFUSAL_CODE}")
+        return _Verdict(False, f"key-metadata call raised an unexpected error: {exc}")
+
+    payload = info.get("data", info) if isinstance(info, dict) else info
+    if exchange == "bybit":
+        ok, reason = _bybit_read_only(payload)
+        return _Verdict(ok, reason, payload)
+    if exchange == "okx":
+        ok, reason = _okx_read_only(payload)
+        return _Verdict(ok, reason, payload)
+    if exchange == "binance":
+        ok, reason = _binance_read_only(payload)
+        return _Verdict(ok, reason, payload)
+    ok, reason, account_mode = _bitget_payload_read_only(payload)
+    return _Verdict(ok, reason, payload, account_mode)
+
+
 def verify_read_only(client: ExchangeClient, exchange: str = "bitget") -> tuple[bool, str]:
     """Programmatic, fail-closed check that a candidate key is read-only.
     Two independent checks must both pass:
@@ -199,29 +308,129 @@ def verify_read_only(client: ExchangeClient, exchange: str = "bitget") -> tuple[
     Any unexpected error during either check is treated as a rejection, not
     a pass - this is a security gate, not a best-effort probe.
     """
-    try:
-        client.fetch_balance()
-    except TamperSignal as exc:
-        return False, f"balance read failed - key may be invalid or lacks account-read scope: {exc}"
-    except Exception as exc:  # fail closed: any surprise here is a rejection
-        return False, f"balance read raised an unexpected error: {exc}"
+    verdict = _verify(client, exchange)
+    return verdict.ok, verdict.reason
 
-    try:
-        info = client.fetch_account_info()
-    except TamperSignal as exc:
-        return False, f"key-metadata call failed: {exc}"
-    except Exception as exc:  # fail closed
-        return False, f"key-metadata call raised an unexpected error: {exc}"
 
-    payload = info.get("data", info) if isinstance(info, dict) else info
-    if exchange == "bybit":
-        return _bybit_read_only(payload)
-    if exchange == "okx":
-        return _okx_read_only(payload)
-    if exchange == "binance":
-        return _binance_read_only(payload)
-    authorities = payload.get("authorities") if isinstance(payload, dict) else None
-    return _bitget_read_only(authorities)
+def _set_baseline_status(db: Database, account_id: int, status: str) -> None:
+    with db.cursor() as cur:
+        cur.execute("UPDATE guardian_accounts SET baseline_status = %s, updated_at = %s WHERE id = %s",
+                    (status, datetime.now(timezone.utc).isoformat(), account_id))
+
+
+def _page(alerter, **kwargs) -> None:
+    """Page an operator, and never let a paging failure change the outcome:
+    the row's status has been written by the time this runs, and a dead mail
+    server must not turn a seeded account into an exception."""
+    if alerter is None:
+        return
+    try:
+        alerter.page(**kwargs)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not page an operator about %s: %s", kwargs.get("rule"), exc)
+
+
+def _record_baseline_outcome(db: Database, account_id: int, label: str, gaps: list[dict], *,
+                             actor: str | None, operator_alerter) -> str:
+    """Write what seeding found: the row's baseline_status, one event per
+    gap, and a page when the history could only be read in part. Returns the
+    status written ('complete' or 'incomplete')."""
+    status = "incomplete" if gaps else "complete"
+    _set_baseline_status(db, account_id, status)
+    # An account whose history could not be fully seeded is not broken, but it
+    # WILL false-positive later on activity the customer has always had - and
+    # nothing distinguished it from an account that started complete (#58,
+    # group C). Recorded as an event so it is attached to the account forever,
+    # not only to whatever log file was open at onboarding.
+    for gap in gaps:
+        append_event(
+            db, account_id, "baseline_seed_incomplete", "HIGH", gap, actor=actor,
+        )
+    if gaps:
+        _page(
+            operator_alerter,
+            rule="account_onboarded_with_partial_baseline",
+            severity="HIGH",
+            message=(
+                f"{label} was onboarded but {len(gaps)} part(s) of its history could not be "
+                f"read from the exchange. The account is monitored, but detectors that compare "
+                f"against history will raise false positives on activity this customer has "
+                f"always had. Re-run the seed once the exchange endpoint is working."
+            ),
+            evidence={"account_label": label, "gaps": gaps},
+            account_id=account_id,
+            dedup_scope=f"onboard:{label}",
+        )
+    return status
+
+
+def seed_account_baseline(db: Database, cipher: CredentialCipher, account_id: int, *,
+                          actor: str | None = None, operator_alerter=None) -> str:
+    """Seed an account's baseline from its stored credentials and return the
+    baseline_status written: 'complete' or 'incomplete'.
+
+    This is the second half of `onboard_account(seed=False)`: the API inserts
+    the row in the request and runs this in the background, because seeding
+    makes several exchange calls and a customer should not wait on them. The
+    engine does not poll a row while it says 'seeding', so a row must never
+    be left there: on ANY exception - the exchange refusing, the database
+    going away, a credential that no longer decrypts - the row is marked
+    'incomplete' and a 'baseline_seed_failed' event says why, with every
+    secret redacted. The account is then polled like any other incomplete
+    one, and an operator is paged to re-seed it."""
+    label = f"account {account_id}"
+    secrets: tuple[str, ...] = ()
+    try:
+        with db.cursor() as cur:
+            cur.execute(
+                "SELECT label, exchange, encrypted_api_key, encrypted_secret, encrypted_passphrase "
+                "FROM guardian_accounts WHERE id = %s",
+                (account_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise LookupError("no such account")
+        label = row["label"]
+        if not row["encrypted_api_key"]:
+            raise RuntimeError("the account has no monitoring key on record")
+        api_key = cipher.decrypt(row["encrypted_api_key"])
+        secret = cipher.decrypt(row["encrypted_secret"])
+        passphrase = cipher.decrypt(row["encrypted_passphrase"]) if row["encrypted_passphrase"] else ""
+        secrets = tuple(s for s in (api_key, secret, passphrase) if s)
+        client = make_client(row["exchange"], api_key, secret, passphrase)
+
+        from guardian.baseline import seed_baseline  # local import avoids a module cycle
+
+        gaps = seed_baseline(db, account_id, client)
+        return _record_baseline_outcome(db, account_id, label, gaps, actor=actor, operator_alerter=operator_alerter)
+    except Exception as exc:  # noqa: BLE001 - the row must not stay 'seeding', whatever happened
+        reason = redact_secrets(f"{type(exc).__name__}: {exc}", *secrets)[:300]
+        logger.warning("account %s: baseline seeding failed: %s", label, reason)
+        try:
+            _set_baseline_status(db, account_id, "incomplete")
+            append_event(
+                db, account_id, "baseline_seed_failed", "HIGH",
+                {"error": reason,
+                 "consequence": "the account is polled without a seeded history; detectors that "
+                                "compare against history may false-positive until it is re-seeded"},
+                actor=actor,
+            )
+        except Exception as inner:  # noqa: BLE001
+            logger.error("account %s: could not record the failed seed: %s", label, inner)
+        _page(
+            operator_alerter,
+            rule="account_baseline_seed_failed",
+            severity="HIGH",
+            message=(
+                f"{label}: the baseline could not be seeded ({reason}). The account is marked "
+                f"incomplete and is being polled, but detectors that compare against history may "
+                f"false-positive on activity this customer has always had. Re-run the seed."
+            ),
+            evidence={"account_label": label, "error": reason},
+            account_id=account_id,
+            dedup_scope=f"seed:{label}",
+        )
+        return "incomplete"
 
 
 def onboard_account(
@@ -247,6 +456,7 @@ def onboard_account(
     telegram_handle_secondary: str | None = None,
     license: str | None = None,
     sms_alerts_enabled: bool = True,
+    seed: bool = True,
 ) -> OnboardingResult:
     """Verify the key is read-only, then store the account under its owner.
 
@@ -254,7 +464,19 @@ def onboard_account(
     is the primary alert destination); `source` says how it got here (self,
     admin, migrated) and `onboarded_by` who did it when an admin did. The
     key's fingerprint is stored so the same key cannot be monitored twice and
-    a purchase key can be refused before it gets here."""
+    a purchase key can be refused before it gets here.
+
+    With `seed=True` (the default, and what the CLI and the engine tests do)
+    the baseline is seeded here and the row leaves as 'complete' or
+    'incomplete'. With `seed=False` the row is inserted as 'seeding', which
+    the engine does not poll, and the caller runs `seed_account_baseline`
+    afterwards - the API does so in a background task so the customer is not
+    kept waiting on the exchange.
+
+    Raises `OnboardingRejected` (plain-language `str`, detail in `.reason`)
+    when the key is not read-only, and its subclass `AlreadyMonitored` when
+    this owner already watches the same exchange account with a key that is
+    not disabled."""
     if topology not in ("independent", "sub_account"):
         raise ValueError(f"unknown topology '{topology}'")
     if exchange not in SUPPORTED_EXCHANGES:
@@ -265,22 +487,47 @@ def onboard_account(
         raise ValueError(f"unknown onboarding source '{source}'")
 
     client = make_client(exchange, api_key, secret, passphrase)
-    ok, reason = verify_read_only(client, exchange)
-    if not ok:
-        raise OnboardingRejected(
-            f"rejected {exchange} key for '{label}': {reason}. Guardian only accepts read-only keys."
-        )
+    verdict = _verify(client, exchange)
+    if not verdict.ok:
+        logger.warning("refused %s key for '%s': %s", exchange, label, verdict.reason)
+        message = UNIFIED_NOT_SUPPORTED_MESSAGE if verdict.reason.startswith(UNIFIED_REASON_PREFIX) else NOT_READ_ONLY_MESSAGE
+        raise OnboardingRejected(message, reason=verdict.reason)
+
+    # One exchange account, one monitoring key per owner. The uid comes from
+    # the payload the gate just verified, so no second request is made; an
+    # exchange whose payload carries no account id (Binance) cannot be
+    # checked and is not. A disabled row does not count: a customer who
+    # switched monitoring off may add the account again with a fresh key.
+    exchange_uid = exchange_account_uid(exchange, verdict.payload)
+    if exchange_uid is not None:
+        with db.cursor() as cur:
+            cur.execute(
+                "SELECT label FROM guardian_accounts WHERE user_id = %s AND exchange = %s AND exchange_uid = %s "
+                "AND status <> 'disabled' ORDER BY id LIMIT 1",
+                (user_id, exchange, exchange_uid),
+            )
+            existing = cur.fetchone()
+        if existing is not None:
+            raise AlreadyMonitored(ALREADY_MONITORED_MESSAGE.format(label=existing["label"]), label=existing["label"])
+
+    # Bitget Classic vs Unified, when the permission payload said which. The
+    # poller needs no mode today (the client is the same), but a Unified
+    # account answers the Classic endpoints with 40085 once migrated, and the
+    # column is where that difference will be read from.
+    account_mode = verdict.account_mode if exchange == "bitget" else None
+    if customer_name is not None:
+        customer_name = customer_name.strip()[:_CUSTOMER_NAME_MAX_LENGTH] or None
 
     now = datetime.now(timezone.utc).isoformat()
     with db.cursor() as cur:
         cur.execute(
             """
             INSERT INTO guardian_accounts
-                (user_id, label, exchange, topology, encrypted_api_key, encrypted_secret, encrypted_passphrase,
-                 key_fingerprint, customer_name, alert_phone, alert_email_secondary, alert_phone_secondary,
-                 telegram_handle, telegram_handle_secondary, license, sms_alerts_enabled, status,
-                 baseline_status, onboarding_source, onboarded_by, onboarded_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active',
+                (user_id, label, exchange, topology, account_mode, encrypted_api_key, encrypted_secret,
+                 encrypted_passphrase, key_fingerprint, customer_name, alert_phone, alert_email_secondary,
+                 alert_phone_secondary, telegram_handle, telegram_handle_secondary, license, sms_alerts_enabled,
+                 status, exchange_uid, baseline_status, onboarding_source, onboarded_by, onboarded_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s,
                     'seeding', %s, %s, %s, %s)
             RETURNING id
             """,
@@ -289,6 +536,7 @@ def onboard_account(
                 label,
                 exchange,
                 topology,
+                account_mode,
                 cipher.encrypt(api_key),
                 cipher.encrypt(secret),
                 cipher.encrypt(passphrase or ""),
@@ -301,6 +549,7 @@ def onboard_account(
                 telegram_handle_secondary,
                 license,
                 bool(sms_alerts_enabled),
+                exchange_uid,
                 source,
                 onboarded_by,
                 now,
@@ -310,35 +559,11 @@ def onboard_account(
         account_id = cur.fetchone()["id"]
         cur.execute("INSERT INTO guardian_poll_state (account_id) VALUES (%s)", (account_id,))
 
-    from guardian.baseline import seed_baseline  # local import avoids a module cycle
+    if seed:
+        from guardian.baseline import seed_baseline  # local import avoids a module cycle
 
-    # An account whose history could not be fully seeded is not broken, but it
-    # WILL false-positive later on activity the customer has always had - and
-    # nothing distinguished it from an account that started complete (#58,
-    # group C). Recorded as an event so it is attached to the account forever,
-    # not only to whatever log file was open at onboarding.
-    gaps = seed_baseline(db, account_id, client)
-    with db.cursor() as cur:
-        cur.execute("UPDATE guardian_accounts SET baseline_status = %s, updated_at = %s WHERE id = %s",
-                    ("incomplete" if gaps else "complete", datetime.now(timezone.utc).isoformat(), account_id))
-    for gap in gaps:
-        append_event(
-            db, account_id, "baseline_seed_incomplete", "HIGH", gap, actor=actor,
-        )
-    if gaps and operator_alerter is not None:
-        operator_alerter.page(
-            rule="account_onboarded_with_partial_baseline",
-            severity="HIGH",
-            message=(
-                f"{label} was onboarded but {len(gaps)} part(s) of its history could not be "
-                f"read from the exchange. The account is monitored, but detectors that compare "
-                f"against history will raise false positives on activity this customer has "
-                f"always had. Re-run the seed once the exchange endpoint is working."
-            ),
-            evidence={"account_label": label, "gaps": gaps},
-            account_id=account_id,
-            dedup_scope=f"onboard:{label}",
-        )
+        gaps = seed_baseline(db, account_id, client)
+        _record_baseline_outcome(db, account_id, label, gaps, actor=actor, operator_alerter=operator_alerter)
 
     # The act of onboarding is itself something a person did, and until G-50
     # it left no trace at all - no event row, so no "who added this customer".

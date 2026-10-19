@@ -38,7 +38,7 @@ from guardian.crypto import CredentialCipher
 from guardian.db import Database
 from guardian.events import append_event
 from guardian.exchange import exchange_account_uid, make_client
-from guardian.onboarding import key_fingerprint, verify_read_only
+from guardian.onboarding import UNIFIED_NOT_SUPPORTED_MESSAGE, UNIFIED_REASON_PREFIX, key_fingerprint, verify_read_only
 
 logger = logging.getLogger("guardian.keyreplacement")
 
@@ -146,6 +146,8 @@ def replace_monitoring_key(
         )
 
     ok, reason = verify_read_only(client, exchange)
+    if not ok and reason.startswith(UNIFIED_REASON_PREFIX):
+        return _refuse("unified_not_supported", UNIFIED_NOT_SUPPORTED_MESSAGE, f"verify_read_only refused: {reason}")
     if not ok:
         # The read-only guarantee is enforced, not promised (G-4). A key with
         # trade or withdrawal permission is refused here exactly as it is at
