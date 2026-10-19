@@ -3,8 +3,11 @@ import uuid
 import pytest
 from sqlalchemy import select
 
+from api.auth import hash_password
 from api.models import User
 from tests.api.conftest import auth_headers
+
+PW = "Routes-User-Passw0rd!1"
 
 
 @pytest.fixture
@@ -35,16 +38,20 @@ async def test_get_own_profile(client, user):
 
 
 async def test_update_email(client, db, user):
+    user.password_hash = hash_password(PW)   # changing the address needs the current password (v0.9.2)
+    await db.commit()
     new_email = f"renamed-{uuid.uuid4().hex[:8]}@example.com"
     async with client as c:
-        r = await c.put("/api/user/profile", json={"email": new_email},
+        r = await c.put("/api/user/profile", json={"email": new_email, "current_password": PW},
                         headers=auth_headers(user))
     assert r.status_code == 200 and r.json()["email"] == new_email
 
 
-async def test_update_email_conflict(client, user, other_user):
+async def test_update_email_conflict(client, db, user, other_user):
+    user.password_hash = hash_password(PW)
+    await db.commit()
     async with client as c:
-        r = await c.put("/api/user/profile", json={"email": other_user.email},
+        r = await c.put("/api/user/profile", json={"email": other_user.email, "current_password": PW},
                         headers=auth_headers(user))
     assert r.status_code == 400
     assert "already in use" in r.text
