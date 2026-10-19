@@ -21,8 +21,10 @@ with the flag off every Guardian path answers 404. No migration.
   watched twice, ten accounts per user), list, replace the key, change the
   alert contacts and the SMS switch (off by default), pause and resume,
   remove (the key is deleted, the history is kept). Baseline seeding runs in
-  the background; an account is not polled while it seeds and a failed seed
-  marks it `incomplete` instead of leaving it stranded.
+  the background; an account is not polled while it seeds, a failed seed
+  marks it `incomplete`, and the worker re-seeds a row left at `seeding` for
+  more than 15 minutes. Resuming an account is refused while another active
+  row watches the same exchange account.
 * Settings → "Guardian: exchange monitoring" (`/settings/monitoring`), a
   "Guardian" entry in the sidebar and a sign-in hint for Guardian customers,
   all only when the feature is on for the account.
@@ -43,8 +45,15 @@ with the flag off every Guardian path answers 404. No migration.
   `api/services/bitget_permissions.py` (the exchange client re-exports them).
   Guardian's Bitget gate uses the platform's confirmed table, which fixes the
   false rejection of the read codes `taxw`/`p2pw`.
-* The API reaches the engine through a two-thread bridge, so Guardian routes
-  add at most two Postgres connections per API worker.
+* The API reaches the engine through a small bridge (two request threads and
+  one seeding thread), so Guardian routes add at most three Postgres
+  connections per API worker, opened on first use. With the API's full pool
+  (80 steady / 120 burst) plus the worker's ten that exceeds the server's
+  `max_connections` of 100 in theory; `docs/DEPLOYMENT.md` has the arithmetic
+  and the owner's options before `GUARDIAN_ENABLED=1`.
+* An empty `GUARDIAN_RULES_PATH` (what compose passes when the server `.env`
+  does not set it) now means the rules file baked into the image; before, the
+  worker would have opened `.` as the rules file the moment the flag went on.
 
 ### Known limits
 

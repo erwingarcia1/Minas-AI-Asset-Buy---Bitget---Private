@@ -319,9 +319,12 @@ platform` builds, recreates and verifies it with the API:
   longer blob (nothing writes one before the Guardian toggles land in PR4), so
   the schema stays at 030 and the operator trims or exports first.
 - From v0.9.2 the API reaches the engine for the monitoring-key routes through a
-  two-thread bridge (`api/services/guardian_bridge.py`), so those routes add at
-  most two Postgres connections per API worker (eight on the box), opened on
-  first use and kept for the process lifetime.
+  three-thread bridge (`api/services/guardian_bridge.py`: two request threads
+  and one for the background baseline seed), so those routes add at most three
+  Postgres connections per API worker (twelve on the box), opened on first use
+  and kept for the process lifetime. The bridge also records the engine's
+  operator pages in `guardian_operator_pages`, and delivers them where the
+  operator channels are configured, exactly as the worker does.
 - Both checks key on the checkout's `docker-compose.yml` declaring the
   `guardian` service. `deploy.sh` runs from the file on disk at invocation, so
   a newer script can run against an older tree; without the service the worker
@@ -359,14 +362,21 @@ before the first deploy of this service:
   returned). The worker adds about ten: `guardian/db.py` keeps one psycopg2
   connection per thread, and the process has 8 pool threads
   (`workers.pool_size` in `guardian/rules.yaml`), the scheduler and the main
-  thread. The server runs Postgres's default `max_connections = 100`; the
-  owner confirms it with `SHOW max_connections;` before the deploy. 80 + 10
-  fits, with room for a few `psql` / `pg_dump` sessions; a full API burst
-  (120 + 10) does not. Whoever connects last then gets `FATAL: sorry, too many
-  clients already` — for the worker that is at start-up (`Database()` connects
-  in its constructor and refuses to look healthy without a connection), so the
-  container exits and compose restarts it in a loop. If the numbers do not
-  fit, either raise `max_connections` on the `postgres` service
+  thread. The API's Guardian bridge adds up to twelve more: three per gunicorn
+  worker (two request threads and the seeding thread), each opened the first
+  time that thread serves a Guardian route and kept for the process lifetime.
+  The server runs Postgres's default `max_connections = 100`, three of them
+  reserved for superusers; the owner confirms it with `SHOW max_connections;`
+  before the deploy. 80 + 10 fits while the bridge is idle (Guardian off, or
+  no monitoring route served yet), with room for a few `psql` / `pg_dump`
+  sessions; with every pool full and every bridge thread connected,
+  80 + 10 + 12 = 102 does not, and a full API burst (120 + 10 + 12) never did.
+  Whoever connects last then gets `FATAL: sorry, too many clients already` —
+  for the worker that is at start-up (`Database()` connects in its constructor
+  and refuses to look healthy without a connection), so the container exits
+  and compose restarts it in a loop; for a bridge thread it is a failed
+  Guardian request. So before `GUARDIAN_ENABLED` goes to `1`, either raise
+  `max_connections` on the `postgres` service
   (`command: ["postgres", "-c", "max_connections=200"]` in
   `docker-compose.yml`; the postgres container must be recreated, so that is
   its own deploy) or lower `pool_size` / `max_overflow` in `api/database.py`

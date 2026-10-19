@@ -82,12 +82,18 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
   onboards) carries `users.password_reset_required`. Until the customer sets
   a password through the seven-day set-password link (the ordinary
   `POST /api/auth/reset-password`, which clears the flag), `POST /api/auth/login`
-  and `/login/mfa` answer the ordinary 401 `Invalid email or password` for it,
-  with the same lockout counter and timing as a wrong password, and quietly
-  re-send the activation email, at most once an hour per account.
+  answers the ordinary 401 `Invalid email or password` for it, with the same
+  lockout counter and timing as a wrong password, and `/login/mfa` its usual
+  401 `Invalid or expired sign-in. Start again from the login page.`; both
+  quietly re-send the activation email, at most once an hour per account. A
+  suspended account gets the same refusal and no email, as at
+  `/forgot-password`. Provisioning an address that already has a platform
+  user adopts that user instead of creating a second one (by design: a
+  migrated member who had already signed up keeps one account).
 - `POST /api/auth/verify` answers `valid: false` for the MFA pending token
-  (it identifies nobody until the second factor is given); the bearer guard
-  refuses it too.
+  (it identifies nobody until the second factor is given) and for a
+  password-reset token, the seven-day set-password link included (it is not
+  a credential); the bearer guard refuses both too.
 - Refresh tokens are rejected as access tokens and vice versa; a refresh
   token posted in a body is ignored.
 - Same-origin only: the Vite dev server proxies `/api` to the API and nginx
@@ -100,9 +106,9 @@ with its reason, and every CSRF failure logs `csrf_failed` with the reason).
 | Module | Endpoints |
 |---|---|
 | auth (`/api/auth`) | `POST /register` · `/login` (200, or 202 `mfa_required` when two-factor is on) · `/login/mfa` · `/logout-all` · `/verify` · `/refresh` · `/logout` · `/change-password` · `/forgot-password` (emails a 1-hour single-use link; always `{sent: true}`) · `/reset-password/validate` (`{token}` → 200 `{valid: true}` / 400 `{valid: false}`, does not consume the token) · `/reset-password` (`{token, new_password}` → 204; signs out every other session) |
-| user (`/api/user`) | `GET/PUT /profile` (`GET` carries `guardian_enabled`, whether Guardian is visible to this account: the flag AND the allowlist, decided server-side, and `mfa_enabled`; changing `email` with `PUT` needs `current_password`, plus the current authenticator `code` when two-factor is on, 400 otherwise, and the previous address is emailed about the change) · `GET /{user_id}` |
+| user (`/api/user`) | `GET/PUT /profile` (`GET` carries `guardian_enabled`, whether Guardian is visible to this account: the flag AND the allowlist, decided server-side, and `mfa_enabled`; changing `email` with `PUT` needs `current_password`, plus the current authenticator `code` when two-factor is on, 400 otherwise; a wrong password or code counts towards the sign-in lockout and a locked account gets 429 as at `/login`; 5/min; the previous address is emailed about the change, and the new address is not verified before it takes effect (follow-up)) · `GET /{user_id}` |
 | security (`/api/user/2fa`, v0.9.0) | `GET /` (`{enabled, enrolled_at, recovery_codes_remaining, pending_enrolment}`) · `POST /enrol` (`{password}` → `{secret, otpauth_uri}`, shown once; 400 wrong password; 409 when already on; nothing is in force until confirmed) · `POST /confirm` (`{code}` → `{recovery_codes[10]}`, shown once; 400 wrong code) · `POST /recovery-codes` (`{code}` from the authenticator, never a recovery code → a new set; the old set stops working) · `POST /disable` (`{password, code \| recovery_code}` → 204; 400 wrong password or code; 403 for admins while `ADMIN_MFA_REQUIRED=1`). Every change emails the account (security category). Admin: `totp_enabled` on `GET /api/admin/users`, `POST /api/admin/users/{id}/2fa/reset` (support path for a lost authenticator; body `{code}` = the caller's own current authenticator code, required when the caller has two-factor on; never the caller's own account, 403; audited, the user is emailed). With `ADMIN_MFA_REQUIRED=1` every admin route answers 403 `{"error": "mfa_required_for_admin"}` until the admin has enrolled |
-| guardian (`/api/guardian`, v0.9.2) | Read-only monitoring of the customer's own exchange accounts through a **separate read-only key** (never an AutoBuy purchase key). It detects and tells; it never trades, withdraws or transfers. Every path answers 404 `Not found` while `GUARDIAN_ENABLED` is off or the caller is not in `GUARDIAN_ALLOWED_EMAILS` (when set), and for another user's or a removed account. `POST /accounts` (3/min; `{exchange: bitget \| bybit \| okx \| binance, api_key, api_secret, passphrase?, name (1-80), topology: independent \| sub_account, alert_phone?, alert_email_secondary?, alert_phone_secondary?, telegram_handle?, sms_alerts_enabled (default false)}` → 201 the account; the key is verified against the exchange's own permission report, so one that can trade, withdraw or transfer, or cannot read the account, is refused 400 with a plain message, as is one of the caller's purchase keys (400) and the eleventh account (400); 409 when the same exchange account is already watched (the message names the existing account) or the same key is already in use; the first snapshot, the baseline, is taken in the background and the account shows `baseline_status: seeding` until it is done) · `GET /accounts` · `GET /accounts/{id}` · `PUT /accounts/{id}/key` (3/min; `{api_key, api_secret, passphrase?}` → `{ok: true, message}`; the new key must be read-only AND belong to the same exchange account, else 400 with the message and nothing changes) · `PATCH /accounts/{id}` (`alert_phone`, `alert_email_secondary`, `alert_phone_secondary`, `telegram_handle` (null clears), `sms_alerts_enabled`) · `POST /accounts/{id}/disable` · `POST /accounts/{id}/enable` · `DELETE /accounts/{id}` (204: monitoring stops and the key material is scrubbed; the row and its alert/event history are kept, the account is no longer listed). Responses never carry key material or the key fingerprint; `created_at`, `updated_at` and `last_success_at` (the engine's last successful check, null until the first) are UTC. See "Guardian" below |
+| guardian (`/api/guardian`, v0.9.2) | Read-only monitoring of the customer's own exchange accounts through a **separate read-only key** (never an AutoBuy purchase key). It detects and tells; it never trades, withdraws or transfers. Every path answers 404 `Not found` while `GUARDIAN_ENABLED` is off or the caller is not in `GUARDIAN_ALLOWED_EMAILS` (when set), and for another user's or a removed account. `POST /accounts` (3/min; `{exchange: bitget \| bybit \| okx \| binance, api_key, api_secret, passphrase? (required for bitget and okx: 422 with a plain message without it), name (1-80), topology: independent \| sub_account, alert_phone?, alert_email_secondary?, alert_phone_secondary?, telegram_handle?, sms_alerts_enabled (default false)}` → 201 the account; the key is verified against the exchange's own permission report, so one that can trade, withdraw or transfer, or cannot read the account, is refused 400 with a plain message, as is one of the caller's purchase keys (400) and the eleventh account (400); 409 when the same exchange account is already watched (the message names the existing account) or the same key is already in use; the first snapshot, the baseline, is taken in the background and the account shows `baseline_status: seeding` until it is done) · `GET /accounts` · `GET /accounts/{id}` · `PUT /accounts/{id}/key` (3/min; `{api_key, api_secret, passphrase?}` → `{ok: true, message}`; a Bitget or OKX account's new key needs its passphrase too (400 otherwise, before the exchange is asked); the new key must be read-only AND belong to the same exchange account, else 400 with the message and nothing changes, and the refusals the engine pages Minas about are recorded in `guardian_operator_pages`) · `PATCH /accounts/{id}` (`alert_phone`, `alert_email_secondary`, `alert_phone_secondary`, `telegram_handle` (null clears), `sms_alerts_enabled`) · `POST /accounts/{id}/disable` · `POST /accounts/{id}/enable` · `DELETE /accounts/{id}` (204: monitoring stops and the key material is scrubbed; the row and its alert/event history are kept, the account is no longer listed). Responses never carry key material or the key fingerprint; `created_at`, `updated_at` and `last_success_at` (the engine's last successful check, null until the first) are UTC. See "Guardian" below |
 | kyc (`/api/kyc`) | `POST /initiate` · `GET /status` · `POST /create-applicant` · `GET /applicant/{id}/status` · `POST /webhook` (Sumsub, HMAC) |
 | auto-buy (`/api/v2/purchases`) | `POST /` (autobuy: wallet required; dca/accumulate: wallet optional; `blockchain_network` is the exchange's chain name (`BTC`, `ERC20`, `TRC20`, `SOL`, `ArbitrumOne`, …; defaults to the coin's native chain); any wallet is validated against that chain's address format and rejected if it is a known burn/unspendable address; on Bitget the pair, minimum order, chain and (for autobuy) the minimum withdrawal are checked live, see "Bitget market data") · `GET /` (with latest transaction) · `GET /{id}` (full history) · `GET /{id}/transactions?status_filter=` · `PUT /{id}` (`status: paused|active`, amount, frequency, `travel_rule_info`, or `purchase_type` switch — switching to `autobuy` requires `wallet_address`, `blockchain_network` and `confirm_wallet_address`) · `POST /{id}/retry-withdrawal` (withdrawal_failed / needs_info only: re-sends the last filled buy's coins, never buys again) · `DELETE /{id}` (cancel, history kept) |
 | wallets (`/api/wallets`) | `POST /` (`blockchain_network` = exchange chain name; the address format must match the chain family: bitcoin mainnet only, EVM `0x…`, Solana base58, Tron `T…`, XRP Ledger `r…`/`X…`, Stellar `G…`/`M…`; tag chains also take `destination_type` + `memo`, see "Destination tag / memo") · `GET /?blockchain_network=` · `DELETE /{id}` |
@@ -142,7 +148,7 @@ verified users.** `kyc_status` cannot be set through the profile API.
 | 400 | Request conflicts with state (duplicate email, nothing to update) |
 | 401 | Missing/invalid/expired/revoked token, or wrong credentials (including a wrong two-factor code at sign-in; a wrong password or code on `/api/user/2fa/*` is 400, so clients do not refresh and replay it) |
 | 403 | Not allowed: admin role required, `csrf_failed`, the withdraw gate, or `mfa_required_for_admin` (an admin without two-factor while `ADMIN_MFA_REQUIRED=1`) |
-| 404 | Not found — including other users' resources (no existence leaks), and every `/api/guardian` path while Guardian is off or hidden from the caller |
+| 404 | Not found — including other users' resources (no existence leaks), and every `/api/guardian` path while Guardian is off (for everyone, anonymous callers included) or hidden from the caller |
 | 409 | Two-factor authentication is already on (`POST /api/user/2fa/enrol`); the exchange account or the key is already being watched (`POST /api/guardian/accounts`) |
 | 413 | Body over 1MB |
 | 422 | Validation failure (amounts, crypto allow-list, addresses, password policy, duplicate active schedule) |
@@ -314,7 +320,10 @@ code can reach an order, withdrawal or transfer endpoint
   lower-case; empty = everyone) narrows it during the private roll-out. The
   decision is server-side and fails closed: a user who cannot see Guardian
   gets 404 `Not found` from every `/api/guardian` path, as if it did not
-  exist (an anonymous caller gets the usual 401 first). `GET /api/user/profile`
+  exist. The flag is checked before the credentials: while it is off, every
+  path is 404 for everyone, anonymous callers included; with it on, an
+  anonymous caller gets the usual 401 and a user outside the allowlist the
+  404. `GET /api/user/profile`
   reports the same decision as `guardian_enabled` (flag AND allowlist) so the
   UI can show or hide the pages; `GET /api/public/meta` reports the raw flag
   only, for the sign-in page's hint, and never the allowlist.
@@ -330,7 +339,13 @@ code can reach an order, withdrawal or transfer endpoint
   exchange account (`exchange_uid`, recorded at onboarding): a valid read-only
   key for a different account would leave the real one unwatched while the
   page said "watching". Refusals are 400 with a plain-language `detail`; the
-  technical reason goes to the log only.
+  technical reason goes to the log only. A Bitget or OKX key needs its
+  passphrase too: the body is refused with a plain message before the
+  exchange is asked. The engine's operator pages (a replacement key for a
+  different account, no recorded account id to check one against, a partial
+  or failed baseline) are recorded in `guardian_operator_pages` through the
+  API as through the worker, and delivered where the operator channels are
+  configured, so a refusal that says Minas has been told is true.
 - **Records.** Adding an account, changing where its alerts go (recorded by
   field name only, never the values), replacing its key, switching it off or
   on and removing it each append a `guardian_events` row attributed to the
@@ -339,9 +354,12 @@ code can reach an order, withdrawal or transfer endpoint
   account no longer appears in the API. All Guardian times are UTC.
 - **Email changes.** Alerts go to `users.email`, so `PUT /api/user/profile`
   with a new `email` needs `current_password` and, when two-factor is on,
-  the current authenticator `code` (400 otherwise; a wrong password counts
-  towards the login lockout). The previous address is emailed about the
-  change, with the new address masked.
+  the current authenticator `code` (400 otherwise; a wrong password or code
+  counts towards the login lockout, and a locked account is refused with 429
+  as at `/login`; 5 a minute). The previous address is emailed about the
+  change, with the new address masked. Known limit: the new address is not
+  verified before it takes effect (a follow-up); the proof is the password
+  and the code, not a link to the new mailbox.
 - **Accounts awaiting activation.** See "Authentication": an account
   created without a password cannot sign in until it has set one through
   the seven-day link, and every attempt re-sends that link at most hourly.
