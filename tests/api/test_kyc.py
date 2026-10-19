@@ -38,8 +38,10 @@ def test_signature_verification(monkeypatch):
 
 
 def test_profile_update_cannot_touch_kyc_status():
-    assert set(ProfileUpdateRequest.model_fields) == {"email"}, \
-        "kyc_status must not be user-writable"
+    fields = set(ProfileUpdateRequest.model_fields)
+    assert "kyc_status" not in fields, "kyc_status must not be user-writable"
+    # The exact writable set: the address, plus the proof an email change needs (v0.9.2).
+    assert fields == {"email", "current_password", "code"}, "a new writable profile field needs a deliberate decision here"
 
 
 @pytest.fixture
