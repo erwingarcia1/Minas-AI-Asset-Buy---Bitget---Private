@@ -18,7 +18,7 @@ import re
 from typing import Optional
 
 __all__ = ["validate_bitcoin_address", "validate_ethereum_address", "validate_solana_address",
-           "get_address_network", "validate_address_for_network", "detect_chain"]
+           "validate_tron_address", "get_address_network", "detect_chain"]
 
 _B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _B58_INDEX = {c: i for i, c in enumerate(_B58_ALPHABET)}
@@ -29,15 +29,39 @@ _BECH32_CONST, _BECH32M_CONST = 1, 0x2BC830A3
 
 # ----------------------------------------------------------------- base58
 
-def _b58decode(s: str) -> Optional[bytes]:
-    if not s or any(c not in _B58_INDEX for c in s):
+def b58decode(s: str, alphabet: str = _B58_ALPHABET) -> Optional[bytes]:
+    """Base58 over `alphabet` (Bitcoin's by default; the XRP Ledger uses a
+    different one). Leading zero bytes are encoded as the alphabet's first
+    character. None when a character is outside the alphabet."""
+    if not s:
         return None
     n = 0
     for c in s:
-        n = n * 58 + _B58_INDEX[c]
+        i = alphabet.find(c)
+        if i < 0:
+            return None
+        n = n * 58 + i
     body = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
-    pad = len(s) - len(s.lstrip("1"))
+    pad = len(s) - len(s.lstrip(alphabet[0]))
     return b"\x00" * pad + body
+
+
+def b58encode(data: bytes, alphabet: str = _B58_ALPHABET) -> str:
+    n = int.from_bytes(data, "big")
+    out = ""
+    while n:
+        n, r = divmod(n, 58)
+        out = alphabet[r] + out
+    return alphabet[0] * (len(data) - len(data.lstrip(b"\x00"))) + out
+
+
+def double_sha256_checksum_ok(payload: bytes) -> bool:
+    """Base58Check: the last 4 bytes equal the first 4 of sha256(sha256(body))."""
+    body, check = payload[:-4], payload[-4:]
+    return hashlib.sha256(hashlib.sha256(body).digest()).digest()[:4] == check
+
+
+_b58decode = b58decode   # former private name
 
 
 def _b58check_payload(s: str) -> Optional[bytes]:
@@ -45,10 +69,9 @@ def _b58check_payload(s: str) -> Optional[bytes]:
     raw = _b58decode(s)
     if raw is None or len(raw) < 5:
         return None
-    data, checksum = raw[:-4], raw[-4:]
-    if hashlib.sha256(hashlib.sha256(data).digest()).digest()[:4] != checksum:
+    if not double_sha256_checksum_ok(raw):
         return None
-    return data
+    return raw[:-4]
 
 
 # ----------------------------------------------------------------- bech32
@@ -144,6 +167,14 @@ def validate_solana_address(address: str) -> bool:
     return raw is not None and len(raw) == 32
 
 
+def validate_tron_address(address: str) -> bool:
+    """True for a Base58Check Tron address: version byte 0x41, 21 bytes, starts with 'T'."""
+    if not isinstance(address, str) or not address.startswith("T") or len(address) != 34:
+        return False
+    data = _b58check_payload(address)
+    return data is not None and len(data) == 21 and data[0] == 0x41
+
+
 def detect_chain(address: str) -> Optional[str]:
     """'bitcoin' | 'ethereum' | 'solana' for a valid address, else None.
     Bitcoin is checked before Solana because base58 alone cannot tell them apart."""
@@ -161,8 +192,7 @@ def get_address_network(address: str) -> Optional[str]:
 
     Only Bitcoin encodes the network in the address. Ethereum and Solana
     addresses are identical on every network, so they report 'mainnet' (the
-    conventional default); use :func:`validate_address_for_network` to accept
-    them for testnet as well. Returns None for an invalid address.
+    conventional default). Returns None for an invalid address.
     """
     chain = detect_chain(address)
     if chain == "bitcoin":
@@ -170,20 +200,3 @@ def get_address_network(address: str) -> Optional[str]:
     if chain in ("ethereum", "solana"):
         return "mainnet"
     return None
-
-
-def validate_address_for_network(address: str, network: str, chain: Optional[str] = None) -> bool:
-    """True when `address` is valid and usable on `network` ('mainnet' | 'testnet').
-
-    Pass `chain` ('bitcoin' | 'ethereum' | 'solana') to also require the
-    address format to match the coin being delivered.
-    """
-    network = (network or "").lower()
-    if network not in ("mainnet", "testnet"):
-        return False
-    actual = detect_chain(address)
-    if actual is None or (chain and actual != chain.lower()):
-        return False
-    if actual == "bitcoin":
-        return _bitcoin_network(address) == network
-    return True  # ethereum / solana: same address on every network

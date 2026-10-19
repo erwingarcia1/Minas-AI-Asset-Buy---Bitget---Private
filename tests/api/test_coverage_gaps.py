@@ -49,21 +49,22 @@ async def test_init_db_skipped_in_production(monkeypatch):
 # ---------------------------------------------------------------- auth refresh
 
 async def test_refresh_happy_path_rotates_tokens(client, user):
-    from api.routes.auth import _create_refresh_token
+    from api.routes.auth import CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE, _create_refresh_token
     refresh = _create_refresh_token(str(user.id))
     async with client as c:
-        r = await c.post("/api/auth/refresh", json={"refresh_token": refresh})
+        r = await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: refresh, CSRF_COOKIE: "c1"}, headers={CSRF_HEADER: "c1"})
     assert r.status_code == 200
     body = r.json()
-    assert body["access_token"] and body["refresh_token"]
+    assert body["access_token"] and body["csrf_token"] and "refresh_token" not in body
+    assert r.cookies.get(REFRESH_COOKIE) not in (None, refresh), "rotated"
 
 
 async def test_refresh_for_deleted_user_401(client):
-    from api.routes.auth import _create_refresh_token
+    from api.routes.auth import CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE, _create_refresh_token
     refresh = _create_refresh_token(str(uuid.uuid4()))
     async with client as c:
-        assert (await c.post("/api/auth/refresh",
-                             json={"refresh_token": refresh})).status_code == 401
+        assert (await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: refresh, CSRF_COOKIE: "c1"},
+                             headers={CSRF_HEADER: "c1"})).status_code == 401
 
 
 async def test_token_without_sub_and_bad_uuid_rejected(client, user):
@@ -206,21 +207,15 @@ async def test_list_and_delete_own_key(client, db, user, binance_key):
 
 # ---------------------------------------------------------------- misc branches
 
-async def test_resend_webhook_stub(client):
-    async with client as c:
-        r = await c.post("/api/webhooks/resend", json={"type": "email.bounced"})
-    assert r.status_code == 202 and r.json() == {"received": True}
-
-
 def test_binance_account_info_and_balance(monkeypatch):
-    import api.services.binance_client as bc_mod
+    import api.services.exchange_client as bc_mod
     class FakeLegacy:
         def __init__(self, **kw): pass
         def _request(self, method, path, params=None, auth=False):
             return {"canTrade": True, "canWithdraw": False, "permissions": ["SPOT"]}
         def get_spot_available(self, coin): return 3.14
     monkeypatch.setattr(bc_mod, "_LegacyClient", lambda **kw: FakeLegacy())
-    c = bc_mod.BinanceClient("k", "s")
+    c = bc_mod.ExchangeClient("k", "s")
     assert c.get_account_info() == {"can_trade": True, "can_withdraw": False, "permissions": ["SPOT"], "permissions_known": True}
     assert c.get_account_balance("BTC") == 3.14
 

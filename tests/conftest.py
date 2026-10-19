@@ -14,9 +14,25 @@ Isolation guarantees:
 * The test database is created if missing and migrated to Alembic head once
   per session. The only sanctioned way to wipe Redis is ``flush_test_redis()``,
   which re-checks the db index before FLUSHDB.
+
+Where a test lives (documented 2026-09-22, audit Batch B4):
+
+* ``tests/api/`` — HTTP-level tests of one router or service through the app,
+  using the ``db`` / ``user`` / ``binance_key`` fixtures and ``auth_headers``
+  from ``tests/api/conftest.py``. One file per router or service module.
+* ``tests/`` (root) — the purchase pipeline end to end: executor, gateway,
+  fill guard, withdrawals, holdings, the /api/v2/purchases flows, and the
+  cross-cutting guards (env plumbing, public proxy). These use
+  ``tests/conftest_autobuy.py`` (``make_purchase``, ``make_key``, ``auth``)
+  and ``tests/fake_gateway.py``. Root-level ``test_bitget_client.py`` /
+  ``test_binance_client.py`` etc. test the exchange transports at the repo root.
+* This file (autouse fixtures) applies to both: Bitget market data is stubbed,
+  fake gateway ids reset, and the isolation guards above hold everywhere.
 """
 import os
 import pathlib
+
+import pytest
 from urllib.parse import urlsplit
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -71,6 +87,15 @@ for var in ("RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_REPLY_TO", "SUPPORT_E
             "APP_NAME", "LOG_RESET_LINKS", "SUMSUB_APP_TOKEN", "SUMSUB_SECRET_KEY", "SUMSUB_WEBHOOK_SECRET",
             "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "FCM_SERVER_KEY", "SLACK_WEBHOOK_URL"):
     os.environ[var] = ""
+# Guardian (v0.9.1) and its SMS transports, pinned to the defaults (off / empty / the compose
+# values): a shell export must not switch the monitor on or point a test at a provider.
+# tests/guardian/conftest.py turns settings.guardian_enabled on per test, on the object.
+os.environ["GUARDIAN_ENABLED"] = "0"
+os.environ["GUARDIAN_METRICS_HOST"] = "0.0.0.0"
+os.environ["GUARDIAN_METRICS_PORT"] = "9109"
+for var in ("GUARDIAN_ALLOWED_EMAILS", "GUARDIAN_RULES_PATH", "GUARDIAN_TELEGRAM_CHAT_ID", "CLICKSEND_USERNAME",
+            "CLICKSEND_API_KEY", "CLICKSEND_FROM", "CLICKSEND_TO_NUMBERS", "TWILIO_TO_NUMBERS"):
+    os.environ[var] = ""
 
 
 def _ensure_test_database() -> None:
@@ -106,3 +131,119 @@ def flush_test_redis() -> None:
     url = os.environ["REDIS_URL"]
     guard_redis_url(url)
     redis.Redis.from_url(url).flushdb()
+
+
+# ------------------------------------------------------------------ Bitget market data stub (no network)
+
+SAMPLE_SYMBOL = {"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT", "minTradeAmount": "0",
+                 "maxTradeAmount": "900000000000000000000", "takerFeeRate": "0.002", "makerFeeRate": "0.002",
+                 "pricePrecision": "2", "quantityPrecision": "6", "quotePrecision": "8", "status": "online",
+                 "minTradeUSDT": "1", "maxMarketOrderValue": "1000000"}
+SAMPLE_CHAINS = {
+    "BTC": [{"chain": "BTC", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.00003",
+             "extraWithdrawFee": "0", "withdrawConfirm": "3", "minWithdrawAmount": "0.0005",
+             "browserUrl": "https://www.blockchain.com/explorer/transactions/btc/", "contractAddress": None, "withdrawMinScale": "8"},
+            {"chain": "BEP20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.00000195",
+             "extraWithdrawFee": "0", "withdrawConfirm": "60", "minWithdrawAmount": "0.00012961",
+             "browserUrl": "https://bscscan.com/tx/", "contractAddress": "0x7130", "withdrawMinScale": "8"},
+            {"chain": "LIGHTNING", "needTag": "false", "withdrawable": "false", "rechargeable": "false", "withdrawFee": "0.00001",
+             "extraWithdrawFee": "0", "withdrawConfirm": "6", "minWithdrawAmount": "0.00002", "browserUrl": "", "withdrawMinScale": "8"}],
+    "ETH": [{"chain": "ERC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.0008",
+             "extraWithdrawFee": "0", "withdrawConfirm": "12", "minWithdrawAmount": "0.001", "browserUrl": "https://etherscan.io/tx/", "withdrawMinScale": "8"},
+            {"chain": "ArbitrumOne", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.0001",
+             "extraWithdrawFee": "0", "withdrawConfirm": "12", "minWithdrawAmount": "0.001", "browserUrl": "https://arbiscan.io/tx/", "withdrawMinScale": "8"}],
+    "USDT": [{"chain": "ERC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.8",
+              "extraWithdrawFee": "0", "withdrawConfirm": "96", "minWithdrawAmount": "10", "browserUrl": "https://etherscan.io/tx/", "withdrawMinScale": "6"},
+             {"chain": "TRC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "1.5",
+              "extraWithdrawFee": "0", "withdrawConfirm": "3", "minWithdrawAmount": "10", "browserUrl": "https://tronscan.org/#/transaction/", "withdrawMinScale": "6"},
+             {"chain": "SOL", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "1",
+              "extraWithdrawFee": "0", "withdrawConfirm": "5", "minWithdrawAmount": "10", "browserUrl": "https://solscan.io/tx/", "withdrawMinScale": "6"}],
+    "USDC": [{"chain": "ERC20", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.8",
+              "extraWithdrawFee": "0", "withdrawConfirm": "96", "minWithdrawAmount": "10", "browserUrl": "https://etherscan.io/tx/", "withdrawMinScale": "6"}],
+    "SOL": [{"chain": "SOL", "needTag": "false", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.008",
+             "extraWithdrawFee": "0", "withdrawConfirm": "5", "minWithdrawAmount": "0.02", "browserUrl": "https://solscan.io/tx/", "withdrawMinScale": "8"}],
+    # tag chains, as live Bitget reported them on 2026-09-16 (needTag true)
+    "XRP": [{"chain": "XRP", "needTag": "true", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.2",
+             "extraWithdrawFee": "0", "withdrawConfirm": "1", "minWithdrawAmount": "5", "browserUrl": "https://xrpscan.com/tx/", "withdrawMinScale": "6"}],
+    "XLM": [{"chain": "StellarLumens", "needTag": "true", "withdrawable": "true", "rechargeable": "true", "withdrawFee": "0.02",
+             "extraWithdrawFee": "0", "withdrawConfirm": "1", "minWithdrawAmount": "57.7433883", "browserUrl": "https://stellar.expert/explorer/public/tx/", "withdrawMinScale": "7"}],
+}
+SAMPLE_ASK = {"BTC": 77042.84, "ETH": 4000.0, "SOL": 200.0, "USDT": 1.0, "USDC": 1.0, "XRP": 2.5, "XLM": 0.35,
+              "DOGE": 0.09179, "SHIB": 0.000005621, "PEPE": 0.000004181, "BONK": 0.000003563}
+
+
+@pytest.fixture(autouse=True)
+def stub_bitget_market(monkeypatch):
+    """Tests never call Bitget: symbol/chain fetchers and the live ask are stubbed
+    with the shapes captured from the real endpoints, and the hour cache is
+    bypassed so every test sees its own stub."""
+    from api.services import bitget_market as bm
+
+    # accumulate-only meme coins as Bitget quoted them on 2026-10-02 (no chains: never withdrawn)
+    MEME_SYMBOLS = {"DOGE": {"pricePrecision": "5", "quantityPrecision": "4"},
+                    "SHIB": {"pricePrecision": "9", "quantityPrecision": "4"},
+                    "PEPE": {"pricePrecision": "9", "quantityPrecision": "0"},
+                    "BONK": {"pricePrecision": "9", "quantityPrecision": "0"}}
+
+    def fetch_symbol(symbol):
+        coin = symbol[:-4] if symbol.endswith("USDT") else symbol
+        if coin in MEME_SYMBOLS:
+            return {**SAMPLE_SYMBOL, "symbol": f"{coin}USDT", "baseCoin": coin, **MEME_SYMBOLS[coin]}
+        if coin not in SAMPLE_CHAINS or coin in ("USDT", "USDC"):   # no USDT/USDT or USDC/USDT spot pair
+            return None
+        return {**SAMPLE_SYMBOL, "symbol": f"{coin}USDT", "baseCoin": coin,
+                "pricePrecision": {"BTC": "2", "ETH": "2", "SOL": "2", "XRP": "4", "XLM": "5"}.get(coin, "2")}
+
+    def fetch_chains(coin):
+        return [dict(c) for c in SAMPLE_CHAINS.get(coin.upper(), [])]
+
+    monkeypatch.setattr(bm, "fetch_symbol", fetch_symbol)
+    monkeypatch.setattr(bm, "fetch_chains", fetch_chains)
+    bm.live_ask_unstubbed = bm.live_ask   # for tests that exercise the real price lookup's error handling
+    monkeypatch.setattr(bm, "live_ask", lambda coin: SAMPLE_ASK.get(coin.upper(), 100.0))
+    bm.cached_real, bm.cached_sync_real = bm._cached, bm._cached_sync   # tests of the cache policy restore these
+    # no cache: each test's stub is authoritative (failures still surface as MarketDataUnavailable, as in production)
+    def _cached_sync(key, producer):
+        try:
+            return producer()
+        except Exception as exc:
+            raise bm.MarketDataUnavailable(f"Bitget market data unavailable for {key}: {exc}") from exc
+
+    async def _cached(key, producer):
+        return _cached_sync(key, producer)
+    monkeypatch.setattr(bm, "_cached_sync", _cached_sync)
+    monkeypatch.setattr(bm, "_cached", _cached)
+    # candles (portfolio chart): no cache, and no network unless a test stubs fetch_page itself
+    from api.services import candles
+
+    def _cached_page(key, ttl, produce):
+        try:
+            return produce()
+        except Exception as exc:
+            raise bm.MarketDataUnavailable(f"Bitget candles unavailable for {key}: {exc}") from exc
+
+    def fetch_page(symbol, granularity, end_ms, rows=candles.PAGE_ROWS):
+        raise RuntimeError("candles.fetch_page is not stubbed in this test")
+    monkeypatch.setattr(candles, "_cached_page", _cached_page)
+    monkeypatch.setattr(candles, "fetch_page", fetch_page)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _withdrawals_enabled_by_default(monkeypatch):
+    """The private-beta withdraw gate (api/services/withdraw_gate.py) is OFF in
+    production by default. Existing suites exercise withdraw-mode purchases end
+    to end, so tests run with withdrawals enabled; the gate's own tests switch
+    it off explicitly."""
+    from api.config import settings
+    monkeypatch.setattr(settings, "withdrawals_enabled", "1")
+    monkeypatch.setattr(settings, "withdraw_allowed_emails_csv", "")
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_gateway_ids():
+    """Exchange ids from the fake gateway restart at ORD-1 / WD-1 for every test."""
+    from tests.fake_gateway import FakeGateway
+    FakeGateway.reset_ids()
+    yield

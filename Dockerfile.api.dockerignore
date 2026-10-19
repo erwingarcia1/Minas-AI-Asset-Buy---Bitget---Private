@@ -17,12 +17,6 @@ htmlcov/
 tests/
 docs/
 frontend/
-mobile/
 data/
 deploy/
-webapp/
-chains/
-memebuy/
-payout/
-safety/
 *.md

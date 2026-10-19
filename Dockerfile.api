@@ -10,13 +10,19 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # The platform reuses the legacy exchange clients at the repo root.
-COPY binance_client.py bitget_client.py bybit_client.py okx_client.py exchange_errors.py ./
+COPY binance_client.py bitget_client.py exchange_errors.py ./
 COPY api/ api/
+COPY guardian/ guardian/
 COPY alembic/ alembic/
 COPY alembic.ini .
 COPY scripts/ scripts/
 COPY templates/ templates/
 COPY deployment/entrypoint.sh /entrypoint.sh
+# The commit this image was built from: /health reports it and scripts/deploy.sh
+# asserts it equals the checkout, so "deployed" always means the code moved.
+ARG GIT_COMMIT=unknown
+LABEL org.opencontainers.image.revision=$GIT_COMMIT
+RUN printf '%s' "$GIT_COMMIT" > /app/GIT_COMMIT
 RUN chmod +x /entrypoint.sh && chown -R autobuy /app
 
 USER autobuy
@@ -25,11 +31,18 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status == 200 else 1)"
 
+# --forwarded-allow-ips "*": the API is only ever reached through the nginx
+# `web` container (port 8000 is published on 127.0.0.1 only), and that nginx
+# overwrites X-Forwarded-For with the one address it verified itself — so
+# request.client is the real visitor and per-IP rate limits are per visitor,
+# not one bucket shared by everyone behind the proxy. Container IPs are
+# dynamic and uvicorn 0.24 takes no CIDR here, hence "*".
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["gunicorn", "api.main:app", \
      "--workers", "4", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
+     "--forwarded-allow-ips", "*", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
      "--timeout", "60", \

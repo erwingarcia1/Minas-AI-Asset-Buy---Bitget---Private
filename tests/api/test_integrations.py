@@ -21,12 +21,12 @@ class VenueRecorder:
     """Fake ExchangeClient capturing which venue and symbol were used."""
     calls = []
 
-    def __init__(self, api_key, api_secret, passphrase="", exchange="binance"):
+    def __init__(self, api_key, api_secret, passphrase="", exchange="binance", account_mode="unknown"):
         self.exchange = exchange
         self.passphrase = passphrase
 
     def spot_symbol(self, base, quote="USDT"):
-        return f"{base}-{quote}" if self.exchange == "okx" else f"{base}{quote}"
+        return f"{base}{quote}"
 
     def execute_order(self, symbol, usdt_amount, dry_run=True, client_oid=None):
         VenueRecorder.calls.append((self.exchange, symbol, self.passphrase))
@@ -45,44 +45,9 @@ class VenueRecorder:
         return {"state": "not_found", "fill": None}
 
 
-async def test_executor_routes_by_purchase_exchange(db, user, monkeypatch):
-    """The Auto-Buy gateway builds the client for the purchase's exchange account:
-    OKX venue, OKX symbol format, decrypted passphrase."""
-    from datetime import timedelta
-    from api.routes.exchange import encrypt_value
-    from api.models import APIKey
-    from api.tasks import purchase_scheduler as ps
-    monkeypatch.setattr(ps, "ExchangeClient", VenueRecorder, raising=False)
-    import api.services.binance_client as bc
-    monkeypatch.setattr(bc, "ExchangeClient", VenueRecorder)
-    VenueRecorder.calls = []
-    key = APIKey(user_id=user.id, exchange="okx",
-                 encrypted_api_key=encrypt_value("okx-key-0000000000"),
-                 encrypted_api_secret=encrypt_value("okx-sec-0000000000"),
-                 encrypted_passphrase=encrypt_value("okx-passphrase"),
-                 verified=True)
-    db.add(key)
-    await db.commit()
-    await make_autobuy_purchase(db, user, crypto="BTC", amount_usd=100, key=key, purchase_type="dca",
-                                next_execution=utcnow() - timedelta(minutes=1))
-    counts = await ps.execute_due_purchases(db, gateway=ps.ExchangeClientGateway(), dry_run=True)
-    assert counts["executed"] == 1
-    assert VenueRecorder.calls == [("okx", "BTC-USDT", "okx-passphrase")]
+async def _instant_sleep(_):
+    return None
 
-
-async def test_okx_key_requires_passphrase(db, user):
-    async with client() as c:
-        r = await c.post("/api/exchange/keys", headers=auth_headers(user),
-                         json={"exchange": "okx", "api_key": "x" * 20,
-                               "api_secret": "y" * 20})
-        assert r.status_code == 422 and "passphrase" in r.text
-        ok = await c.post("/api/exchange/keys", headers=auth_headers(user),
-                          json={"exchange": "okx", "api_key": "x" * 20,
-                                "api_secret": "y" * 20, "passphrase": "p" * 10})
-        assert ok.status_code == 201
-
-
-# ---------------------------------------------------------------- webhooks
 
 @pytest.fixture
 def capture_delivery(monkeypatch):
@@ -103,6 +68,8 @@ def capture_delivery(monkeypatch):
 
 async def _instant_sleep(_):
     return None
+
+
 
 
 async def test_webhook_crud_ping_and_signature(db, user, capture_delivery):
@@ -159,8 +126,8 @@ async def test_purchase_flow_fires_webhooks(db, user, binance_key, capture_deliv
     events = [json.loads(r.content)["event"] for r in delivered]
     assert events == ["purchase.buy_executed", "purchase.withdrawal_sent"]
     buy, wd = (json.loads(r.content)["data"] for r in delivered)
-    assert buy["order_id"] == "ORD-1" and buy["tx_type"] == "buy" and buy["dry_run"] is True
-    assert wd["withdrawal_id"] == "WD-1" and wd["tx_type"] == "withdrawal" and wd["wallet_address"]
+    assert buy["order_id"].startswith("ORD-1-") and buy["tx_type"] == "buy" and buy["dry_run"] is True
+    assert wd["withdrawal_id"].startswith("WD-1-") and wd["tx_type"] == "withdrawal" and wd["wallet_address"]
 
 
 async def test_integrations_listing(db, user, binance_key):
@@ -169,6 +136,7 @@ async def test_integrations_listing(db, user, binance_key):
                              headers=auth_headers(user))).json()
     by = {i["name"]: i for i in items}
     assert by["binance"]["status"] == "connected"
-    assert by["okx"]["status"] == "available"
+    assert by["bitget"]["status"] == "available"
+    assert "okx" not in by and "bybit" not in by
     assert by["webhooks"]["kind"] == "automation"
     assert by["slack"]["kind"] == "alerting"

@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
 import { dashboardAPI } from "@/api/endpoints";
 import { Alert, Loading, StatusBadge } from "@/components/Common";
+import ActiveSince from "@/components/Dashboard/ActiveSince";
 import Analytics from "@/components/Dashboard/Analytics";
-import InvestmentTimeline from "@/components/Dashboard/InvestmentTimeline";
+import PortfolioChart from "@/components/Dashboard/PortfolioChart";
 import { useAsync } from "@/hooks/useAsync";
-import { capitalize, fmtCrypto, fmtDay, fmtUsdt } from "@/utils/format";
+import { capitalize, fmtCrypto, fmtDay, fmtRunTime, fmtUsdt } from "@/utils/format";
 
 function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
@@ -18,13 +19,13 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
 
 export default function Dashboard() {
   const { data, loading, error, reload } = useAsync(
-    () => Promise.all([dashboardAPI.quickStats(), dashboardAPI.overview(), dashboardAPI.timeline(30)])
-      .then(([stats, overview, timeline]) => ({ stats, overview, timeline })),
+    () => Promise.all([dashboardAPI.quickStats(), dashboardAPI.overview()])
+      .then(([stats, overview]) => ({ stats, overview })),
   );
 
   if (loading) return <Loading />;
   if (error || !data) return <Alert kind="error">{error} <button className="ml-2 underline" onClick={() => void reload()}>Retry</button></Alert>;
-  const { stats, overview, timeline } = data;
+  const { stats, overview } = data;
 
   return (
     <div className="space-y-6">
@@ -32,9 +33,15 @@ export default function Dashboard() {
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <Link to="/purchases" className="btn-primary">New purchase</Link>
       </div>
+      <ActiveSince />
       {stats.kyc_status !== "verified" && (
         <Alert kind="warning">Identity not verified — scheduled purchases will not execute. <Link to="/kyc" className="font-medium underline">Verify now</Link></Alert>
       )}
+      {(stats.low_balance ?? []).map((n) => (
+        <div key={n.purchase_id} data-testid="low-balance-banner">
+          <Alert kind="warning">Balance low for your next {n.crypto_symbol} buy on {fmtRunTime(n.next_execution)}. Move USDT into the spot wallet of your exchange sub-account before then. <Link to="/purchases" className="font-medium underline">See purchases</Link></Alert>
+        </div>
+      ))}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Total invested" value={fmtUsdt(stats.total_invested_usdt)} />
         <Stat label="Transactions" value={stats.transaction_count} />
@@ -46,14 +53,28 @@ export default function Dashboard() {
           <h2 className="font-semibold">Holdings</h2>
           {overview.holdings.length === 0 ? <p className="mt-3 text-sm text-slate-500">No completed purchases yet.</p> : (
             <table className="mt-3 w-full text-sm">
-              <thead className="text-left text-slate-500"><tr><th className="py-1">Asset</th><th>Amount</th><th className="text-right">Cost</th></tr></thead>
+              <thead className="text-left text-slate-500"><tr><th className="py-1">Asset</th><th>Acquired</th><th>Where it is</th><th className="text-right">Cost</th></tr></thead>
               <tbody>{overview.holdings.map((h) => (
-                <tr key={h.crypto} className="border-t border-slate-100"><td className="py-2 font-medium">{h.crypto}</td><td>{fmtCrypto(h.total_amount)}</td><td className="text-right">{fmtUsdt(h.total_cost_usdt)}</td></tr>
+                <tr key={h.crypto} className="border-t border-slate-100" data-testid={`holding-${h.crypto}`}>
+                  <td className="py-2 font-medium">{h.crypto}</td>
+                  <td title="Net of the trading fee charged in the coin">{fmtCrypto(h.total_amount)}</td>
+                  <td className="text-slate-600">
+                    {(h.sent_to_wallet ?? 0) > 0
+                      ? <>{fmtCrypto(h.on_exchange ?? h.total_amount)} on exchange · {fmtCrypto(h.sent_to_wallet)} in your wallet</>
+                      : "all on the exchange"}
+                  </td>
+                  <td className="text-right">{fmtUsdt(h.total_cost_usdt)}</td>
+                </tr>
               ))}</tbody>
             </table>
           )}
+          {overview.holdings.length > 0 && (
+            <p className="mt-3 text-xs text-slate-500" data-testid="holdings-note">
+              AutoBuy's holdings count only what it bought for you, so they won't reflect coins you move or add yourself.
+            </p>
+          )}
         </section>
-        <InvestmentTimeline timeline={timeline} />
+        <PortfolioChart />
       </div>
       <section className="card" aria-label="Upcoming purchases">
         <h2 className="font-semibold">Upcoming purchases</h2>

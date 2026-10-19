@@ -83,7 +83,7 @@ async def test_stats_summary_math(client, user, seeded):
         st = (await c.get("/api/transactions/stats/summary", headers=auth_headers(user))).json()
     assert st == {"total_transactions": 4, "total_invested_usdt": 300.0,
                   "average_purchase_usdt": 150.0, "completed_count": 2,
-                  "failed_count": 1, "pending_count": 1}
+                  "failed_count": 1, "pending_count": 1, "needs_review_count": 0}
 
 
 async def test_get_by_id_scoping(client, db, user, seeded):

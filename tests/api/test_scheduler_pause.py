@@ -143,12 +143,15 @@ async def test_pause_state_survives_a_restart(admin):
 async def test_health_reports_the_autobuy_job(db, user, binance_key):
     await make_purchase(db, user, binance_key, next_execution=NOW - timedelta(minutes=1))
     await ps.execute_due_purchases(db, now=NOW, gateway=FakeGateway(), dry_run=True)
+    await ps.poll_withdrawals(db, now=NOW, gateway=FakeGateway())
     async with api() as c:
         h = (await c.get("/health")).json()
     assert "scheduler" not in h, "the legacy per-worker block is gone"
     assert h["dry_run"] is True
     s = h["schedulers"]
-    assert set(s) == {"paused", "paused_since", "paused_by", "autobuy"}
+    assert set(s) == {"paused", "paused_since", "paused_by", "autobuy", "withdrawals"}
+    assert s["withdrawals"]["last_result"] == "ok" and s["withdrawals"]["interval_minutes"] == 10
+    assert set(s["withdrawals"]["last_counts"]) == {"confirmed", "failed", "pending", "skipped"}
     assert s["paused"] is False and s["paused_since"] is None
     assert s["autobuy"]["last_result"] == "ok" and s["autobuy"]["last_run_at"]
     assert s["autobuy"]["last_counts"]["executed"] == 1 and s["autobuy"]["consecutive_failures"] == 0

@@ -76,6 +76,7 @@ def test_deploy_check_accepts_a_good_production_env():
     (("https://app.example.com", "http://app.example.com"), "APP_BASE_URL must start with https://"),
     (("https://app.example.com", "https://localhost:5173"), "localhost"),
     (("LOG_RESET_LINKS=0", "LOG_RESET_LINKS=1"), "LOG_RESET_LINKS=1"),
+    (("LOG_RESET_LINKS=0", "LOG_RESET_LINKS=0\nGUARDIAN_ENABLED=yes"), "GUARDIAN_ENABLED must be 0 or 1"),
     (("SECRET_KEY=" + "s" * 40, "SECRET_KEY="), "SECRET_KEY is not set"),
 ])
 def test_deploy_check_refuses_each_bad_value(replace, expect):
@@ -86,3 +87,10 @@ def test_deploy_check_refuses_each_bad_value(replace, expect):
 def test_deploy_sh_uses_the_library():
     text = (ROOT / "scripts" / "deploy.sh").read_text()
     assert "platform_env_checks.sh" in text and "check_platform_env .env || exit 1" in text
+
+
+def test_deploy_check_accepts_the_guardian_switch_on_or_off():
+    """v0.9.1: the worker and the API key on the exact values 0 and 1."""
+    for value in ("0", "1"):
+        r = run_check(GOOD_ENV.replace("LOG_RESET_LINKS=0", f"LOG_RESET_LINKS=0\nGUARDIAN_ENABLED={value}"))
+        assert r.returncode == 0, (value, r.stderr)

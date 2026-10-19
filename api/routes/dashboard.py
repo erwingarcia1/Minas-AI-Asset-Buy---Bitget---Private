@@ -15,6 +15,9 @@ from api.routes.user import UTCModel, get_current_user, to_db_datetime, utc_now
 from fastapi import Request
 from api.services.rate_limit import limiter, user_or_ip_key
 
+import logging
+
+logger = logging.getLogger("autobuy.dashboard")
 router = APIRouter()
 
 
@@ -23,9 +26,16 @@ router = APIRouter()
 # --------------------------------------------------------------------------
 
 class CryptoHolding(BaseModel):
+    """What the customer owns of a coin and where it is. total_amount is the
+    quantity ACQUIRED (net of the trading fee charged in the coin); on_exchange
+    is what is still on Bitget after real withdrawals (matches Bitget's balance);
+    sent_to_wallet is what those withdrawals delivered."""
     crypto: str
-    total_amount: float
+    total_amount: float          # acquired, net of the coin-denominated trading fee
+    on_exchange: float = 0.0
+    sent_to_wallet: float = 0.0
     total_cost_usdt: float
+    price_precision: int = 8   # decimals Bitget quotes the pair in (for any price derived from these figures)
 
 
 class ActivePurchase(UTCModel):
@@ -57,11 +67,19 @@ class DashboardResponse(BaseModel):
     monthly_average_usdt: float
 
 
+class LowBalanceNotice(UTCModel):
+    purchase_id: UUID
+    crypto_symbol: str
+    amount_usd: float
+    next_execution: datetime
+
+
 class QuickStats(BaseModel):
     total_invested_usdt: float
     transaction_count: int
     active_purchases: int
     kyc_status: str
+    low_balance: List[LowBalanceNotice] = []   # active purchases with an outstanding low-balance warning
 
 
 class TimelinePoint(BaseModel):
@@ -75,14 +93,48 @@ class TimelineResponse(BaseModel):
     timeline: List[TimelinePoint]
 
 
+class SeriesPoint(BaseModel):
+    t: int                 # unix seconds, end of the bucket (the last point is "now")
+    value: float           # holdings at t x price at t, USDT
+    invested: float        # cumulative cost of buys executed at or before t, USDT
+
+
+class SeriesBuy(BaseModel):
+    t: int
+    crypto: str
+    amount: float          # net acquired
+    cost_usd: float
+
+
+class PortfolioSeriesResponse(BaseModel):
+    """Portfolio value over a range: history from Bitget candle closes, the last
+    point at the same current price the performance card uses. A bucket with
+    no candle carries the previous close forward (carried_forward counts them)."""
+    range: str
+    granularity: str
+    bucket_seconds: int
+    points: List[SeriesPoint]
+    buys: List[SeriesBuy]
+    current_value: Optional[float] = None    # None when no coin could be priced now
+    invested: float
+    change_usdt: Optional[float] = None      # value change over the range, excluding what buys in the range added
+    change_pct: Optional[float] = None
+    carried_forward: int = 0
+    unpriced: List[str] = []
+    note: str
+
+
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
 
 async def _holdings(db: AsyncSession, user_id) -> List[CryptoHolding]:
     """Successful Auto-Buy buys summed per coin (purchase_transactions)."""
-    return [CryptoHolding(crypto=c, total_amount=round(a, 8), total_cost_usdt=round(cost, 8))
-            for c, a, cost in await history.holdings(db, user_id)]
+    from api.services import bitget_market
+    return [CryptoHolding(crypto=pos.crypto, total_amount=pos.acquired, on_exchange=pos.on_exchange,
+                          sent_to_wallet=pos.sent_to_wallet, total_cost_usdt=round(pos.cost_usd, 8),
+                          price_precision=await bitget_market.price_precision_async(pos.crypto))
+            for pos in await history.positions(db, user_id)]
 
 
 # --------------------------------------------------------------------------
@@ -136,11 +188,17 @@ async def quick_stats(
             )
         )
     ).scalar_one()
+    from api.services.low_balance import low_balance_outstanding
+    flagged = (await db.execute(select(Purchase).where(
+        Purchase.user_id == current_user.id, Purchase.status == "active",
+        Purchase.low_balance_alerted_for.is_not(None)).order_by(Purchase.next_execution.asc()))).scalars().all()
     return QuickStats(
         total_invested_usdt=round(float(total_invested), 8),
         transaction_count=tx_count,
         active_purchases=active_count,
         kyc_status=current_user.kyc_status,
+        low_balance=[LowBalanceNotice(purchase_id=p.id, crypto_symbol=p.crypto_symbol, amount_usd=p.amount_usd,
+                                      next_execution=p.next_execution) for p in flagged if low_balance_outstanding(p)],
     )
 
 
@@ -153,3 +211,28 @@ async def analytics_timeline(
     """Daily successful-buy totals for the last `days` days (zero-filled)."""
     points = await history.timeline(db, current_user.id, days, now=utc_now())
     return TimelineResponse(days=days, timeline=[TimelinePoint(**pt) for pt in points])
+
+
+@router.get("/portfolio/series", response_model=PortfolioSeriesResponse,
+            responses={503: {"description": "Bitget candles unavailable and nothing cached"}})
+@limiter.limit("30/minute", key_func=user_or_ip_key)
+async def portfolio_series(
+    request: Request, response: Response,
+    range: str = Query("30D", pattern="^(1D|7D|30D|90D|All)$"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only. Portfolio value and amount invested over the range, built from
+    this customer's successful buys and Bitget candles (see
+    api/services/portfolio_series.py). 503 when Bitget is unreachable and no
+    candle page is cached; the rest of the dashboard is unaffected."""
+    from fastapi import HTTPException
+    from api.services import portfolio_series as ps
+    from api.services.bitget_market import MarketDataUnavailable, UNAVAILABLE_MESSAGE
+    try:
+        series = await ps.build(db, current_user.id, range)
+    except MarketDataUnavailable as exc:
+        logger.warning("portfolio series: candles unavailable for user %s: %s", current_user.id, exc)
+        raise HTTPException(status_code=503, detail={"error": "exchange_data_unavailable",
+                                                    "details": {"message": UNAVAILABLE_MESSAGE}})
+    return PortfolioSeriesResponse(**series.__dict__)

@@ -18,14 +18,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models import APIKey, Purchase, PurchaseTransaction
 
 DB_SUCCESS = "success"
 API_COMPLETED = "completed"
-API_STATUSES = ("pending", "completed", "failed")
+API_SIMULATED = "simulated"   # a dry-run withdrawal: recorded, nothing was sent
+API_STATUSES = ("pending", "completed", "failed", "simulated")
 
 
 def to_api_status(db_status: str) -> str:
@@ -33,7 +34,74 @@ def to_api_status(db_status: str) -> str:
 
 
 def from_api_status(api_status: str) -> str:
-    return DB_SUCCESS if api_status == API_COMPLETED else api_status
+    return DB_SUCCESS if api_status in (API_COMPLETED, API_SIMULATED) else api_status
+
+
+def is_simulated(tx: PurchaseTransaction) -> bool:
+    return tx.tx_type == "withdrawal" and tx.status == DB_SUCCESS and (tx.raw_status or "") == "simulated"
+
+
+def presented_status(tx: PurchaseTransaction) -> str:
+    """The status shown everywhere (API, UI, emails, CSV): a dry-run
+    withdrawal is "simulated", never "completed"."""
+    return API_SIMULATED if is_simulated(tx) else to_api_status(tx.status)
+
+
+def _trim(text: str, keep: int = 0) -> str:
+    """Trim trailing zeros past `keep` decimals ("1.50000000" -> "1.5"; keep=2: "1.500" -> "1.50")."""
+    if "." not in text:
+        return text
+    whole, frac = text.split(".")
+    frac = frac.rstrip("0")
+    if len(frac) < keep:
+        frac = frac + "0" * (keep - len(frac))
+    return f"{whole}.{frac}" if frac else whole
+
+
+def fmt_amount_plain(value, digits: int = 8) -> str:
+    """Machine-readable coin amount (CSV): at most `digits` decimals, trailing zeros
+    trimmed, no grouping, dot decimal point ("0.00076179", "2389380.228", "0")."""
+    if value is None:
+        return ""
+    return _trim(f"{float(value):.{digits}f}")
+
+
+def fmt_amount(value, digits: int = 8) -> str:
+    """Coin amounts for humans (web, email, Telegram, PDF): thousands separators;
+    at or above 1,000 coins at most 2 decimals ("2,389,380.23 PEPE"), below that
+    at most `digits` decimals, trailing zeros trimmed ("0.00076179", "0.5", "0").
+    Storage keeps full precision."""
+    if value is None:
+        return ""
+    v = float(value)
+    if abs(v) >= 1000:
+        return _trim(f"{v:,.2f}")
+    return _trim(f"{v:,.{digits}f}")
+
+
+def _price_decimals(value: float, min_significant: int = 4) -> int:
+    """Decimals that show at least `min_significant` significant digits, never fewer than 2, at most 10."""
+    import math
+    if value == 0:
+        return 2
+    return max(2, min(10, min_significant - 1 - math.floor(math.log10(abs(value)))))
+
+
+def fmt_price_plain(value) -> str:
+    """Machine-readable price (CSV): at least 4 significant digits, no grouping ("84487.36", "0.000004181")."""
+    if value is None:
+        return ""
+    v = float(value)
+    return _trim(f"{v:.{_price_decimals(v)}f}", keep=2)
+
+
+def fmt_price(value) -> str:
+    """Price for humans: at least 4 significant digits, never fewer than 2 decimals,
+    thousands separators ("84,487.36", "0.09179", "0.000004181")."""
+    if value is None:
+        return ""
+    v = float(value)
+    return _trim(f"{v:,.{_price_decimals(v)}f}", keep=2)
 
 
 @dataclass
@@ -44,8 +112,9 @@ class HistoryRow:
     crypto: str
     purchase_type: str            # autobuy | dca
     tx_type: str                  # withdrawal | accumulation
-    status: str                   # API vocabulary: pending | completed | failed
-    amount_crypto: float          # coins bought (0 when the buy failed)
+    status: str                   # API vocabulary: pending | completed | failed | simulated (dry-run withdrawal)
+    amount_crypto: float          # coins bought, GROSS fill as Bitget's order history shows it (0 when the buy failed)
+    net_amount: float             # what the account actually received: gross minus the trading fee when it was charged in the coin
     cost_usd: float               # quote spent (the purchase amount when the fill did not report it)
     fill_price: Optional[float]
     fee: Optional[float]
@@ -79,16 +148,65 @@ class HistoryRow:
 BUY_TYPES = ("buy", "accumulation")   # rows that are purchases (lots); "withdrawal" rows move coins
 
 
+def net_of_fee(tx: PurchaseTransaction, coin: str) -> float:
+    """Coins the account actually received from a buy: the gross fill minus the
+    trading fee when Bitget charged it in the coin itself (proved against the
+    live balance on 2026-09-21: 0.000197 BTC bought, fee 1.97e-07 BTC, balance
+    0.000196803). Fees charged in USDT or BGB do not touch the quantity."""
+    if tx.tx_type not in BUY_TYPES:
+        return float(tx.amount_executed or 0.0)
+    amount = float(tx.amount_executed or 0.0)
+    if tx.fee and (tx.fee_currency or "").upper() == (coin or "").upper():
+        amount = max(amount - float(tx.fee), 0.0)
+    return amount
+
+
+def withdrawal_fee_mode(tx: PurchaseTransaction) -> Optional[str]:
+    """The fee mode a withdrawal row was SENT under, never today's configuration.
+    Since migration 025 the executor stores it in withdrawal_fee_mode; rows
+    older than that are derived from what they recorded at send time:
+      exclusive: Bitget charged the fee on top -> expected_received == amount_executed
+      inclusive: Bitget took the fee out of the size -> expected_received == amount_executed - fee
+    None when nothing was recorded (pre-2026-09-14 rows)."""
+    if tx.tx_type != "withdrawal":
+        return None
+    if tx.withdrawal_fee_mode in ("exclusive", "inclusive"):
+        return tx.withdrawal_fee_mode
+    if tx.expected_received is None or tx.amount_executed is None:
+        return None
+    if abs(float(tx.expected_received) - float(tx.amount_executed)) < 1e-12:
+        return "exclusive"
+    return "inclusive"
+
+
+def withdrawal_movement(tx: PurchaseTransaction) -> Tuple[float, float, Optional[str]]:
+    """(left_exchange, received_by_wallet, mode) for a successful, real withdrawal.
+    exclusive: left = size + fee, received = size.  inclusive: left = size, received = size - fee.
+    A row with no recorded mode uses the mode configured NOW and is reported as such
+    (only pre-2026-09-14 simulated rows on the dev database; none in production)."""
+    size = float(tx.amount_executed or 0.0)
+    fee = float(tx.withdrawal_fee or 0.0)
+    mode = withdrawal_fee_mode(tx)
+    if mode is None:
+        from api.services.bitget_market import fee_mode
+        mode = fee_mode()
+    if mode == "exclusive":
+        return size + fee, size, mode
+    return size, max(size - fee, 0.0), mode
+
+
 def _row(tx: PurchaseTransaction, p: Purchase, exchange: Optional[str]) -> HistoryRow:
     amount = float(tx.amount_executed or 0.0)
     if tx.cost_usd is not None:
         cost = tx.cost_usd
+    elif tx.tx_type in BUY_TYPES and tx.status == DB_SUCCESS:
+        cost = float(p.amount_usd)   # older successful buys without a recorded quote
     else:
-        cost = float(p.amount_usd) if tx.tx_type in BUY_TYPES else 0.0
+        cost = 0.0   # a failed or pending attempt spent nothing
     return HistoryRow(
         id=tx.id, purchase_id=p.id, user_id=p.user_id, crypto=p.crypto_symbol,
-        purchase_type=p.purchase_type, tx_type=tx.tx_type, status=to_api_status(tx.status),
-        amount_crypto=amount, cost_usd=float(cost), fill_price=tx.fill_price,
+        purchase_type=p.purchase_type, tx_type=tx.tx_type, status=presented_status(tx),
+        amount_crypto=amount, net_amount=net_of_fee(tx, p.crypto_symbol), cost_usd=float(cost), fill_price=tx.fill_price,
         fee=tx.fee, fee_currency=tx.fee_currency, exchange=exchange,
         order_id=tx.order_id or (tx.exchange_tx_id if tx.tx_type == "accumulation" else None),
         withdrawal_id=tx.withdrawal_id or (tx.exchange_tx_id if tx.tx_type == "withdrawal" else None),
@@ -113,6 +231,11 @@ def _filters(user_id=None, status: Optional[str] = None, crypto: Optional[str] =
         where.append(Purchase.user_id == user_id)
     if status is not None:
         where.append(PurchaseTransaction.status == from_api_status(status))
+        simulated = (PurchaseTransaction.tx_type == "withdrawal") & (PurchaseTransaction.raw_status == "simulated")
+        if status == API_SIMULATED:
+            where.append(simulated)
+        elif status == API_COMPLETED:
+            where.append(~simulated)
     if crypto is not None:
         where.append(Purchase.crypto_symbol == crypto.strip().upper())
     if since is not None:
@@ -157,6 +280,11 @@ async def completed_rows(db: AsyncSession, user_id, *, since: Optional[datetime]
 # ------------------------------------------------------------------ aggregates
 
 async def stats(db: AsyncSession, user_id) -> dict:
+    """The rule: total_invested_usdt, average_purchase_usdt and completed_count
+    are computed over the SAME set of rows — successful buys only. Failed and
+    pending attempts and withdrawal rows never add cost and are never averaged;
+    they are reported separately (failed_count, pending_count) and
+    total_transactions counts every row of every kind for the history table."""
     ok = (PurchaseTransaction.status == DB_SUCCESS) & PurchaseTransaction.tx_type.in_(BUY_TYPES)
     cost = func.coalesce(PurchaseTransaction.cost_usd, Purchase.amount_usd)
     row = (await db.execute(
@@ -164,28 +292,87 @@ async def stats(db: AsyncSession, user_id) -> dict:
                func.coalesce(func.sum(cost).filter(ok), 0.0),
                func.coalesce(func.avg(cost).filter(ok), 0.0),
                func.count(PurchaseTransaction.id).filter(ok),
-               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "failed"),
-               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "pending"))
+               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "failed",
+                                                          PurchaseTransaction.tx_type.in_(BUY_TYPES)),
+               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "pending"),
+               func.count(PurchaseTransaction.id).filter(PurchaseTransaction.status == "needs_review"))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
         .where(Purchase.user_id == user_id))).one()
     return {"total_transactions": row[0], "total_invested_usdt": round(float(row[1]), 8),
             "average_purchase_usdt": round(float(row[2]), 8), "completed_count": row[3],
-            "failed_count": row[4], "pending_count": row[5]}
+            "failed_count": row[4], "pending_count": row[5], "needs_review_count": row[6]}
 
 
-async def holdings(db: AsyncSession, user_id) -> List[Tuple[str, float, float]]:
-    """[(crypto, total_amount, total_cost_usd)] over successful buys, biggest cost first."""
+async def count_network_failures_since(db: AsyncSession, since: datetime) -> int:
+    """Failed buy attempts caused by the exchange being unreachable (DNS, timeouts,
+    connection errors) rather than by the order itself — a run that silently
+    could not happen."""
+    from sqlalchemy import or_
+    err = PurchaseTransaction.error_message
+    q = (select(func.count(PurchaseTransaction.id))
+         .where(PurchaseTransaction.status == "failed", PurchaseTransaction.tx_type.in_(BUY_TYPES),
+                PurchaseTransaction.created_at >= since,
+                or_(err.ilike("%NETWORK%"), err.ilike("%name resolution%"), err.ilike("%timed out%"),
+                    err.ilike("%ConnectionError%"), err.ilike("%unreachable%"))))
+    return int((await db.execute(q)).scalar_one())
+
+
+@dataclass
+class Position:
+    """What a customer owns of one coin and where it is. All three quantities
+    come from recorded rows only (see net_of_fee / withdrawal_movement)."""
+    crypto: str
+    acquired: float          # Σ net buys: gross fill − trading fee charged in the coin
+    on_exchange: float       # acquired − Σ what each real withdrawal took off the Bitget balance
+    sent_to_wallet: float    # Σ what each real withdrawal delivered to the destination
+    cost_usd: float          # Σ quote spent on those buys
+    withdrawals: int         # real (non-simulated) successful withdrawals counted
+    fee_modes: List[str]     # distinct modes those withdrawals were sent under
+
+
+async def positions(db: AsyncSession, user_id) -> List[Position]:
+    """Per coin, biggest cost first. Buys are summed net of the coin-denominated
+    trading fee; successful real withdrawals are subtracted per the mode each
+    was sent under. Simulated (dry-run) withdrawals move nothing."""
     cost = func.coalesce(PurchaseTransaction.cost_usd, Purchase.amount_usd)
+    fee_in_coin = case((func.upper(func.coalesce(PurchaseTransaction.fee_currency, "")) == func.upper(Purchase.crypto_symbol),
+                        func.coalesce(PurchaseTransaction.fee, 0.0)), else_=0.0)
+    net = func.coalesce(PurchaseTransaction.amount_executed, 0.0) - fee_in_coin
     rows = (await db.execute(
-        select(Purchase.crypto_symbol,
-               func.coalesce(func.sum(PurchaseTransaction.amount_executed), 0.0),
-               func.coalesce(func.sum(cost), 0.0))
+        select(Purchase.crypto_symbol, func.coalesce(func.sum(net), 0.0), func.coalesce(func.sum(cost), 0.0))
         .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
         .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
                PurchaseTransaction.tx_type.in_(BUY_TYPES))
         .group_by(Purchase.crypto_symbol)
         .order_by(func.sum(cost).desc()))).all()
-    return [(r[0], float(r[1]), float(r[2])) for r in rows if float(r[1]) > 0]
+    out = {r[0]: Position(crypto=r[0], acquired=float(r[1]), on_exchange=float(r[1]), sent_to_wallet=0.0,
+                          cost_usd=float(r[2]), withdrawals=0, fee_modes=[]) for r in rows if float(r[1]) > 0}
+    wds = (await db.execute(
+        select(PurchaseTransaction, Purchase.crypto_symbol)
+        .join(Purchase, PurchaseTransaction.purchase_id == Purchase.id)
+        .where(Purchase.user_id == user_id, PurchaseTransaction.status == DB_SUCCESS,
+               PurchaseTransaction.tx_type == "withdrawal"))).all()
+    for tx, coin in wds:
+        if is_simulated(tx) or coin not in out:
+            continue
+        left, received, mode = withdrawal_movement(tx)
+        pos = out[coin]
+        pos.on_exchange = max(pos.on_exchange - left, 0.0)
+        pos.sent_to_wallet += received
+        pos.withdrawals += 1
+        if mode not in pos.fee_modes:
+            pos.fee_modes.append(mode)
+    for pos in out.values():
+        pos.acquired, pos.on_exchange, pos.sent_to_wallet = (round(pos.acquired, 10), round(pos.on_exchange, 10),
+                                                             round(pos.sent_to_wallet, 10))
+    return list(out.values())
+
+
+async def holdings(db: AsyncSession, user_id) -> List[Tuple[str, float, float]]:
+    """[(crypto, acquired, total_cost_usd)] over successful buys, NET of the
+    coin-denominated trading fee, biggest cost first. Feeds P&L, average buy
+    price and cost shares: invested cost bought the acquired quantity."""
+    return [(p.crypto, p.acquired, p.cost_usd) for p in await positions(db, user_id)]
 
 
 async def monthly_average(db: AsyncSession, user_id) -> float:
@@ -252,11 +439,11 @@ async def users_with_activity_since(db: AsyncSession, since: datetime) -> Sequen
 
 
 def group_by_crypto(rows: Iterable[HistoryRow]) -> List[Tuple[str, float, float]]:
-    """[(crypto, amount, cost)] from already-loaded successful rows."""
+    """[(crypto, net amount, cost)] from already-loaded successful rows (net of the coin fee, like holdings)."""
     acc: dict = {}
     for r in rows:
         a, c = acc.get(r.crypto, (0.0, 0.0))
-        acc[r.crypto] = (a + r.amount_crypto, c + r.cost_usd)
+        acc[r.crypto] = (a + r.net_amount, c + r.cost_usd)
     return [(k, v[0], v[1]) for k, v in sorted(acc.items())]
 
 

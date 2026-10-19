@@ -18,6 +18,7 @@ or webhook can never affect execution or another subscriber):
 4. Slack ops alert              – failures, and live (non dry-run) withdrawals
 5. outbound user webhooks       – ``purchase.<event>`` signed POSTs
 6. metrics                      – ``transactions_total`` counter
+7. Telegram ops alert           – every event, masked, rate limited (api/services/telegram.py)
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, List, Optional
 
 from api.models import Purchase, PurchaseTransaction, User
+from api.services.history import fmt_amount, presented_status
 
 logger = logging.getLogger("autobuy.events")
 
@@ -54,7 +56,7 @@ class PurchaseEvent:
         return {
             "event": self.type, "transaction_id": str(tx.id), "purchase_id": str(self.purchase.id),
             "crypto": self.purchase.crypto_symbol, "purchase_type": self.purchase.purchase_type,
-            "tx_type": tx.tx_type, "status": tx.status, "amount_crypto": tx.amount_executed,
+            "tx_type": tx.tx_type, "status": presented_status(tx), "amount_crypto": tx.amount_executed,
             "cost_usd": tx.cost_usd, "fill_price": tx.fill_price, "fee": tx.fee, "fee_currency": tx.fee_currency,
             "exchange": self.exchange, "order_id": tx.order_id, "withdrawal_id": tx.withdrawal_id,
             "wallet_address": self.purchase.wallet_address if tx.tx_type == "withdrawal" else None,
@@ -97,6 +99,22 @@ async def _notification_email(db, event: PurchaseEvent) -> None:
         return
     if event.type == "buy_executed" and event.purchase.purchase_type == "autobuy":
         return
+    if event.type in ("buy_executed", "withdrawal_sent"):
+        from api.services.notifications import Preferences
+        if not Preferences.for_user(event.user).wants_email("email_purchase_confirmations"):
+            logger.info("purchase confirmation email skipped (opted out): user=%s", event.user.id)
+            return
+    if event.type == "buy_failed":
+        # One email per failed CYCLE, not per attempt: nothing on attempts 1 and 2 (they retry
+        # minutes later); one email when the cycle is exhausted (missed, next attempt named)
+        # and a distinct one when the purchase is stopped. A one-time purchase exhausts its
+        # attempts within ~15 minutes, so it still hears the same day.
+        x = event.extra or {}
+        if not (x.get("cycle_exhausted") or x.get("stopped")):
+            logger.info("buy_failed email withheld until the cycle is exhausted: purchase=%s attempt %s/%s",
+                        event.purchase.id, event.attempt, event.max_attempts)
+            return
+    # failure emails (buy_failed, withdrawal_failed, withdrawal_needs_info) are never optional
     await email_service.send_purchase_event_email(event.user.email, event)
 
 
@@ -120,14 +138,21 @@ async def _dispatcher(db, event: PurchaseEvent) -> None:
         await dispatcher.notify(
             db, event.user, template="purchase_executed",
             subject=f"Bought {p.crypto_symbol}",
-            body=f"{(tx.amount_executed or 0):.8f} {p.crypto_symbol} for {(tx.cost_usd or p.amount_usd):.2f} USD"
-                 + (f", sent to {p.wallet_address}" if event.type == "withdrawal_sent" else ", held on the exchange"),
+            body=f"{fmt_amount(tx.amount_executed or 0)} {p.crypto_symbol} for {(tx.cost_usd or p.amount_usd):.2f} USD"
+                 + (f", withdrawal to {p.wallet_address} simulated (nothing was sent)" if event.type == "withdrawal_sent" and presented_status(tx) == "simulated"
+                    else f", sent to {p.wallet_address}" if event.type == "withdrawal_sent" else ", held on the exchange"),
             critical=(tx.cost_usd or p.amount_usd) >= LARGE_TRANSACTION_USDT, include_email=False)
     else:
+        body = str(event.error or "")[:200]
+        if event.type == "buy_failed":
+            from api.services import failure_text as ft
+            cls = ft.classify(body)
+            if cls != ft.UNKNOWN or event.tx.tx_type == "buy":
+                body = ft.in_app_line(cls, p.crypto_symbol)
         await dispatcher.notify(
             db, event.user, template="purchase_failed",
             subject=f"{'Withdrawal' if event.type == 'withdrawal_failed' else 'Purchase'} failed: {p.crypto_symbol}",
-            body=str(event.error or "")[:200], critical=True, include_email=False)
+            body=body, critical=True, include_email=False)
 
 
 @subscribe
@@ -141,13 +166,22 @@ async def _slack(db, event: PurchaseEvent) -> None:
                          f"{str(event.error or '')[:200]}. Check the exchange before doing anything; "
                          "the purchase will not be retried automatically.")
         return
+    if event.type == "buy_failed":
+        # per-attempt buy failures are collapsed into one Slack line per scheduler run
+        # (see purchase_scheduler.execute_due_purchases); a stopped purchase is worth its own line
+        x = event.extra or {}
+        if x.get("stopped"):
+            await send_slack(f":octagonal_sign: AutoBuy PURCHASE STOPPED: {p.crypto_symbol} {p.amount_usd:.2f} USD "
+                             f"via {event.exchange or '?'} for user {event.user.id} after {p.failure_count} failed attempts"
+                             f"{', dry run' if event.dry_run else ''}: {str(event.error or '')[:200]} — needs a human "
+                             "(admin force-retry after fixing the cause, or the customer recreates it)")
+        return
     if event.type in FAILURE_EVENTS:
         await send_slack(f":x: AutoBuy {event.type.replace('_', ' ')}: {p.crypto_symbol} "
-                         f"{p.amount_usd:.2f} USD via {event.exchange or '?'} for user {event.user.id} "
-                         f"(attempt {event.attempt}/{event.max_attempts}{', dry run' if event.dry_run else ''}): "
-                         f"{str(event.error or '')[:200]}")
+                         f"{p.amount_usd:.2f} USD via {event.exchange or '?'} for user {event.user.id}"
+                         f"{', dry run' if event.dry_run else ''}: {str(event.error or '')[:200]}")
     elif event.type == "withdrawal_sent" and not event.dry_run:
-        await send_slack(f":outbox_tray: AutoBuy withdrawal sent: {(event.tx.amount_executed or 0):.8f} "
+        await send_slack(f":outbox_tray: AutoBuy withdrawal sent: {fmt_amount(event.tx.amount_executed or 0)} "
                          f"{p.crypto_symbol} to {p.wallet_address} ({p.blockchain_network}) "
                          f"via {event.exchange or '?'}, withdrawal {event.tx.withdrawal_id}")
 
@@ -164,3 +198,9 @@ async def _metrics(db, event: PurchaseEvent) -> None:
     if event.type in ("buy_executed", "buy_failed", "buy_needs_review"):
         label = {"buy_executed": "completed", "buy_failed": "failed", "buy_needs_review": "needs_review"}[event.type]
         transactions_total.labels(label, event.purchase.crypto_symbol).inc()
+
+
+@subscribe
+async def _telegram(db, event: PurchaseEvent) -> None:
+    from api.services import telegram
+    await telegram.on_purchase_event(event)

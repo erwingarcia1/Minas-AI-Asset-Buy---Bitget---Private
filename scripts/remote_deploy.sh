@@ -2,23 +2,24 @@
 # One-command deploy from your laptop: SSH into the AWS server and run
 # scripts/deploy.sh there. All arguments are passed straight through:
 #
-#   bash scripts/remote_deploy.sh                    # update the live bot
+#   bash scripts/remote_deploy.sh                    # deploy the platform stack
 #   bash scripts/remote_deploy.sh --check            # read-only: what would change?
-#   bash scripts/remote_deploy.sh platform           # deploy the platform API stack
-#   bash scripts/remote_deploy.sh all --force        # both stacks, discard server-local git state
+#   bash scripts/remote_deploy.sh --force            # discard server-local git state first
 #
 # The LOCAL copy of scripts/deploy.sh is streamed over SSH, so this works even
 # when the server's checkout doesn't have the script yet (first deploy).
 #
 # Overrides (env vars):
 #   SSH_KEY     path to the .pem   (default: <repo>/Minas-AI-Guardian-Execution-Key-Tokyo.pem)
-#   SERVER      user@host          (default: the Tokyo EC2 box)
+#   SERVER      user@host          (default: ubuntu@$SERVER_HOST from scripts/lib/server_host.sh)
+#   SERVER_HOST the box's address    (default: the Tokyo Elastic IP; the only place it is written)
 #   REMOTE_DIR  repo path on server (default: ~/autobuy)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_KEY="${SSH_KEY:-$REPO_ROOT/Minas-AI-Guardian-Execution-Key-Tokyo.pem}"
-SERVER="${SERVER:-ubuntu@ec2-18-179-57-78.ap-northeast-1.compute.amazonaws.com}"
+# shellcheck source=scripts/lib/server_host.sh
+. "$REPO_ROOT/scripts/lib/server_host.sh"      # SERVER (user@host); override SERVER_HOST / SERVER_USER / SERVER
 REMOTE_DIR="${REMOTE_DIR:-\$HOME/autobuy}"
 
 if [ ! -f "$SSH_KEY" ]; then

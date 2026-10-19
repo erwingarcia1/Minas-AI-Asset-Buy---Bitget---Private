@@ -31,7 +31,7 @@ The schema is versioned with Alembic; migration scripts live in `alembic/version
 alembic upgrade head
 ```
 
-**Create a new migration after changing `api/models.py`:**
+**Create a new migration after changing `api/models/`:**
 
 ```bash
 alembic revision --autogenerate -m "describe the change"
@@ -76,6 +76,11 @@ alembic upgrade head # apply the real fixes (002+)
 | `010`–`013` | Auto-Buy: `wallets`, `purchases`, `purchase_transactions` (+ purchase_type / tx_type enums, fill details). `purchase_transactions` is the only execution history |
 | `014` | Drops the retired legacy tables `transactions` and `recurring_purchases` (take a `pg_dump` first; the downgrade recreates them empty) |
 | `015` | `api_keys.verification_status` / `verification_error` / `verified_at` / `last_checked_at` / `withdrawal_enabled`, backfilled from the old boolean |
+| `016`–`021` | Exchange chain names for withdrawals, Bitget market data, travel-rule fields, key permissions, withdrawal sizing / optional chain |
+| `022` | `users.wallet_hold_until` / `wallet_hold_reason`: 24-hour hold on new withdrawal destinations after a password reset or change |
+| `023` | `destination_type` / `memo` on wallets and purchases, `withdrawal_memo` on transaction rows (XRP Ledger / Stellar tags) |
+| `024` | CHECK: an exchange destination must carry a memo (wallets, purchases) |
+| `025` | `purchase_transactions.withdrawal_fee_mode`: the fee mode each withdrawal was sent under |
 
 ## Running tests
 
@@ -107,7 +112,7 @@ npm run build    # dist/ for nginx
 
 `VITE_API_BASE_URL=/api` in both `.env.development` and `.env.production`, so
 the app always talks to the origin it was served from: the Vite proxy in
-development, nginx in production (web vhost in `deployment/nginx.conf`). The
+development, nginx in production (`deployment/nginx.web.conf`, fronted by caddy for TLS). The
 API's `ALLOWED_ORIGINS` default already includes `http://localhost:5173`; set
 `APP_BASE_URL` to the same origin so emailed links open the app. The Sumsub
 KYC page embeds the official WebSDK (`@sumsub/websdk-react`, pinned).
@@ -146,7 +151,6 @@ docker compose --profile monitoring up -d   # optional Prometheus on :9090
 Production refuses to boot on a default/short `SECRET_KEY` or missing
 `ENCRYPTION_KEY`. Orders are **simulated** unless `AUTOBUY_DRY_RUN=0`.
 
-- Reverse proxy/TLS: `deployment/nginx.conf` (keeps `/metrics` private)
+- Reverse proxy/TLS: caddy (`deployment/caddy/Caddyfile`) in front of nginx (`deployment/nginx.web.conf`, which keeps `/metrics` private)
 - Metrics + alert thresholds + runbook: `docs/ALERTING.md`
 - Dev in-container reload: `docker-compose.dev.yml` override
-- Kubernetes: `deployment/kubernetes.yaml` is a stub; compose is the supported path

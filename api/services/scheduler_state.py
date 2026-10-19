@@ -29,7 +29,7 @@ from api.config import settings
 
 logger = logging.getLogger("autobuy.scheduler_state")
 
-SCHEDULERS = ("autobuy",)
+SCHEDULERS = ("autobuy", "withdrawals")
 PAUSE_KEY = "autobuy:schedulers:paused"
 _HEARTBEAT_KEY = "autobuy:schedulers:{name}:last_run"
 _FAILURES_KEY = "autobuy:schedulers:{name}:consecutive_failures"

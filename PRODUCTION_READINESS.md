@@ -1,6 +1,6 @@
 # AutoBuy Crypto Platform — Production Readiness Report
 
-**Report generated:** 2026-09-01 · **Version:** 0.4.1 · **Target launch window:** Oct 26–30, 2026
+**Report generated:** 2026-09-01, figures refreshed 2026-09-22 · **Version:** 0.6.5 · **Target launch window:** Oct 26–30, 2026
 **Status:** 🟡 **Staging-ready now — production launch gated on the prerequisites checklist below**
 
 ## Phase completion status
@@ -8,11 +8,11 @@
 ### Phase 1: MVP Foundation ✅ COMPLETE (Sprint 0)
 - [x] Async FastAPI + PostgreSQL 16 + Redis 7
 - [x] JWT auth (Argon2, access/refresh separation)
-- [x] Full API surface (auth, user, kyc, exchange, purchases, transactions, dashboard, analytics — 35+ endpoints)
-- [x] Alembic migrations (5 revisions) with cascade-safety fix — deleting a schedule preserves its history
+- [x] Full API surface (auth, user, kyc, exchange, purchases, transactions, dashboard, analytics, admin, market — 85 routes as of 2026-09-22)
+- [x] Alembic migrations (25 revisions as of 2026-09-22) — deleting a purchase preserves its history
 
 ### Phase 2: Automation ✅ COMPLETE (Sprints 1–2)
-- [x] Purchase execution on Binance (reusing the battle-tested legacy client; due-date idempotency)
+- [x] Purchase execution on Bitget (the only venue enabled; client-order-id idempotency, fill guard, reconciliation before retry)
 - [x] ~~APScheduler recurring automation~~ retired 2026-09-11: the Auto-Buy `execute_purchases` job (5-minute interval, advisory lock, Redis pause switch, 3 attempts per purchase) is the only executor
 - [x] Email notifications (Resend, fire-and-forget) + KYC via Sumsub (self-serve verification hole closed)
 - [x] Exchange key verification gating the executor
@@ -22,7 +22,7 @@
 
 ### Phase 3: Production Deployment ✅ COMPLETE (Sprint 3)
 - [x] Prometheus /metrics + alert thresholds + runbook (docs/ALERTING.md); CRITICAL alert on 5 consecutive execution failures (tested)
-- [x] Dockerfile.api: migrations-on-boot → gunicorn ×4 uvicorn workers; compose prod/monitoring profiles; nginx config
+- [x] Dockerfile.api: migrations-on-boot → gunicorn ×4 uvicorn workers; compose prod/monitoring profiles; nginx web config + caddy
 - [x] OpenAPI polish with documentation enforced by tests; docs/API.md, DEPLOYMENT.md, EXAMPLES.md
 - [x] React web app in `frontend/` (typed client, JWT lifecycle, auth-guarded routing, Sumsub WebSDK KYC)
 
@@ -37,7 +37,7 @@
 - [x] ~~Advanced purchases (limit orders, DCA bands, rebalancing plans)~~ dropped with the legacy system on 2026-09-11; one-time buys live on as the Auto-Buy `one_time` frequency
 - [x] Mobile app implemented (auth, dashboard, purchases, activity, settings; offline cache + queued sync)
 - [x] Admin dashboard: RBAC, stats, user management (suspend/delete/KYC-override with audit), transaction audit + CSV, live alerts, scheduler pause/resume
-- [x] Notifications: Twilio SMS + FCM push (credential-gated), preferences, quiet hours with critical override, audit history
+- [ ] Notifications: email works (Resend, queued through the outbox). **SMS (Twilio) and push (FCM) do not work today**: no credentials are configured, and the FCM code targets the legacy `fcm.googleapis.com/fcm/send` endpoint that Google retired in June 2024, so it would fail even with a key. Preferences, quiet hours and audit history exist, but only email is delivered.
 - [x] Tax reporting (FIFO lots, CSV + PDF) and annualized-ROI performance reports
 - [x] Integrations: multi-exchange execution (Bitget/Bybit/OKX via the proven legacy clients), HMAC-signed outbound webhooks, Slack ops alerts
 
@@ -45,10 +45,10 @@
 
 | Metric | Value |
 |---|---|
-| API tests | **190 passed** (+2 perf tests run per-process) |
+| API tests | 626 backend tests (2026-09-22; 300 under `tests/api/`) |
 | E2E tests | 7 flows in `tests/e2e_tests.py`: register→login→profile, purchase→scheduler dry-run, transactions + dashboard, token refresh/revocation, rate limiting (per-IP + per-user), Python SDK against the live app |
-| Frontend tests | vitest suite in `frontend/` (KYC/Sumsub, password reset, purchase form, address validation, dashboard + analytics, admin console) + 7 mobile logic · TypeScript strict, clean; CI job `frontend-tests.yml` builds and tests on every change |
-| Coverage | **93%** on `api/` (CI gate at 85%, GitHub Actions with Postgres+Redis services) |
+| Frontend tests | vitest suite in `frontend/` (KYC/Sumsub, password reset, purchase form, address validation, dashboard + analytics, admin console) · TypeScript strict, clean; CI job `frontend-tests.yml` builds and tests on every change |
+| Coverage | 87% on `api/` (2026-09-22; CI gate at 85%, GitHub Actions with Postgres+Redis services) |
 | Security | bandit clean at high severity; secrets provably absent from logs |
 | Load (4 workers) | p50 18ms / **p95 245ms** @ 10 concurrent; 1,000-purchase scheduler backlog in 32s, zero duplicates |
 
@@ -58,10 +58,10 @@ Each blocker is tracked as a Phase 7 GitHub issue (labels `phase-7`, `production
 
 1. [ ] **Sumsub sandbox→prod credentials** (`SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`, `SUMSUB_WEBHOOK_SECRET`) — integration is mock-tested only; embed the WebSDK widget once credentials exist → #27
 2. [ ] **Resend API key** + verified sending domain → #28
-3. [ ] **Twilio SMS credentials** (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) → #29
-4. [ ] **FCM push service account** (`FCM_SERVICE_ACCOUNT`) → #30
-5. [ ] **Live-trade verification on Binance testnet**, then a small-amount canary with `AUTOBUY_DRY_RUN=0` (today every order is simulated)
-6. [ ] TLS certificate + DNS for `api.autobuy.app`; deploy `deployment/nginx.conf` → #31
+3. [ ] **Twilio SMS credentials** (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) → #29 — SMS does not work today
+4. [ ] **FCM push** → #30 — does not work today: the code reads `FCM_SERVER_KEY` and posts to the legacy FCM endpoint retired in 2024; it needs a rewrite to the HTTP v1 API before any credential helps
+5. [ ] **Small-amount canary withdrawals with real money** on the Tokyo server (`AUTOBUY_DRY_RUN=0` since 2026-09-16; one real BTC buy so far, no withdrawal yet): XRP first (~6 XRP to Erwin's own account on another exchange, with its destination tag, which also verifies Bitget's `tag` request field), then BTC (~$41). Shape and order in `docs/DEPLOYMENT.md`, "Go-live runbook".
+6. [x] TLS certificate + DNS: `autobuy.minastrade.com` via the `caddy` service (done 2026-09-21, #31)
 7. [ ] Strong `SECRET_KEY` + `ENCRYPTION_KEY` in production env (boot guard enforces this)
 8. [ ] Automated database backups on a schedule + one tested restore → #32
 9. [ ] Prometheus scraping `/metrics` with the docs/ALERTING.md rules wired to a pager → #33
@@ -73,23 +73,23 @@ Each blocker is tracked as a Phase 7 GitHub issue (labels `phase-7`, `production
 docker build -f Dockerfile.api -t autobuy-api:v0.3.0 .
 docker tag autobuy-api:v0.3.0 <registry>/autobuy-api:v0.3.0 && docker push <registry>/autobuy-api:v0.3.0
 docker compose --profile prod up -d        # entrypoint applies migrations, then serves
-curl https://api.autobuy.app/health        # scheduler state included
+curl https://autobuy.minastrade.com/health   # scheduler state included
 ```
 
 ## Launch timeline
 
-- **Weeks 1–2 (staging):** deploy, wire Sumsub/Resend sandbox, testnet trading run, load test, security re-check
+- **Weeks 1–2 (staging):** deploy, wire Sumsub/Resend sandbox, dry-run trading, load test, security re-check
 - **Weeks 3–4 (limited launch):** ~100 users, `AUTOBUY_DRY_RUN=0` behind small per-user caps, KYC + campaigns live
-- **Weeks 5–6:** open signup; begin Phase 5 mobile implementation
+- **Weeks 5–6:** open signup (the mobile scaffold was removed on 2026-09-22; a mobile app is unscheduled)
 
 ## Risks & mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Live-order defect (double buy / wrong size) | Critical | Idempotent per due-date (tested), dry-run default, testnet first, canary with small caps |
-| Binance API change / ban | High | Pinned legacy client, error-budget alert (>10/h), granular key re-verification |
+| Live-order defect (double buy / wrong size) | Critical | Client-order-id idempotency and reconciliation before retry (tested), fill guard, dry-run default, canary with small caps |
+| Bitget API change / ban | High | Pinned client, error-budget alert (`exchange_api_calls_total` > 10/h), granular key re-verification |
 | Database loss | Critical | Automated backups + tested restore (prerequisite #6); migrations reproducible from empty DB |
-| Load surge / DDoS | High | slowapi + nginx rate limits, 4-worker scaling, horizontal replicas (advisory-lock safe) |
+| Load surge / DDoS | High | slowapi rate limits behind caddy + nginx, 4-worker scaling, horizontal replicas (advisory-lock safe) |
 | KYC false rejections | Medium | Status sync endpoint, support escalation path in rejection email |
 | Email provider outage | Low | Fire-and-forget by contract — trades never blocked; failure-ratio alert |
 

@@ -1,6 +1,6 @@
 import type * as Api from "./api.js";
 import type { FetchTransport, FetchTransportOptions, TokenPair } from "./http.js";
-import type { PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse, UserOut, UserProfile } from "./types.js";
+import type { MfaRequiredResponse, PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse, UserOut, UserProfile } from "./types.js";
 
 export * from "./types.js";
 export * from "./api.js";
@@ -10,6 +10,12 @@ export {
 } from "./http.js";
 
 export type AutoBuyClientOptions = FetchTransportOptions;
+
+/** Second factor for `loginMfa`: the authenticator code or one of the recovery codes. */
+export type MfaFactor = { code: string } | { recovery_code: string };
+
+/** True when `login()` answered with a pending two-factor challenge (HTTP 202) instead of a token pair. */
+export declare function isMfaRequired(result: TokenResponse | MfaRequiredResponse): result is MfaRequiredResponse;
 
 export declare class AutoBuyClient {
   readonly transport: FetchTransport;
@@ -33,7 +39,10 @@ export declare class AutoBuyClient {
   get tokens(): TokenPair | null;
   setTokens(tokens: TokenPair | null): void;
   register(email: string, password: string): Promise<UserOut>;
-  login(email: string, password: string): Promise<TokenResponse>;
+  /** Answers with the `MfaRequiredResponse` challenge (nothing stored) for a two-factor account; see `loginMfa`. */
+  login(email: string, password: string): Promise<TokenResponse | MfaRequiredResponse>;
+  /** Finish a two-factor sign-in with the `mfa_token` from `login()` plus `{ code }` or `{ recovery_code }`; stores the tokens. */
+  loginMfa(mfaToken: string, factor: MfaFactor): Promise<TokenResponse>;
   refreshTokens(): Promise<TokenPair>;
   logout(): Promise<void>;
   me(): Promise<UserProfile>;

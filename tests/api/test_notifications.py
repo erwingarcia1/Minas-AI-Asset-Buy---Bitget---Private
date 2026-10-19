@@ -143,3 +143,31 @@ async def test_large_purchase_is_critical_sms(db, user, binance_key, channels, m
     sms = [s for s in channels.sent if s[0] == "sms"]
     assert sms, "large transactions page through quiet hours"
     assert "1500.00 USD" in sms[0][2]
+
+
+async def test_history_returns_sent_rows_only(db, user, channels, monkeypatch):
+    """#90 feed cleanup: the customer feed shows what actually reached them;
+    skipped/covered attempts stay in the table for the admin audit."""
+    noon(monkeypatch)
+    user.notification_preferences = Preferences(
+        email_enabled=True, sms_enabled=False, push_enabled=False).to_json()
+    await db.commit()
+    await NotificationDispatcher().notify(db, user, "test", "OnlyEmailLands", "B")
+    rows = (await db.execute(select(Notification).where(
+        Notification.user_id == user.id))).scalars().all()
+    assert {r.status for r in rows} == {"sent", "skipped_pref"}, "audit keeps everything"
+    from api.main import app
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as c:
+        hist = (await c.get("/api/notifications/history", headers=auth_headers(user))).json()
+    assert hist["total"] == 1
+    assert [i["status"] for i in hist["items"]] == ["sent"]
+    assert hist["items"][0]["subject"] == "OnlyEmailLands"
+
+
+async def test_covered_elsewhere_replaces_skipped_pref_for_rich_emails(db, user, channels, monkeypatch):
+    noon(monkeypatch)
+    results = await NotificationDispatcher().notify(
+        db, user, "purchase_executed", "Bought PEPE", "B", include_email=False)
+    assert results["email"] == "covered_elsewhere", \
+        "a richer email carries the event — that is not a customer preference"

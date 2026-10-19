@@ -7,7 +7,7 @@ only execution history.
 """
 import uuid
 
-from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String, UniqueConstraint, event
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -25,7 +25,8 @@ PURCHASE_FREQUENCIES = ("one_time", "daily", "weekly", "monthly")
 # missing travel-rule / identity data.
 PURCHASE_STATUSES = ("active", "paused", "completed", "failed", "cancelled", "needs_review", "withdrawal_failed", "needs_info")
 TRANSACTION_STATUSES = ("pending", "success", "failed", "needs_review", "needs_info")
-BLOCKCHAIN_NETWORKS = ("mainnet", "testnet")
+# blockchain_network now stores the exchange's chain name ("BTC", "ERC20", "SOL", "TRC20", ...); see api/utils/chains.py
+BLOCKCHAIN_NETWORKS = ("mainnet", "testnet")   # legacy values, kept for migration 018 and old tests
 
 
 class Wallet(Base):
@@ -34,7 +35,11 @@ class Wallet(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     address = Column(String(128), nullable=False, unique=True)
-    blockchain_network = Column(String(20), nullable=False)  # mainnet | testnet
+    blockchain_network = Column(String(40), nullable=False)  # exchange chain name (BTC, ERC20, SOL, ...)
+    # Chains that need a tag/memo (XRP, Stellar): who the address belongs to, as the
+    # customer declared it (self_custody | exchange; NULL = never asked), and the tag.
+    destination_type = Column(String(20), nullable=True)
+    memo = Column(String(64), nullable=True)
     label = Column(String(100), nullable=True)
     verified_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -56,13 +61,26 @@ class Purchase(Base):
     frequency = Column(String(20), nullable=False)          # one_time | daily | weekly | monthly
     # autobuy: required, withdrawn to after every buy. dca: optional (kept for a later switch to withdraw).
     wallet_address = Column(String(128), nullable=True)
-    blockchain_network = Column(String(20), nullable=False)  # mainnet | testnet
+    # exchange chain name (BTC, ERC20, SOL, ...); None on accumulate purchases without a wallet
+    blockchain_network = Column(String(40), nullable=True)
+    wallet_destination_type = Column(String(20), nullable=True)   # self_custody | exchange | NULL (never asked)
+    wallet_memo = Column(String(64), nullable=True)               # destination tag / memo sent with withdrawals
     purchase_type = Column(Enum(*PURCHASE_TYPES, name="purchase_type"), nullable=False, default="autobuy",
                            server_default="autobuy")
     status = Column(String(20), nullable=False, default="active")
+    # optional travel-rule / beneficiary details some venues require before an API
+    # withdrawal (JSON: first_name, last_name, identity_type, company_name, area_code, member_code)
+    travel_rule_info = Column(String(1000), nullable=True)
     failure_count = Column(Integer, nullable=False, default=0)  # consecutive failed attempts
     last_error = Column(String(500), nullable=True)
     next_execution = Column(DateTime(timezone=True), nullable=True)
+    # The fixed point the recurring schedule is computed from (migration 027): set at creation and on a
+    # frequency edit, never by execution, failure, pause or resume. next run = first anchor + k × period after now.
+    schedule_anchor = Column(DateTime(timezone=True), nullable=False)
+    # pre-buy low-balance alert (migration 026): the run the last warning was for, and when it
+    # was sent; both NULL when nothing is outstanding. The banner shows while alerted_for == next_execution.
+    low_balance_alerted_for = Column(DateTime(timezone=True), nullable=True)
+    low_balance_alerted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
@@ -75,6 +93,18 @@ class Purchase(Base):
         return self.purchase_type == "autobuy"
     transactions = relationship("PurchaseTransaction", back_populates="purchase",
                                 cascade="all, delete-orphan", order_by="PurchaseTransaction.created_at.desc()")
+
+
+    def travel_rule_dict(self) -> dict:
+        """Parsed travel_rule_info with empty values dropped ({} when none stored)."""
+        import json
+        if not self.travel_rule_info:
+            return {}
+        try:
+            raw = json.loads(self.travel_rule_info)
+        except ValueError:
+            return {}
+        return {k: v for k, v in (raw or {}).items() if v not in (None, "")}
 
 
 class PurchaseTransaction(Base):
@@ -107,6 +137,9 @@ class PurchaseTransaction(Base):
     withdrawal_id = Column(String(128), nullable=True)       # autobuy: exchange withdrawal id
     withdrawal_fee = Column(Float, nullable=True)
     withdrawal_fee_currency = Column(String(10), nullable=True)
+    expected_received = Column(Float, nullable=True)         # withdrawal: what the wallet should receive after the chain fee
+    withdrawal_fee_mode = Column(String(10), nullable=True)  # withdrawal: exclusive | inclusive, the mode it was SENT under (migration 025; NULL only on rows older than it)
+    withdrawal_memo = Column(String(64), nullable=True)      # withdrawal: the tag/memo actually sent
     tx_hash = Column(String(128), nullable=True)             # on-chain hash once the exchange reports it
     # Idempotency + row lineage (migration 017)
     client_oid = Column(String(64), nullable=True, unique=True)   # written before the order is sent
@@ -116,3 +149,10 @@ class PurchaseTransaction(Base):
     withdrawal_chain = Column(String(40), nullable=True)          # exchange chain name used for a withdrawal
 
     purchase = relationship("Purchase", back_populates="transactions")
+
+
+@event.listens_for(Purchase, "before_insert")
+def _default_schedule_anchor(mapper, connection, target) -> None:
+    """A purchase created without an explicit anchor anchors on its first due time."""
+    if target.schedule_anchor is None:
+        target.schedule_anchor = target.next_execution or utcnow()

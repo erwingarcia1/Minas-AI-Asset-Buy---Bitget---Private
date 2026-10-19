@@ -3,7 +3,7 @@ Ethereum, Solana, network inference and address/network matching."""
 import pytest
 
 from api.utils.network_validator import (
-    detect_chain, get_address_network, validate_address_for_network, validate_bitcoin_address,
+    detect_chain, get_address_network, validate_bitcoin_address,
     validate_ethereum_address, validate_solana_address)
 
 BTC_P2PKH = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
@@ -98,26 +98,9 @@ class TestNetworkInference:
         assert get_address_network("garbage") is None
 
 
-class TestAddressForNetwork:
-    def test_bitcoin_must_match_declared_network(self):
-        assert validate_address_for_network(BTC_P2PKH, "mainnet")
-        assert validate_address_for_network(BTC_TEST_P2PKH, "testnet")
-        assert not validate_address_for_network(BTC_TEST_P2PKH, "mainnet"), "testnet coins must not be sent to a mainnet purchase"
-        assert not validate_address_for_network(BTC_P2PKH, "testnet")
-        assert validate_address_for_network(BTC_TEST_SEGWIT, "TESTNET"), "network is case-insensitive"
-
-    def test_ethereum_and_solana_valid_on_both_networks(self):
-        for addr in (ETH, SOL):
-            assert validate_address_for_network(addr, "mainnet")
-            assert validate_address_for_network(addr, "testnet")
-
-    def test_chain_constraint(self):
-        assert validate_address_for_network(ETH, "mainnet", chain="ethereum")
-        assert not validate_address_for_network(ETH, "mainnet", chain="bitcoin")
-        assert not validate_address_for_network(BTC_P2PKH, "mainnet", chain="solana")
-        assert validate_address_for_network(SOL, "testnet", chain="solana")
-
-    def test_invalid_inputs(self):
-        assert not validate_address_for_network("nope", "mainnet")
-        assert not validate_address_for_network(ETH, "devnet")
-        assert not validate_address_for_network(ETH, "")
+def test_supported_purchase_coins_map_to_an_address_family():
+    """USDT is the quote coin, not a purchase coin (kept from tests/test_exchange_networks.py)."""
+    from api.utils import exchange_networks as en
+    assert set(en.SUPPORTED_CRYPTOS) == {"BTC", "ETH", "USDC", "SOL", "XRP", "XLM", "DOGE", "SHIB", "PEPE", "BONK"}
+    assert en.ACCUMULATE_ONLY == {"DOGE", "SHIB", "PEPE", "BONK"} and set(en.CRYPTO_CHAINS) == {"BTC", "ETH", "USDC", "SOL", "XRP", "XLM"}
+    assert en.CRYPTO_CHAINS["XRP"] == "xrpl" and en.CRYPTO_CHAINS["XLM"] == "stellar"

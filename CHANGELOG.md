@@ -5,6 +5,1080 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-10-13: Guardian engine, dark (PR TBD)
+
+Second Guardian merge PR. Minas AI Guardian's read-only monitoring engine
+moves into this repository as the `guardian/` package and a worker container,
+behind `GUARDIAN_ENABLED` (default 0). Nothing is visible to customers and the
+worker only writes its heartbeat until the owner switches it on; this PR
+exists so the heavy pieces (image, schema, container) land and are proven in
+production before any feature does.
+
+### Added
+
+* `guardian/` — Guardian's engine, poller, twelve detectors, dispatch,
+  escalation, retention, limiters, breakers, read-only onboarding gates and
+  alert copy, ported with the storage swapped for Postgres: a psycopg2 wrapper
+  (`guardian/db.py`) keeps the `cursor()` contract the engine was written
+  against, with typecasters so timestamps and JSON come back in the shapes the
+  engine wrote. `?` became `%s`, `lastrowid` became `RETURNING id`, tables
+  gained the `guardian_` prefix; the detectors are untouched (one message now
+  says Guardian instead of Sentinel).
+* **Migration 030** (`030_guardian_tables`): 19 `guardian_*` tables with
+  bigint identity ids (Guardian's dedup keys survive the cutover),
+  timestamptz, jsonb and numeric columns, cascading foreign keys from the
+  account and `guardian_accounts.user_id` → `users.id`; plus
+  `users.password_reset_required` and `users.notification_preferences`
+  widened to Text. `api/models/guardian.py` mirrors the tables for the API;
+  the `User` model carries the two columns.
+* The `guardian` compose service (`autobuy_guardian`, the API image,
+  `python -m guardian.worker`, no ports, 1 GB cap, waits for the API so
+  migrations have run). Heartbeat `autobuy:guardian:heartbeat` and pause
+  switch `autobuy:guardian:paused` in Redis; `/health` gains a `guardian`
+  block (`running`, `enabled`, `paused`, `active_accounts`, heartbeat age).
+  `scripts/deploy.sh` asserts the worker was recreated on the API's image and
+  waits for a fresh heartbeat before calling the deploy done — only when the
+  checkout's compose file declares the `guardian` service, so the script stays
+  correct if it ever runs against a tree without the worker.
+* Channels on the platform's transports: customer and admin email through the
+  Resend outbox (`email_outbox.enqueue_sync`), Telegram through
+  `api/services/telegram.send_sync` (emails masked; optional
+  `GUARDIAN_TELEGRAM_CHAT_ID`), SMS via ClickSend or Twilio
+  (`CLICKSEND_*`, `TWILIO_TO_NUMBERS`). The daily MEDIUM/LOW digest runs
+  inside the worker (`alerting.digest_hour_utc`, default 08:00 UTC) instead
+  of Guardian's host cron.
+* Settings `GUARDIAN_ENABLED`, `GUARDIAN_ALLOWED_EMAILS`, `GUARDIAN_RULES_PATH`,
+  `GUARDIAN_METRICS_HOST/PORT`, `GUARDIAN_TELEGRAM_CHAT_ID`, `CLICKSEND_USERNAME`,
+  `CLICKSEND_API_KEY`, `CLICKSEND_FROM`, `CLICKSEND_TO_NUMBERS`,
+  `TWILIO_TO_NUMBERS` in `.env.example` and both compose blocks;
+  `tests/test_env_plumbing.py` now also asserts the worker's block carries
+  every api setting.
+* Dependencies: `ccxt==4.5.63` (Guardian's pin; the four read-only adapters
+  were verified against it), `PyYAML==6.0.3`, an explicit `cryptography` pin.
+* `tests/guardian/` — Guardian's engine suite on Postgres (its own conftest:
+  truncate-per-test, one throwaway test user, every transport setting blanked);
+  the suite is the proof detection did not change in the move.
+* Docs: `docs/GUARDIAN-ARCHITECTURE.md`, `GUARDIAN-SECURITY.md`,
+  `GUARDIAN-THREAT-MODEL.md`, `GUARDIAN-RETENTION.md`, a "Guardian worker"
+  section in `docs/DEPLOYMENT.md`.
+
+### Changed
+
+* `api/services/email_outbox.py`: the queued message is built by one helper
+  shared with the new synchronous entry point; the async path is unchanged.
+* `api/services/telegram.py`: `send_detailed`/`send` take an optional
+  `chat_id`; `send_sync` for a thread without an event loop.
+* CI runs on `guardian/**` changes too and measures `--cov=guardian`.
+
+### Not in this PR
+
+* No API route, page or nav entry (PR3–PR5); no live channel in production
+  (PR6 switches the flag on for internal accounts); no data migration (PR7).
+* Not ported from Guardian: its HTML dashboard and portal, CLI, operator and
+  member identities, scrypt passwords, SQLite schema, optional AI triage,
+  WebSocket monitor, deploy gate, mutation testing and git hooks.
+### Hardening (review before merge, 2026-10-16)
+
+* `scripts/deploy.sh`: the worker checks key on the checkout's compose file
+  (a newer script can run against an older tree); a rollback to a tree
+  without the worker warns and stops an orphaned `autobuy_guardian` instead
+  of leaving it running on the old image; the compose services list is read
+  once. The worker's `SKIP_MIGRATIONS` is a literal, not a knob.
+* The `User` model mirrors the two `users` columns of migration 030 and the
+  schema-mirror test compares that table too.
+* Engine: a key replacement rewrites `key_fingerprint` and refuses a key that
+  already watches another account; accounts still seeding their baseline are
+  not polled; labels fit `varchar(100)`; digest-bound and snoozed alerts no
+  longer page operators as "delivered to nobody"; an unreadable rules file
+  pages once, not every pass; the heartbeat beats at least every 60 s
+  whatever the poll interval; the scheduler thread is joined on stop and the
+  worker exits 1 when its engine dies on its own.
+* Copy and masking: no alert or page tells anyone to run a `sentinel` CLI;
+  wallet addresses, emails and phone numbers are masked in Telegram text and
+  in the worker's logs; amounts render with at most 8 decimals and never in
+  scientific notation.
+* `api/services/telegram.send_sync` holds a lock around the shared limiter
+  state, so worker threads cannot exceed the per-minute cap together.
+* Tests: the SMS-provider factory tests set `settings` (they were vacuous);
+  the breaker back-off test drives a fake clock; the root conftest pins every
+  new variable.
+
+## [0.9.0] — 2026-10-13: Two-factor authentication and sign out everywhere (PR TBD)
+
+First of the Guardian merge PRs (`docs/GUARDIAN` plan): the platform gains the
+optional TOTP second factor that Minas AI Guardian's customers already have,
+ahead of their accounts moving over. `GUARDIAN_ENABLED` does not exist yet;
+nothing else about Guardian lands here.
+
+### Added
+
+* Optional two-factor authentication for every account: `/api/user/2fa`
+  (enrol with the password, confirm with a code, ten single-use recovery
+  codes shown once, regenerate against a code, disable with the password plus
+  a code or a recovery code). Settings → Security renders the QR code in the
+  browser (`qrcode` 1.5.4; the secret never leaves the page) and shows the
+  recovery codes once with copy and download. Every change emails the account.
+  RFC 6238 on the standard library, ported verbatim from Guardian
+  (`api/services/totp.py`, `api/services/twofactor.py`): no new Python
+  dependency inside the authentication path.
+* `POST /api/auth/login` answers **202** `{mfa_required, mfa_token, expires_in}`
+  for an account with two-factor on and sets no cookie; `POST /api/auth/login/mfa`
+  finishes the session with the same body and cookies as `/login`. The login
+  page gains the code step (authenticator code or recovery code).
+* `POST /api/auth/logout-all` ("Sign out everywhere" in Settings → Security):
+  `users.sessions_revoked_at`; every access and refresh token issued before it
+  is refused, the caller's included.
+* Admin: `totp_enabled` on the user list with a 2FA pill, a "Reset 2FA"
+  support action (`POST /api/admin/users/{id}/2fa/reset`, audited, the user is
+  emailed), and `ADMIN_MFA_REQUIRED` (default 0): when on, every admin route
+  answers 403 `mfa_required_for_admin` until the admin has enrolled, and an
+  admin cannot turn two-factor off.
+* **Migration 029** (`029_user_totp_and_session_revocation`): `user_totp`,
+  `user_totp_recovery_codes`, `users.sessions_revoked_at`. Empty tables, no
+  backfill; nothing changes for a user who never enrols.
+* New `.env` line (also in compose): `ADMIN_MFA_REQUIRED=0`.
+
+### Changed
+
+* The Fernet helpers moved from `api/routes/exchange.py` to
+  `api/services/crypto.py` byte for byte (the router re-exports the same
+  names; services and the coming Guardian worker encrypt without importing a
+  router). TOTP secrets use the same cipher; `scripts/rotate_encryption_key.py`
+  rotates `user_totp` alongside `api_keys`.
+* `POST /api/auth/verify` answers `valid: false` for the MFA pending token;
+  the email-verification token still identifies its user there, as before.
+* The bearer guard and `/refresh` compare a token's `iat` against the later of
+  `password_changed_at` and `sessions_revoked_at` (`api.auth.token_cutoff`);
+  with the new column NULL the behaviour is identical to before.
+
+### Security
+
+* The pending MFA token lives five minutes, is redeemable once, allows five
+  attempts, is bound to the password hash it was issued against, and is
+  refused by the bearer guard and by `/verify`. A wrong code, a wrong password
+  at enrol/disable and a wrong code at regenerate all count towards the
+  15-minute lockout. Each 30-second step is accepted once, atomically (two
+  requests spending the same code get exactly one success). Secrets, codes
+  and tokens never reach the log; the tests assert it on captured output.
+* A session that existed before enrolment keeps working: turning two-factor
+  on protects future sign-ins, it does not evict the person turning it on.
+
+### Tests
+
+* Backend 654 → 720 (`tests/test_totp.py` 19 ported verbatim,
+  `test_twofactor_service.py`, `test_mfa_login.py`, `test_twofactor_routes.py`,
+  `test_logout_all.py`); the existing auth suites (`test_session_cookies`,
+  `test_refresh_grace`, `test_logout_stale_csrf`, `test_routes_auth`,
+  `test_password_reset`, `test_security`) unchanged and green. Frontend
+  150 → 162 (`LoginMfa.test.tsx`, `SecuritySettings.test.tsx`); the Settings
+  suite still finds exactly two password fields on the page.
+
+### Hardening (review before merge, 2026-10-16)
+
+* `/login` no longer clears the failed-login counter while a second factor is
+  still owed, so re-posting the password cannot reset the lockout between
+  code guesses; the counter clears when the sign-in completes.
+* Recovery codes are 80 bits (`XXXXX-XXXXX-XXXXX-XXXXX`); codes issued at the
+  older length still verify.
+* An admin cannot reset their own two-factor through the admin route (403),
+  and an admin who has two-factor on proves it with their current code.
+* A wrong password or code on `/api/user/2fa/*` answers 400, not 401, so the
+  web client does not refresh the session and replay the mistake; validation
+  errors no longer echo the submitted body; the delivery-failure log masks
+  the address; a sign-in that lands in the same second as a revocation waits
+  for the next whole second instead of being dead on arrival.
+* `scripts/rotate_encryption_key.py` also re-encrypts
+  `api_keys.encrypted_passphrase` — a pre-existing gap: a rotation would have
+  left every Bitget passphrase under the old key and stopped every buy.
+## [0.8.3] — 2026-10-16: active-time clock, upcoming buys (PR #95)
+
+### Added
+
+* The Dashboard shows a live "AutoBuy active for N days, HH:MM:SS" clock,
+  counted from the account's registration date.
+* The Transactions page lists the upcoming buys (active schedules' next
+  runs, soonest first, Eastern with the UTC clock in brackets) above the
+  history they will appear in.
+
+## [0.8.2] — 2026-10-14: plain-English failure text, Funding hint (PR #93)
+
+### Changed
+
+* Customer-facing buy-failure wording (#90): plain English with no venue
+  codes, new subjects ("Your {COIN} buy didn't go through. No money was
+  spent" / "We've paused your {COIN} purchase. No money was spent"), USDT-only
+  money, the current balance and exact top-up amount when readable, next
+  attempts in Eastern with the UTC clock in brackets, mode-specific key-fix
+  steps, and a help footer. Raw codes stay on the rows, in admin views, Slack
+  and Telegram. Bitget menu labels live in one BITGET_LABELS block.
+* The pre-buy top-up warning's instructions are per account mode, and on
+  Unified accounts the email says when USDT sits in Funding and how to move
+  it (#91) — "enough to cover this" only when Funding covers the shortfall.
+* The customer notification feed returns sent rows only; the rich-email case
+  records "covered_elsewhere" instead of "skipped_pref".
+
+## [0.8.1] — 2026-10-12: Unified definite refusals (PR #89)
+
+### Fixed
+
+* The Unified (v3) client answered a lookup of a never-placed order by raising
+  25204 "Order does not exist"; it now returns None, exactly like the Classic
+  client's 43001 family, so executor lookups, reconciliation and the admin
+  review/resolve see "not found" again (the 2026-10-10 PEPE park).
+
+### Changed
+
+* A buy rejection that is a definite refusal — insufficient balance (25202),
+  below minimum order size (25207, 25611), pair not tradeable (25100/25101/
+  25102), key lacks trade permission (25013, 25620), and our own pre-send
+  SYMBOL / MIN_NOTIONAL checks — fails the attempt outright with the venue's
+  message, the same outcome and customer emails as the Classic equivalents
+  (43012 etc.). Never needs_review.
+* An unknown placement error still asks the exchange first; a "not found"
+  answer is re-checked once after 5 s (v3 order-info can lag a just-placed
+  order) before the attempt is failed. A lookup error still parks for review.
+
+## [0.8.0.1] — 2026-10-10: v3 order lookup path (PR #85)
+
+### Fixed
+
+* The Unified client read an order back from `GET /api/v3/trade/order-details`,
+  which Bitget answers with 40404 "Request URL NOT FOUND"; the real path behind
+  the docs page titled "Get Order Details" is `GET /api/v3/trade/order-info`.
+  In the first live Unified buy (2026-10-10 11:05 UTC) the order was placed and
+  filled, but the read-back failed, so the attempt was parked for review with
+  nothing recorded and the fill left to the admin to record. `history-orders`,
+  `fills`, `assets`, `settings` and `place-order` were right.
+
+## [0.8.0] — 2026-10-10: Unified Trading Account (Bitget v3) support alongside Classic (PR #81)
+
+### Added
+
+* **Unified Trading Accounts work.** Bitget is migrating Classic accounts to
+  Unified Trading mode in batches; such an account refuses every Classic (v2)
+  call with 40085. AutoBuy now carries a second Bitget client for the Unified
+  (v3) API: `POST /api/v3/trade/place-order` (category SPOT, qty in USDT, same
+  client order id), `GET /api/v3/trade/order-details`, `GET /api/v3/trade/fills`,
+  `GET /api/v3/account/assets`, `GET /api/v3/account/info`. Fills, fees and
+  holdings use the same shapes as before: fee in the base coin is still
+  subtracted from the gross fill.
+* **Mode per key**, `api_keys.account_mode` (migration 028, every key
+  backfilled `unknown`): verification stores the real mode (a v2 answer means
+  Classic; 40085 followed by a v3 answer means Unified; a Unified key answered
+  40084 means it switched back to Classic). The executor treats `unknown` as
+  Classic; on 40085 only, it switches the key to `unified` and retries the
+  same attempt through v3 with the same client order id. No other error
+  switches anything. Classic request paths and bodies are byte-for-byte
+  unchanged, proven by test.
+* **Balance** on a Unified account: the USDT row's `available` minus any USDT
+  `debt`, never equity or account totals, for the low-balance check and the
+  pre-buy read alike.
+* **Daily check**: a key that turns Unified switches mode (re-verified through
+  v3) instead of being flagged; only when v3 also refuses does the v0.7.7
+  flagging run.
+* **After the deploy**, `python -m api.tasks.reverify_unified` re-verifies
+  every key flagged by v0.7.7 through v3, stores its mode and emails the owner
+  "Good news: AutoBuy now works with your Bitget account. Press Resume on your
+  purchases whenever you're ready." Nothing is resumed automatically.
+* **A Unified key needs both Trade and Management → Read.** Verification of a
+  Unified key requires `uta_trade` and `uta_mgt`; with Trade only it is refused
+  with "Almost there! In Bitget, edit this key and also tick Unified Trading
+  Account → Management → Read, then verify again. AutoBuy needs it to check
+  your balance before each buy."
+* Withdraw-immediately purchases are refused on a Unified key for now
+  (`unified_account_withdraw`): v3 withdrawals are not built. Settings shows
+  each key's mode and says both account types work for buying and holding.
+## [0.7.7.2] — 2026-10-08: no purchase on an unverified or flagged key (PR #82)
+
+### Fixed
+
+* Creating a purchase on a key that is not verified, and resuming a paused
+  purchase on such a key, are refused at once (`409 exchange_key_unverified`)
+  with the key's own message, for example "This Bitget account uses Unified
+  Trading mode…", instead of being accepted and left to fail at buy time.
+  Pausing and editing the amount still work. The purchases list shows a
+  disabled Resume carrying the message. No executor change.
+
+## [0.7.7.1] — 2026-10-08: a flagged Unified key pauses its purchases (PR #79)
+
+### Changed
+
+* When the daily check flags a key as Unified, every active purchase on that
+  key is paused through the normal pause path (status only, nothing else), so
+  no attempt runs and fails on it. The customer email says "We've paused your
+  purchases so nothing fails; nothing was bought." Still one email per key; a
+  Classic key's purchases are untouched. No executor change.
+
+## [0.7.7] — 2026-10-08: Unified Trading accounts detected before a buy fails (PR #77)
+
+### Added
+
+* **Verification refuses Unified Trading accounts.** Bitget is migrating Classic
+  accounts to Unified Trading mode in batches; a migrated account answers every
+  Classic (v2) call with 40085 and a buy on it parks for review. Verification
+  now treats 40085 as `unified_account` and records it on the key like the
+  read-only refusal, with the message "This Bitget account uses Unified Trading
+  mode, which AutoBuy doesn't support yet. We're adding it now. Please contact
+  support@minastech.ca and we'll let you know as soon as it's ready."
+* **Daily read-only check** (`unified_account_check`, 06:20 UTC, seventh
+  scheduler job): the same account-info call for every verified Bitget key.
+  A key that has turned Unified is marked as above, the customer gets one
+  email in the same words, the owner one Telegram alert, and the purchases
+  list shows the message under the purchase's status (`exchange_key_error` on
+  purchase rows). The key is no longer verified afterwards, so it is not
+  checked again: one alert per key.
+* Settings says AutoBuy currently needs a Classic Bitget account.
+
+## [0.7.5.1] — 2026-10-07: schedule anchor, no more drift (PR #68)
+
+### Fixed
+
+* **Recurring purchases no longer drift later.** The next run was computed
+  from the moment a buy executed, so the scheduler's 5-minute tick offset
+  accumulated (the weekly XRP buy moved from 00:12 to 00:16 UTC in one week).
+  Migration 027 adds `purchases.schedule_anchor`, set at creation and on a
+  frequency edit and never by execution, failure, pause or resume; the next
+  run is the first anchor + k × period strictly after now. Monthly keeps the
+  anchor's day and clock, clamped to each month and computed from the anchor
+  every time (31 Jan → 28 Feb → 31 Mar). A paused purchase resumed late still
+  buys once immediately, then snaps back to the grid; a far-past due time
+  catches up with one buy; retries within a cycle never move anything; an
+  exhausted cycle advances to the next grid point. The grid is UTC, so the
+  Eastern display shifts an hour across the clock change while the UTC time
+  stays put. Backfill: active and paused purchases anchor on their current
+  next_execution (the live XRP buys keep 00:16 and 18:16 UTC), everything
+  else on created_at.
+
+### Changed
+
+* **Logo credits page** lists only the coins that display a logo; any coin
+  shown with its initial is named in one line built from the rows of
+  `LOGO_SOURCES.md` without a file, so the line disappears on its own once
+  every coin has a logo. A trademark line reads "All coin logos are trademarks
+  of their respective owners and are used only to identify each coin."
+* **XLM, SHIB, PEPE and BONK logos**: the icon Bitget displays for each spot
+  pair, downloaded once, stored in `frontend/public/logos/` at 64 px and
+  resized only (never recoloured, cropped or redrawn, never loaded from
+  Bitget's servers), recorded in `LOGO_SOURCES.md` as "Icon as displayed on
+  Bitget (URL); trademark of [project]; used unaltered only to identify the
+  coin". All ten coins now show a logo; clearing a File cell in
+  `LOGO_SOURCES.md` puts a coin back on its lettered circle.
+
+## [0.7.6] — 2026-10-07: coin logos (PR #74)
+
+### Added
+
+* **Coin logos.** The coin cards, the purchase list, the holdings table, the
+  landing page coin list and the allocation legend show each coin's logo at
+  32 px (smaller in dense rows) on a white plate in place of the colour dot.
+  Six coins ship with a logo from the project's own brand source: BTC (public
+  domain), ETH (CC BY 4.0, credited), SOL (Solana Foundation brand guidelines),
+  XRP (the community symbol), USDC (Circle brand policy), DOGE (Dogecoin Core,
+  MIT). XLM, SHIB, PEPE and BONK show a lettered circle in their own colour
+  until a licensed mark arrives; the same circle is the fallback whenever a
+  file is missing or fails to load. Logos are decorative (`alt=""`) and are
+  served only from our own domain (`/logos/`).
+* **Logo credits page** at `/logo-credits`, linked from the site footer,
+  generated from `frontend/public/logos/LOGO_SOURCES.md`: one row per coin
+  with file, source, licence and any notice the licence asks for. Adding or
+  swapping a logo later is one file plus one line in that table, no code.
+
+## [0.7.5] — 2026-10-07: meme coins, accumulate-only by category (PR #60 + PR #61)
+
+### Added
+
+* **Coin registry with categories.** `api/utils/exchange_networks.py` now
+  holds every purchase coin with a display name, a category and the address
+  family its withdrawals use. Categories: Main coins (BTC, ETH, SOL, XRP,
+  XLM), Stablecoins (USDC), Meme coins (DOGE, SHIB, PEPE, BONK; Bitget USDT pairs
+  checked online on 2026-10-02, 1 USDT minimum; PEPE and BONK trade in whole coins).
+  Labels describe, never rank.
+* **Meme coins are accumulate-only, as a category property.** They are bought
+  and held on the exchange; withdraw mode is never offered for them, whatever
+  `WITHDRAWALS_ENABLED` or `WITHDRAW_ALLOWED_EMAILS` say. Enforced next to the
+  existing withdraw gate at every path: create in withdraw mode or with a
+  wallet on file, switch to withdraw, set a wallet, retry withdrawal, admin
+  force-retry and both admin resolutions (keeping the coins on the exchange
+  stays possible). 403 `withdrawals_disabled` with "DOGE is bought and held on
+  Bitget only; it can't be sent to a wallet." plus `coin` and `accumulate_only`.
+* `GET /api/v2/market/coins/{coin}` carries `name`, `category`,
+  `category_label`, `accumulate_only` and `risk_note` (the neutral category
+  note: "Meme coins can move very sharply in price. Only buy what you can
+  afford to lose."). `GET /api/public/meta` carries `coin_categories` and
+  `accumulate_only`.
+
+### Changed
+
+* **Number display.** Prices now show at least 4 significant digits, never
+  fewer than 2 decimals, with thousands separators (84,487.36; 0.000004181)
+  instead of the pair's precision; coin amounts keep at most 8 decimals below
+  1,000 coins and show at most 2 decimals with thousands separators from
+  1,000 (2,389,380.23 PEPE). Applied to emails, Telegram and the PDF report.
+  The CSV stays machine-readable: no grouping, dot decimal point, prices at
+  full useful precision (this also fixes the "0.00" price column for sub-cent
+  coins), amounts at up to 8 decimals; a test parses it back. The API's JSON
+  keeps raw numbers. Full precision stays in the database.
+## [0.7.4.1] — 2026-10-07
+
+### Fixed
+
+* **Read-only Bitget keys are refused at verification (PR #70).** A Read-only
+  key with Spot ticked reports the code `stor` (Spot → Read); it authenticates
+  and reads balances, verification called it "verified" because the code was
+  unconfirmed, and then every buy failed with Bitget 40014 (seen live on
+  2026-10-06). `stor` is now a known code meaning Read-only: verification
+  fails with "This key is Read-only, so AutoBuy can't place buys. In Bitget,
+  edit the key to Read-write with only Spot → Trade ticked, then verify
+  again." A Read-write key with Spot → Trade (`stow`) verifies as before.
+  Settings guidance names the Read-write requirement.
+* **Every successfully sent email leaves a history row.** The outbox recorded a
+  `notifications` row only when a message was delivered on a retry; a
+  first-attempt delivery (the live low-balance email) left nothing.
+* **Scheduler jobs run once per tick.** Each API worker runs its own scheduler,
+  so the low-balance pass and the two digest jobs fired once per worker (three
+  passes per tick on the server, serialised by the advisory lock but not
+  deduplicated). A Redis `SET NX` with a 60 s TTL now claims the tick; the
+  other workers skip without opening the database. Redis trouble lets the job
+  through to the advisory lock. The purchase and withdrawal jobs are untouched.
+
+## [0.7.4] — 2026-10-06: pre-buy low-balance warning (PR #55)
+
+### Added
+
+* **Low-balance warning before a scheduled buy.** A new read-only scheduler job
+  (`low_balance_check`, every 30 minutes, advisory-locked) looks at every
+  active purchase whose next run is about a day away (23–25 h) or about two
+  hours away (1–3 h), reads the available spot USDT on its exchange account
+  (one read per account per pass, never an order call) and, when it is below
+  the sum of what every in-window purchase on that account needs (each amount
+  plus 1%), warns once per purchase per run, one email per account: email "Top up before your next
+  AutoBuy purchase" (purchases on that account, run time in Eastern Time with UTC in brackets,
+  balance, shortfall, how to move USDT to spot, unsubscribe link), a banner on the
+  dashboard and on the purchase row ("Balance low for your next buy on …"),
+  and one masked line in the admin Telegram chat. The two-hour window also
+  warns when the day-before check never ran. A later check that finds enough
+  balance clears the banner. An unreadable balance goes to admins only, never
+  to the customer. Purchases that are paused, cancelled, completed, already
+  past their run time, owned by a suspended or unverified user, or on an
+  unverified key are skipped. The executor, poller and withdrawal code are
+  untouched; the job's only writes are two bookkeeping columns.
+* Migration 026: `purchases.low_balance_alerted_for` / `low_balance_alerted_at`
+  (nullable, no backfill, no index).
+* Notification preference `email_low_balance` (on by default) in the existing
+  preferences JSON, exposed on `GET/PUT /api/notifications/preferences` and in
+  Settings → Email notifications.
+* `GET /api/v2/purchases` rows carry `low_balance_for_next_run` and
+  `low_balance_alerted_at`; `GET /api/dashboard/stats` carries `low_balance`
+  (the flagged purchases). Six scheduler jobs are now registered.
+
+## [0.7.3.1] — 2026-10-06: sign-out from a stale tab (issue #64, PR #65)
+
+### Fixed
+
+* **Signing out from a tab whose CSRF value went stale now signs out for
+  real.** When another tab had rotated the cookies, the stale tab's logout
+  was refused with 403 and the web app showed the login page anyway, leaving
+  the refresh cookie valid on that computer. Logout now revokes the session
+  whenever the refresh cookie holds a valid token, whatever the CSRF header
+  says (the cookies are SameSite=Lax, so a cross-site POST cannot carry them
+  and a forged sign-out is not possible); without a valid cookie the CSRF
+  check applies as before. The web app no longer pretends: a refused sign-out
+  is retried once with a freshly refreshed CSRF value, and if that fails too
+  it shows "Sign-out failed, try again." and keeps the session visible.
+
+## [0.7.3] — 2026-10-05: refresh rotation grace window (PR #57)
+
+### Fixed
+
+* **Two tabs refreshing at the same moment no longer sign the user out.** The
+  refresh token is single use (rotation); a second tab presenting the same
+  cookie a moment later got 401 and the cleared cookies signed both tabs out.
+  Now exactly one request rotates the token (an atomic SET NX claim in Redis)
+  and the other gets the very same new session back: same access token, same
+  refresh cookie, same CSRF value, cached encrypted (Fernet, the app's own
+  helper) for 30 seconds under the id of the token it replaced. The grace
+  covers only the immediately previous token: the next rotation drops it, a
+  token two rotations old is refused as before, logout and a password change
+  drop it, and a password change made elsewhere is caught by the cached
+  session's issue time. A real refusal still clears the cookies; a grace
+  response is an ordinary 200 with Set-Cookie, so the web client needed no
+  change. Refresh tokens now carry `prv`, the id of the token they replaced.
+* **The CSRF cookie rotates with the refresh cookie, and the window covers it
+  too.** Found while preparing the release: a second tab that built its
+  request with the previous CSRF value, but whose browser attached the
+  rotated cookies when it was sent, got a 403 and was signed out. The
+  rotation's cached entry now remembers the CSRF value it validated; inside
+  the window such a request gets the same cached session. Any other mismatch,
+  and the same header once the window is gone, stay a 403.
+* Tokens issued before this release (no `prv` claim) refresh, get the window,
+  and die on logout and password change exactly like new ones (tested).
+* The committed OpenAPI spec and SDKs were regenerated from the merged code.
+
+## [Unreleased] — 2026-10-01: withdraw gate, remaining paths (PR #54)
+
+### Fixed
+
+* Five more paths returned a withdraw-mode purchase to the scheduler without
+  the private-beta gate: resuming a paused one (`PUT … status: active`), the
+  admin "mark not sent" resolution, unsuspending an account, a KYC override
+  back to verified, and re-verifying an exchange key. All five are now judged
+  by the purchase owner. Resume answers 403 with the beta message plus "Switch
+  this purchase to accumulate first, then resume it." (switching and resuming
+  in one call works). Unsuspend and KYC-to-verified are refused while the
+  account owns ACTIVE withdraw-mode purchases, with the purchase ids listed;
+  unsuspend accepts `{"pause_withdraw_mode": true}` to pause those purchases
+  and reactivate the account instead. Key re-verify is refused, before any
+  exchange call, while that key has active withdraw-mode purchases. The web
+  purchase list no longer offers Resume on such a purchase to users who are
+  not allowed; "Switch to accumulate" stays. Executor and withdrawal code
+  untouched; existing purchases are not modified by any refusal.
+
+## [Unreleased] — 2026-10-01: landing follow-ups (PR #52)
+
+### Changed
+
+* Every "Request access" button carries "or email support@minastech.ca" as
+  visible text (from `/api/public/meta`, with the existing fallback).
+* Below 640px the how-it-works diagram renders top to bottom (a second SVG
+  layout; the wide one is hidden), so phones no longer get a scrolling box;
+  reduced-motion and offscreen-pause behaviour unchanged.
+* Anonymous visitors no longer call the refresh endpoint at startup: with no
+  session cookie the app goes straight to anonymous. A returning session still
+  refreshes. Lighthouse best practices 96 → 100 (the console-error audit was
+  the anonymous 403).
+* Header logo keeps its 28px box on narrow screens.
+
+## [Unreleased] — 2026-09-30: private-beta withdraw gate (PR #50)
+
+### Changed
+
+* **Withdraw-immediately purchases are off during the private beta.** New
+  settings `WITHDRAWALS_ENABLED` (default 0) and `WITHDRAW_ALLOWED_EMAILS`
+  (comma-separated). The API refuses every path that creates or switches a
+  purchase into withdraw mode, retries a withdrawal, or re-arms a withdraw-mode
+  purchase, unless withdrawals are enabled globally or the purchase OWNER's
+  email is allowlisted (never the acting admin), with one message: "Sending
+  coins to your own wallet isn't available during the private beta. Your
+  coins stay in your Bitget sub-account." The API default `purchase_type` is
+  now `dca` (accumulate). Admin resolve gains `keep_on_exchange`: record the
+  fill, keep the coins on Bitget, switch the purchase to accumulate, so the
+  review queue never becomes unresolvable. The profile exposes
+  `withdrawals_allowed`; the web app hides the withdraw toggle (off by default
+  for everyone), "Switch to withdraw", "Retry withdrawal" and the withdraw key
+  guidance for users who are not allowed, and shows "Sending to your own
+  wallet is coming later. For now, coins stay in your Bitget sub-account."
+  Existing withdraw-mode purchases are not changed. Executor, withdrawal
+  poller and withdrawal code untouched.
+* Landing copy no longer implies wallet sending is available.
+
+## [Unreleased] — 2026-09-30: fee wording (PR #51)
+
+### Changed
+
+* The purchase form no longer shows a fee percentage. It showed Bitget's
+  public tier taker rate for the pair (0.20% for BTCUSDT) while the account's
+  first live buy on 2026-09-16 was charged 0.10%, taken in the coin bought
+  (1.97e-07 BTC on 0.000197 BTC), not in USDT. The form and the Settings key
+  guidance now say: "Bitget's trading fee applies, taken from the coin you
+  receive." The landing page already said so.
+
+### Noted, no code change
+
+* The fill guard (`validate_fill`) compares the gross filled amount
+  (`baseVolume`) against cost ÷ price and does not subtract the trading fee;
+  a fee taken in the base coin is recorded separately and only the holdings
+  maths nets it out. At the current ±10% tolerance a 0.1–0.2% fee cannot
+  trip the guard, so this is acceptable; it is not fee-aware and would need
+  revisiting if the tolerance were ever tightened below about 1%.
+
+## [Unreleased] — 2026-09-28: public landing page, private-beta gate, ticker (PR #48)
+
+### Added
+
+* **Landing page at `/`** (lazy chunk, 15 KB / 4.7 KB gzipped; the app's chart
+  code is never loaded): header, hero with the "Private beta · by invitation"
+  badge, how-it-works with one inline-SVG loop (transform/opacity keyframes,
+  paused offscreen, static under prefers-reduced-motion, fixed aspect ratio),
+  safety, supported coins and fees, setup guide with a copy-to-clipboard
+  server IP, keyboard-accessible FAQ, final call to action, footer with
+  Terms/Privacy placeholders (`TODO(owner): legal text`), the risk line and
+  the copyright year. Signed-in visitors go straight to the dashboard; a
+  returning session waits for the silent refresh so the landing page never
+  flashes. Request access is a mailto to the support address.
+* **Private-beta ticker** on every page (`VITE_BETA_TICKER=0` removes it at
+  launch): transform-only seamless loop, brand-800 with white text (13.7:1),
+  pause on hover/focus and a visible pause/play button, static under reduced
+  motion, read once by screen readers, not dismissible.
+* **`GET /api/public/meta`** (anonymous, cacheable 5 min, 60/minute): coins,
+  exchanges, support email and the server's public IP (`PUBLIC_SERVER_IP`,
+  new setting). Settings shows that IP instead of its placeholder.
+* **Signup gate**: registration needs `SIGNUP_INVITE_CODE` whenever one is
+  configured and always in production (empty closes signup there);
+  constant-time comparison; one vague 403 for missing, wrong or unconfigured
+  code, checked before the email lookup; the code is never logged. Signup
+  asks for the code. Admin overview shows signups per day for 14 days from
+  `users.created_at` (no migration) so a leaked code is visible.
+* Dashboard: helper text under Holdings ("AutoBuy's holdings count only what
+  it bought for you…"). `robots.txt`.
+
+## [Unreleased] — 2026-09-28: Telegram alerts for purchase and withdrawal events (PR #47)
+
+### Added
+
+* **Telegram ops alerts** (`api/services/telegram.py`), additional to the
+  email alert digest and Slack, never a replacement. One message per event,
+  sent after the database write: purchase completed (coin, USDT, quantity,
+  fill price, masked customer, whether it will be withdrawn), purchase failed
+  or stopped (reason, attempt), purchase parked for review (with "needs admin
+  review"), withdrawal sent, confirmed (tx id), failed, needs information.
+  Emails show two characters plus the domain, addresses the first 6 and last
+  4 characters; error reasons are scrubbed of emails and long ids; never an
+  API key, secret, token or memo. Fully non-blocking: 5 s timeout, one retry
+  on a transport error only, every path wrapped so a Telegram failure logs
+  one WARNING and cannot reach the executor or change an outcome; both
+  settings unset = silent no-op. The bot token never reaches a log line (a
+  redaction filter scrubs httpx's request-URL log). Rate limit
+  `TELEGRAM_MAX_PER_MINUTE` (default 20, excess dropped and counted); a burst
+  of identical failures (same reason) collapses into one message plus a
+  "repeated N more times in this run" summary at the end of the scheduler
+  run. Settings `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+  `TELEGRAM_MAX_PER_MINUTE` are forwarded by compose and documented in
+  `.env.example` (the env-plumbing test covers them).
+* `POST /api/admin/telegram/test` (admin only, 3/minute): sends one test
+  message and reports `configured`, `sent` and Telegram's error description,
+  never the token.
+
+## [Unreleased] — 2026-09-25: brand palette and link previews (PR #46)
+
+### Changed
+
+* **Brand purple across the app.** The tailwind `brand` scale is now built
+  from the symbol's deep purple #543477 (brand-600; tints towards white,
+  shades towards black), so primary buttons and their hover/disabled states,
+  focus rings, links, the active nav item, the admin tabs, the loading spinner,
+  info alerts and the active/autobuy chips take the purple. Native checkboxes
+  and radios use it as their accent colour. The warm tan #87735b is a sparing
+  secondary accent (the "accumulate" chip). Status colours (green / amber /
+  red, the verified badge) are unchanged. The portfolio chart's value area is
+  #543477 (was #1b5cf5). SOL's asset colour moved from violet #7c3aed to pink
+  #db2777 so it stays distinct from the brand purple; other asset colours
+  unchanged. Contrast (WCAG AA): white on brand-600 9.8:1, links 9.8:1, active
+  nav 10.5:1, chips 11.2:1, focus ring 6.3:1.
+
+### Added
+
+* **Link previews.** `og-image.png` (1200×630) and `og-image-square.png`
+  (1200×1200): the symbol beside "AutoBuy" on white. `index.html` carries the
+  Open Graph and Twitter Card tags with absolute
+  `https://autobuy.minastrade.com/…` URLs, a plain description, and the title
+  "AutoBuy", so any shared URL (login page included) unfurls with the logo.
+
+## [Unreleased] — 2026-09-25: AI Wealth Builder symbol as the app mark (PR #45)
+
+### Changed
+
+* **App mark and favicon.** The AI Wealth Builder symbol (source of truth
+  `brand/aiwb-logo.png`, an 8625×8625 RGBA PNG; symbol only, never the
+  wordmark — the app is still AutoBuy) replaces the blue "A" mark in the
+  header and on the login/signup/reset pages, beside the AutoBuy wordmark at
+  the same size and position, wordmark in the symbol's deep purple #543477
+  (tailwind `brand-ink`, also the browser theme colour). Icons are transparent
+  PNGs resampled from the source: 512/192/180/64 keep the gradient
+  (#543477 → #61446f → #87735b); 16 and 32 px and `favicon.ico` are a flat
+  deep-purple silhouette because the gradient washes out at that size.
+  `manifest.json` (name AutoBuy Crypto, short_name AutoBuy, 192/512 icons) and
+  an apple-touch-icon are new; `favicon.svg` is gone. Button and link colours
+  are unchanged.
+
+## [Unreleased] — 2026-09-23: Settings credentials out of autofill (PR #44)
+
+### Changed
+
+* **Exchange API key fields no longer look like a login to the browser.** The
+  API secret is a masked `type="text"` input (`SecretInput`: CSS
+  text-security with a show/hide button) instead of `type="password"`, so
+  Chrome's password manager neither captures it nor offers to save it. API
+  key, secret and passphrase carry `autocomplete="one-time-code"`,
+  autocorrect/autocapitalize off, spellcheck off and the 1Password / LastPass /
+  Bitwarden ignore attributes; their ids and names are
+  `exchange_credential_public` / `_private` / `_phrase`; the fields are no
+  longer inside a `<form>` and "Save key" is a plain button. The change
+  password form is untouched (real password fields, `current-password` /
+  `new-password`).
+
+### Fixed
+
+* **Direct load of /settings crashed.** Settings declared its `verifying`
+  state after the early "no user yet" return, so opening `/settings` by URL
+  (reload or bookmark) rendered Loading with one hook fewer and then failed
+  with React error 310 once the profile arrived; reaching Settings through the
+  app never triggered it. Introduced in 6f3aeec on 2026-09-11 (v0.5.0), live on
+  the Tokyo server from the first server deploy (v0.6.0, 2026-09-17) until this
+  fix; reproduced on the live site on 2026-09-23. Regression test renders with
+  no user, then with one.
+
+## [Unreleased] — 2026-09-22: dashboard charts (PR #42), deployed
+
+Merged as 97759aa and deployed to the Tokyo server on 2026-09-22 19:27 UTC
+with `scripts/deploy.sh platform --branch main --web ~/web-charts` (run on the
+server). Verified after the deploy: health commit 97759aa, alembic 025,
+dry_run false, holdings and the 8 transaction rows byte-identical to the
+pre-deploy baseline (pre-deploy dump `~/backups/pre-charts-20260922T192446Z.sql.gz`),
+BUILD_INFO through nginx and through the public host, five jobs registered,
+purchase and withdrawal jobs ran ok, unfiltered log scan clean (the only
+warnings were two 401s from a revoked test session). Live site as the owner's
+account: donut total, performance market value and chart final point all
+26.38 USDT on the same load; every range rendered; the first cold load made
+16 Bitget candle calls (one per cached page), the second load made none; the
+new endpoint answered 200 on every request; the old
+`/api/dashboard/analytics/timeline` still answers.
+
+### Added
+
+* **Portfolio value chart** replaces "Invested — last 30 days" on the dashboard:
+  headline value and change over the range (1D · 7D · 30D · 90D · All), a
+  filled value area with a dashed step line for the amount invested, buy
+  markers, crosshair with the buys of that bucket, touch drag on mobile. The
+  change figure excludes what buys made in the range added (a simple return,
+  not time-weighted) and says so. Read-only endpoint
+  `GET /api/dashboard/portfolio/series?range=` (`api/services/candles.py`,
+  `api/services/portfolio_series.py`): holdings at each point are the net
+  acquired quantities of the buys executed by then × Bitget candle closes
+  (15min / 1h / 4h / 1Dutc, pages cached in Redis per pair: one bucket for the
+  newest page, 24 h for closed pages, never per user); a bucket with no candle
+  carries the previous close forward and the response counts them
+  (`carried_forward`); the final point uses `market_data.get_price` summed the
+  way the performance card sums it, so the chart's last value, the allocation
+  total and the performance market value agree by construction. 503 with
+  `exchange_data_unavailable` when Bitget is unreachable and nothing is
+  cached; the chart shows an unavailable state and the rest of the dashboard
+  renders.
+* **Allocation donut** replaces the "Share of invested value" line in the
+  performance card: share of current value by default, cost on a labelled
+  toggle, hover/focus details (asset, acquired quantity, USDT, share), a text
+  legend, one colour per asset (`frontend/src/utils/assetColors.ts`, also used
+  in the performance table), more than six assets collapse into "Other".
+* Dashboard refresh policy (no polling loop): the charts and performance
+  figures refetch when the tab regains visibility or focus, right after a
+  purchase is created, changed or deleted anywhere in the app, and at most
+  every 5 minutes while the tab stays visible (`usePortfolioRefresh`).
+* Root `bitget_client.py`: `get_candles()` for the public candle endpoints
+  (additive; no money path touched).
+
+## [Unreleased]
+
+### Added
+
+* **Public HTTPS at https://autobuy.minastrade.com.** New `caddy` service in the
+  prod compose profile (`deployment/caddy/Caddyfile`): automatic Let's Encrypt
+  certificate, http → https redirect, HSTS on the static SPA as well as the
+  API, proxying to the existing `web` container. It is the only service
+  published on a public interface; the tailnet URL still works.
+
+### Fixed
+
+* **Per-IP rate limits were one bucket for everyone.** Behind the nginx `web`
+  container the API saw every visitor as the container's address (verified in
+  the production access log), so `5/minute` on login was shared by all users.
+  Caddy now discards client-sent `X-Forwarded-*`, nginx resolves the real
+  address (`real_ip_header`) and overwrites — never appends —
+  `X-Forwarded-For`, and gunicorn trusts it (`--forwarded-allow-ips "*"`; safe
+  because the API port is loopback-only). Pinned by `tests/test_public_proxy.py`.
+
+### Changed
+
+* **The production EC2 box has an Elastic IP, `16.76.92.209`** (assigned
+  2026-09-21). `scripts/server_ssh.sh` and `scripts/remote_deploy.sh` default
+  to it; README, `docs/DEPLOYMENT.md` (new "Production host" table),
+  `docs/MEME_BUY.md` and `deploy/AWS_EC2.md` name it in place of the
+  auto-assigned `18.179.57.78`, which no longer reaches the box. Exchange API
+  key allowlists must name the new address. Public hostname to be served:
+  `autobuy.minastrade.com` (A record → the Elastic IP).
+
+## [Unreleased] — 2026-09-22: Batch C1 + C2 of the codebase audit (PR 4)
+
+### Removed (C1)
+
+* Bybit and OKX: the root `bybit_client.py` / `okx_client.py` and their
+  tests, the eager imports, the `hasattr` and `TypeError` fallbacks and the
+  "other venues" permission branch in `ExchangeClient`, their error-code
+  tables in key verification, the OKX passphrase rule, and
+  `WITHDRAW_NETWORK_CODES` in the gateway (the withdrawal network is the
+  purchase's chain, as it always was for Bitget). Bitget is the only venue a
+  key can be created for; the Binance transport stays only for analytics
+  prices until C3. `tests/api/test_bitget_wire.py` pins the exact requests
+  Bitget receives (market buy, lookup by client id, fill by order id, coin
+  info, withdraw with and without tag, withdrawal records) and passes
+  unchanged before and after.
+
+### Changed (C2)
+
+* Password reset, password changed and wallet-hold-lifted emails go through
+  the email outbox under the `security` category (6 attempts, ~15 minutes)
+  instead of one inline Resend call with no retry. Latency: from inline during
+  the request to the next `drain_email_outbox` run (every minute). Link and
+  token unchanged. The `wallet_hold_lifted` notification audit row now records
+  `queued` instead of `sent`.
+* Production note (2026-09-22): Resend answers 429 `daily_quota_exceeded` on
+  the production account; no email has been delivered since 2026-09-21 and
+  three purchase emails sit in the dead-letter list. C2 makes security emails
+  survive such a window for about 15 minutes; it does not fix the quota.
+
+## [Unreleased] — 2026-09-22: Batch B3 of the codebase audit (PR 3): the executor split
+
+Move only. `api/tasks/purchase_scheduler.py` (1,146 lines, seven concerns) is
+now three modules, every function, class and constant moved as an exact
+source segment (52 names; source and AST hashes identical before and after):
+
+* `api/services/exchange_gateway.py` — `ExecutionError`, the `ExchangeGateway`
+  protocol, `_client_for`, `tag_requirement`, `ExchangeClientGateway`.
+* `api/services/purchase_executor.py` — due-purchase selection (SKIP LOCKED),
+  the fill guard, reconciliation before retry, `execute_one` (client_oid
+  committed before the order is sent), withdrawals and the memo backstop,
+  withdrawal polling, the batch driver with its advisory lock, run-result
+  recording.
+* `api/tasks/scheduler.py` — the APScheduler job wrappers, `build_scheduler`,
+  `job_event_listener`.
+
+`api/tasks/purchase_scheduler.py` stays as a shim that re-exports everything
+and forwards attribute writes to the owning modules, so every existing import
+and every monkeypatch (`ps._client_for`, `ps.execute_due_purchases`, …) still
+reaches the real code. The APScheduler job ids, triggers, misfire settings and
+coalescing are unchanged; only the function reference of each job moves from
+`api.tasks.purchase_scheduler:` to `api.tasks.scheduler:`. The jobstore is the
+in-memory default, so no persisted job needs to resolve the old path.
+
+## [Unreleased] — 2026-09-22: Batch B of the codebase audit (PR 2: B1, B2, B4, B5)
+
+No behaviour change; the OpenAPI document is byte-identical before and after.
+
+### Changed
+
+* **B1** `api/services/binance_client.py` → `api/services/exchange_client.py`;
+  `BinanceClient` → `ExchangeClient`, `BinanceClientError` →
+  `ExchangeClientError`. The old module path and class names remain as a
+  one-release alias (`api/services/binance_client.py` re-exports; patching
+  attributes there does not affect the real module). Prometheus metrics
+  renamed: `binance_api_calls_total` → `exchange_api_calls_total`,
+  `binance_api_duration_seconds` → `exchange_api_duration_seconds`; the timer
+  `metrics.time_binance` → `time_exchange` (old name aliased for one
+  release). `docs/ALERTING.md` rule updated; saved Prometheus rules must be.
+* **B2** shared helpers in `api/routes/_deps.py`: `user_or_404` (was pasted
+  six times), `purchase_or_404` (three loaders with the same 404), `gateway`
+  (was defined twice), `PrecisionMemo` as a request dependency (was four
+  copies of the same memo). One read-through cache in
+  `api/services/cache.py`; `bitget_market` keeps fail-closed
+  (`MarketDataUnavailable`) and `market_data` keeps degrade-to-None, exactly
+  as before — pinned by `tests/api/test_cache_policy.py` through both real
+  callers (read failure → producer runs; producer failure → refused / None;
+  write failure → value still returned).
+* CI: the push trigger now matches branch names with a slash (`**`).
+* **B4** `api/routes/admin.py` split into `api/routes/admin/{users,purchases,ops}.py`
+  with `_deps.py`; purchase request/response schemas moved to
+  `api/schemas/purchases.py`; Base58 decode/encode and the double-SHA256
+  checksum live once in `api/utils/network_validator.py`; the web app's
+  `fmtCoin` folded into `fmtCrypto`; the tests/ vs tests/api/ rule is written
+  in both conftests.
+* **B5** docs corrected against the code: the copy-paste examples in
+  `docs/API.md` and `docs/EXAMPLES.md` no longer send `mainnet` or a Binance
+  key; coin lists match the six purchase coins; `SETUP_GUIDE.md` migrations
+  table runs to 025; `ROADMAP.md` and `GITHUB_ISSUES.md` no longer plan a
+  Binance testnet run or list `/api/purchases` as live;
+  `docs/PRODUCT_BACKLOG.md` carries a historical banner;
+  `PRODUCTION_READINESS.md` states plainly that **SMS (Twilio) and push
+  (FCM) do not work today** (the FCM code targets an endpoint Google retired
+  in 2024), and its counts are current (25 migrations, 85 routes, TLS done on
+  autobuy.minastrade.com via caddy).
+
+## [Unreleased] — 2026-09-22: Batch A of the codebase audit (PR 1)
+
+Deletions only; no behaviour change for the platform. Audit and plan:
+tag `v0.6.5-pre-audit` is the last commit carrying everything below.
+
+### Removed
+
+* **The legacy sub-account auto-buy bot** (`autobuy.py`, `memebuy_cli.py`,
+  `webapp/`, `memebuy/`, `chains/`, `payout/`, `safety/`,
+  `docker-compose.legacy.yml`, the root `Dockerfile`, both
+  `config*.example.json`, `requirements-legacy.txt`,
+  `requirements-onchain.txt`, `deploy/bootstrap.sh`, `deploy/autobuy.service`,
+  `docs/MEME_BUY.md`) and its ten test files. It was not running on the
+  server (no legacy compose project, no container); a stopped bot in the
+  repo is how someone redeploys it by accident. `scripts/deploy.sh` lost the
+  `bot` and `all` targets and the bot-stack guard; `platform` is the default
+  and only target. The four exchange-client modules and `exchange_errors.py`
+  at the repo root stay: the platform imports them.
+* `mobile/` (Expo scaffold): unreferenced by CI, scripts or the web app, and
+  written against the retired `/api/purchases` routes.
+* Web app: `purchaseAPI` (six methods calling routes that 404, zero call
+  sites) and the legacy `Purchase`, `PurchaseCreate`, `PurchaseUpdate`,
+  `Frequency` types; the mainnet/testnet validation generation
+  (`addressVerdict`, `validateAddressForNetwork`, the stale `CRYPTO_CHAINS`
+  mirror that still listed USDT, `EXCHANGE_NETWORKS`, `NETWORKS`,
+  `canExchangeWithdrawToNetwork`); the unimported `SUPPORTED_CRYPTOS` and
+  `FREQUENCIES` in `format.ts` that carried BNB/ADA/DOGE/LTC and a `biweekly`
+  the API does not offer.
+* API: `validate_address_for_network` and the mainnet/testnet half of
+  `api/utils/exchange_networks.py` (only `CRYPTO_CHAINS` / `SUPPORTED_CRYPTOS`
+  remain); the unread settings `supported_cryptos`, `binance_api_key`,
+  `binance_api_secret` and their `.env.example` / compose lines; the log-only
+  `POST /api/webhooks/resend` stub.
+* Stragglers: `BINANCE_API_*` lines in `.env.production.example`, the stale
+  `.env.example` comment, the bot-deploy sections of `deploy/AWS_EC2.md`,
+  `deploy/ALIBABA_CLOUD.md` (entirely a bot guide), comments in
+  `docker-compose.yml`, `deployment/nginx.web.conf`, `docs/DEPLOYMENT.md`,
+  and the root `.dockerignore` (served only the deleted root `Dockerfile`;
+  `Dockerfile.api` has its own ignore file, verified by building).
+* `deployment/kubernetes.yaml` (self-labelled stub) and
+  `deployment/nginx.conf` (nothing mounted it; the served config is
+  `deployment/nginx.web.conf` behind caddy). Docs re-pointed.
+
+### Tests removed, by name (backend 1,179 → see PR for the exact count)
+
+`tests/test_memebuy.py` (99), `tests/test_safety_gate.py` (113),
+`tests/test_solana_swap.py` (55), `tests/test_bitget_swap.py` (67),
+`tests/test_payout.py` (63), `tests/test_bsc_swap.py` (49),
+`tests/test_basket.py` (36), `tests/test_webapp.py` (25, already excluded
+from CI), `tests/test_autobuy.py` (20), `tests/test_multi_exchange.py` (16),
+`tests/test_exchange_networks.py` (8; its one live assertion, the purchase
+coin list, moved to `tests/test_network_validator.py`),
+`TestAddressForNetwork` in `tests/test_network_validator.py` (4),
+`test_resend_webhook_stub` in `tests/api/test_coverage_gaps.py` (1).
+Frontend: "address must match network and coin" and "exchange network
+support" in `addressValidation.test.ts` (2).
+
+Two of the removed bot tests exercised the kept `bitget_client.py` (request
+signing, error-envelope handling); they were restored as
+`tests/test_bitget_client.py`. Every other removed test imported only deleted
+code (verified from each file's imports at the tag; none imported `api.*`).
+
+## [0.6.4] — 2026-09-21: holdings are net and located; prices follow the pair; analytics states facts
+
+Corrections from the first live XRP and XLM buys on the production server.
+
+### Changed
+
+* **Holdings are net of the trading fee charged in the coin.** The gross fill
+  stays on the transaction row (`amount_crypto`, what Bitget's order history
+  shows) with `net_amount` beside it; the tax CSV gains `net_quantity`.
+  Holdings, average buy price, P&L and cost shares use the net figure.
+  Proved against the live account on 2026-09-21: BTC 0.000197 bought, fee
+  1.97e-07, Bitget balance 0.000196803; XLM 14.32 − 0.01432 = 14.30568; XRP
+  1.3334 − 0.0013334 = 1.3320666, each to the last digit.
+* **Holdings say where the coins are.** `total_amount` = acquired,
+  `on_exchange` = acquired minus what each real withdrawal took off the
+  Bitget balance, `sent_to_wallet` = what those withdrawals delivered. The
+  mode each withdrawal was sent under is read from the row (exclusive:
+  `expected_received == amount_executed`, balance drops by size + fee;
+  inclusive: `expected_received == amount_executed − fee`, balance drops by
+  size), never from today's configuration. Simulated withdrawals move nothing.
+* **Prices follow the pair's precision** (`price_precision`: BTC 2, XRP 4,
+  XLM 5) on transaction rows, holdings and analytics, and in emails, so XLM's
+  0.20945 fill no longer shows as 0.21.
+* **Analytics copy states the metric only** (reviewed for compliance):
+  volatility entries carry `summary` ("30-day volatility 3.1% (moderate).")
+  instead of `recommendation`; best/worst performer dropped; the
+  diversification score replaced by `share_of_invested` (share of COST,
+  labelled as such). The "Estimates only, not financial advice" note stays.
+  SDKs regenerated (breaking rename).
+* Runbook: after the first real withdrawal, compare the app's `on_exchange`
+  figure with Bitget's balance to the last digit and **record** the result;
+  that comparison is what confirms `BITGET_WITHDRAW_FEE_MODE`.
+
+### Added (0.6.5, 2026-09-21)
+
+* **Migration 025** — `purchase_transactions.withdrawal_fee_mode` with CHECK
+  `ck_purchase_transactions_withdrawal_fee_mode` (`exclusive` / `inclusive` /
+  NULL). The executor writes the configured mode on every withdrawal row at
+  send time; readers prefer the column and fall back to the
+  `expected_received` derivation only for rows written before 025. A test
+  asserts every executor-written row carries a non-NULL mode.
+
+### Known issues
+
+* `tests/api/test_admin_alert_digest.py::test_nothing_is_emailed_while_no_alert_is_critical`
+  is order-dependent: it passes alone and fails in the full `tests/api` run
+  when an earlier test leaves a stopped purchase or a recent failed
+  transaction behind, because the alert computation is platform-wide, not
+  per user. Tracked as GitHub issue #35; not a product defect. Do not re-run
+  CI to green over it — fix the test's isolation.
+
+## [Unreleased] — AutoBuy platform, 2026-09-16 / 2026-09-17
+
+Platform releases are tagged separately on GitHub (v0.5.0 covers everything up
+to commit bd93adf); this entry records what shipped after it.
+
+### Added
+
+* **XRP and XLM as purchase coins**, each on its single native chain (Bitget
+  chain names `XRP` and `StellarLumens`). Address validation for the XRP
+  Ledger (classic `r…` Base58Check and `X…` X-addresses, tag decoded) and
+  Stellar (`G…` StrKey with CRC16 and `M…` muxed addresses, memo id decoded),
+  server side and in the web form. Checksums verified against generated
+  addresses and known funded accounts.
+* **Migration 023** — `wallets.destination_type` / `wallets.memo`,
+  `purchases.wallet_destination_type` / `purchases.wallet_memo`,
+  `purchase_transactions.withdrawal_memo`, all nullable, with CHECK
+  constraints `ck_wallets_destination_type` and
+  `ck_purchases_wallet_destination_type` restricting the type to
+  `self_custody` / `exchange` / NULL. Applied locally 2026-09-17 (alembic
+  `023`, both constraints present); **not yet applied on the Tokyo server**
+  (planned as a deliberate step with a `pg_dump` first, see
+  `docs/DEPLOYMENT.md`, "Go-live runbook", Step 0).
+* **The destination-type rule** (`api/utils/chains.check_destination`), one
+  function for purchase create, wallet change, memo edit, switch to
+  withdraw-immediately, retry-withdrawal, `POST /api/wallets` and the
+  executor. On a chain Bitget reports as needing a tag: refuse when the
+  destination type is unset; refuse `exchange` without a memo; refuse a memo
+  on `self_custody`; an X-address / muxed address supplies its own tag and a
+  conflicting typed memo is refused; the base address is what gets stored. On
+  any other chain a memo or destination type is refused. The executor applies
+  the same rule at send time (`TAG_REQUIRED`): the withdrawal row fails, the
+  purchase parks as `withdrawal_failed` with the reason, no re-buy.
+* `GET /api/v2/market/destination` — the same verdict before a form submits,
+  plus a public-ledger existence probe (XRPL `account_info`, Horizon). A
+  never-funded address is a warning, never a block. `tag_label` on the market
+  chains (`"destination tag"` / `"memo"`).
+* Web form: the required "Where is this XRP address?" question with the
+  approved wording; X/M addresses auto-select *exchange* with the decoded tag
+  read-only; the memo is shown on purchases and withdrawal rows.
+
+### Verified
+
+* **Eleven curl proofs against the API, bypassing the UI** (2026-09-16, live
+  Bitget chain data, live XRPL node): exchange without tag → 422
+  `memo_required`; destination never answered → 422
+  `destination_type_required`; X-address with a conflicting typed tag → 422
+  `memo_conflict`; self-custody with a tag → 422 `memo_not_expected`; BTC with
+  a memo → 422 `memo_not_used`; self-custody → 201; exchange with tag → 201
+  (memo stored); `POST /api/wallets` exchange without tag → 422; X-address
+  saved as classic address + tag → 201; destination check reports the
+  unfunded warning; `GET /api/v2/market/coins/XRP` reports `need_tag` true.
+* **Two executor proofs in the real local container** (2026-09-17, dry run,
+  live Bitget chain data, real `ExchangeClientGateway`): an XRP purchase
+  written straight into the database with no destination type, and one with
+  `exchange` and no memo, both bought (simulated) and then **refused at send
+  time** — withdrawal row `failed`, purchase `withdrawal_failed`, reason
+  stored, nothing sent.
+* **Live fee:** the first real BTC buy on the Tokyo server (2026-09-16 20:44
+  UTC, 0.000197 BTC) paid 1.97e-07 BTC, i.e. **0.1%**, while Bitget's public
+  symbols endpoint quotes a 0.2% taker rate. The UI estimate therefore
+  overstates the fee for this account; the 3% fill-warning band is
+  unaffected.
+
+### Not verified
+
+* Bitget's withdrawal request field `tag` (docs and SDK only). It is only
+  exercised by a withdrawal to an exchange address with a tag attached, which
+  is the first real XRP test in the go-live runbook.
+
+### Excluded
+
+* **KORU** — requested alongside XRP/XLM; not added. Bitget lists coin id
+  2880 with an empty `chains` array and no `KORUUSDT` spot pair (error
+  40034). It is a TradFi perpetual on a 3× leveraged Direxion ETF: no chain,
+  no spot market, nothing to deliver to a wallet.
+
 ## [2.2.0] - 2026-07-21
 
 Adds a second, opt-in swap backend and makes the Bitget credential model

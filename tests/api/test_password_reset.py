@@ -31,12 +31,14 @@ async def account(db):
 
 @pytest.fixture
 def sent(monkeypatch):
+    """Security emails are queued to the outbox (audit C2); capture at the outbox."""
     box = []
 
-    async def fake_send(to_email, subject, html_content, from_email=None, **kw):
-        box.append({"to": to_email, "subject": subject, "text": kw.get("text_content", ""), "html": html_content})
-        return "email-1"
-    monkeypatch.setattr(resend, "send_email", fake_send)
+    async def fake_enqueue(to, subject, html, text, template="generic", *, category="confirmation", user_id=None, now=None):
+        box.append({"to": to, "subject": subject, "text": text, "html": html, "template": template, "category": category})
+        return True
+    from api.services import email_outbox
+    monkeypatch.setattr(email_outbox, "enqueue", fake_enqueue)
     return box
 
 
@@ -51,6 +53,7 @@ async def test_forgot_password_sends_link_for_known_email(client, account, sent,
     assert r.status_code == 200 and r.json() == {"sent": True}
     assert len(sent) == 1 and sent[0]["to"] == account.email
     assert sent[0]["subject"] == f"Reset your {settings.app_name} password"
+    assert sent[0]["category"] == "security" and sent[0]["template"] == "password_reset"
     assert "https://app.autobuy.test/reset-password?token=" in sent[0]["text"]
     decoded = jwt.decode(link_token(sent[0]), settings.secret_key, algorithms=[settings.algorithm])
     assert decoded["type"] == "password_reset" and decoded["sub"] == str(account.id)
@@ -73,6 +76,8 @@ async def test_reset_token_cannot_be_used_as_a_login(client, account):
 async def test_reset_password_flow(client, db, account, sent):
     async with client as c:
         old_session = (await c.post("/api/auth/login", json={"email": account.email, "password": OLD})).json()
+        from api.routes.auth import CSRF_COOKIE, REFRESH_COOKIE
+        old_refresh = c.cookies[REFRESH_COOKIE]
         assert (await c.get("/api/user/profile", headers={"Authorization": f"Bearer {old_session['access_token']}"})).status_code == 200
         await c.post("/api/auth/forgot-password", json={"email": account.email})
         token = link_token(sent[0])
@@ -84,7 +89,10 @@ async def test_reset_password_flow(client, db, account, sent):
         assert (await c.post("/api/auth/login", json={"email": account.email, "password": OLD})).status_code == 401
         # every session issued before the reset is signed out
         assert (await c.get("/api/user/profile", headers={"Authorization": f"Bearer {old_session['access_token']}"})).status_code == 401
-        assert (await c.post("/api/auth/refresh", json={"refresh_token": old_session["refresh_token"]})).status_code == 401
+        from api.routes.auth import CSRF_HEADER
+        assert (await c.post("/api/auth/refresh", cookies={REFRESH_COOKIE: old_refresh, CSRF_COOKIE: old_session["csrf_token"]},
+                             headers={CSRF_HEADER: old_session["csrf_token"]})).status_code == 401, \
+            "the pre-reset refresh cookie is rejected"
         # the token is single-use
         r = await c.post("/api/auth/reset-password", json={"token": token, "new_password": "Third-Passw0rd!"})
         assert r.status_code == 400 and "Invalid or expired" in r.json()["detail"]

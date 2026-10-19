@@ -43,11 +43,3 @@ async def sumsub_events(request: Request, db: AsyncSession = Depends(get_db)):
                 (payload.get("reviewResult") or {}).get("reviewAnswer"))
     result = await apply_review_event(db, payload)
     return {"received": True, "type": payload.get("type"), **result}
-
-
-@router.post("/resend", status_code=202)
-async def resend_events(request: Request):
-    """Accept Resend delivery events (bounce/complaint). Stub: log only."""
-    payload = await request.json()
-    logger.info("resend webhook: type=%s", payload.get("type"))
-    return {"received": True}

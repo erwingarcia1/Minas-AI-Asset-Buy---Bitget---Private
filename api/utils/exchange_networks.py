@@ -1,40 +1,89 @@
-"""Which blockchain networks each supported exchange can withdraw to, and which
-chain each supported coin is delivered on."""
+"""The coin registry: every purchase coin with its category, display name, the
+address-format family its withdrawals use (None = never withdrawn) and whether
+withdraw mode may ever be used for it.
+
+Chain names for withdrawals are the exchange's own (see api/utils/chains.py);
+the family only says which validator checks an address. USDT is NOT a purchase
+coin: purchases are paid in USDT and Bitget has no USDTUSDT pair. USDC stays
+because USDCUSDT exists and was online on Bitget when checked (2026-09-13).
+
+Categories carry the policy, so a coin added to "meme" inherits it: meme coins
+are accumulate-only (bought and held on the exchange, no withdraw mode even for
+allowlisted users) and show a neutral risk note in the purchase form. Labels
+describe; they never rank or recommend.
+"""
 from __future__ import annotations
 
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
-EXCHANGE_NETWORKS: Dict[str, List[str]] = {
-    "binance": ["mainnet", "testnet"],
-    "bitget": ["mainnet", "testnet"],
-    "okx": ["mainnet", "testnet"],
-    "bybit": ["mainnet", "testnet"],
+
+@dataclass(frozen=True)
+class Category:
+    key: str
+    label: str
+    accumulate_only: bool = False
+    risk_note: Optional[str] = None
+
+
+CATEGORIES: Dict[str, Category] = {
+    "main": Category("main", "Main coins"),
+    "stable": Category("stable", "Stablecoins"),
+    "meme": Category("meme", "Meme coins", accumulate_only=True,
+                     risk_note="Meme coins can move very sharply in price. Only buy what you can afford to lose."),
 }
 
-# Coin -> chain whose address format applies. USDT/USDC are delivered as
-# ERC-20 tokens, so they use Ethereum addresses.
-CRYPTO_CHAINS: Dict[str, str] = {
-    "BTC": "bitcoin",
-    "ETH": "ethereum",
-    "USDT": "ethereum",
-    "USDC": "ethereum",
-    "SOL": "solana",
-}
 
-SUPPORTED_EXCHANGES = tuple(EXCHANGE_NETWORKS)
-SUPPORTED_CRYPTOS = tuple(CRYPTO_CHAINS)
+@dataclass(frozen=True)
+class Coin:
+    symbol: str
+    name: str
+    category: str
+    family: Optional[str] = None   # address family for withdrawals; None = accumulate-only
 
-
-def supported_networks(exchange_name: str) -> List[str]:
-    """Networks `exchange_name` can withdraw to (empty list for unknown exchanges)."""
-    return list(EXCHANGE_NETWORKS.get((exchange_name or "").lower(), []))
+    @property
+    def withdrawable(self) -> bool:
+        return self.family is not None and not CATEGORIES[self.category].accumulate_only
 
 
-def can_exchange_withdraw_to_network(exchange_name: str, blockchain_network: str) -> bool:
-    """True when the exchange is known and supports withdrawals to that network."""
-    return (blockchain_network or "").lower() in supported_networks(exchange_name)
+COINS: Dict[str, Coin] = {c.symbol: c for c in (
+    Coin("BTC", "Bitcoin", "main", "bitcoin"),
+    Coin("ETH", "Ethereum", "main", "ethereum"),
+    Coin("USDC", "USD Coin", "stable", "ethereum"),   # delivered as an ERC-20 token by default
+    Coin("SOL", "Solana", "main", "solana"),
+    Coin("XRP", "XRP", "main", "xrpl"),               # native XRP on the XRP Ledger (Bitget chain "XRP"); destination tag on exchanges
+    Coin("XLM", "Stellar", "main", "stellar"),        # native XLM on Stellar (Bitget chain "StellarLumens"); memo on exchanges
+    Coin("DOGE", "Dogecoin", "meme"),                 # Bitget DOGEUSDT checked online 2026-10-02; accumulate-only
+    Coin("SHIB", "Shiba Inu", "meme"),                # Bitget SHIBUSDT checked online 2026-10-02; accumulate-only
+    Coin("PEPE", "Pepe", "meme"),                     # Bitget PEPEUSDT checked online 2026-10-02; whole-coin pair; accumulate-only
+    Coin("BONK", "Bonk", "meme"),                     # Bitget BONKUSDT rechecked online 2026-10-02; whole-coin pair; accumulate-only
+)}
+
+SUPPORTED_CRYPTOS = tuple(COINS)
+CRYPTO_CHAINS: Dict[str, str] = {s: c.family for s, c in COINS.items() if c.family}   # withdrawable coins -> family
+ACCUMULATE_ONLY = frozenset(s for s, c in COINS.items() if not c.withdrawable)
 
 
-def chain_for_crypto(crypto_symbol: str) -> str | None:
-    """Address-format chain for a coin symbol, or None if the coin is unsupported."""
-    return CRYPTO_CHAINS.get((crypto_symbol or "").upper())
+def coin_spec(symbol: str) -> Optional[Coin]:
+    return COINS.get((symbol or "").upper())
+
+
+def category_of(symbol: str) -> Optional[Category]:
+    c = coin_spec(symbol)
+    return CATEGORIES[c.category] if c else None
+
+
+def is_withdrawable(symbol: str) -> bool:
+    c = coin_spec(symbol)
+    return bool(c and c.withdrawable)
+
+
+def categories_with_coins() -> List[dict]:
+    """[{category, label, accumulate_only, risk_note, coins:[{symbol, name}]}] in registry order."""
+    out = []
+    for key, cat in CATEGORIES.items():
+        coins = [{"symbol": c.symbol, "name": c.name} for c in COINS.values() if c.category == key]
+        if coins:
+            out.append({"category": key, "label": cat.label, "accumulate_only": cat.accumulate_only,
+                        "risk_note": cat.risk_note, "coins": coins})
+    return out

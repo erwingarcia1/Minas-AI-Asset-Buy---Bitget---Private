@@ -3,3 +3,7 @@ Hi {{ name }}, here's what your automation did this week:
 {% for row in rows %}- {{ row.crypto }}: {{ row.amount }} for {{ row.cost }} USDT
 {% endfor %}
 Total: {{ total_usdt }} USDT across {{ count }} purchase(s){% if failed %} ({{ failed }} failed — see your dashboard){% endif %}.
+{% if unsubscribe_url %}
+Unsubscribe or change which emails you get: {{ unsubscribe_url }}
+(Security and failure alerts are always sent.)
+{% endif %}

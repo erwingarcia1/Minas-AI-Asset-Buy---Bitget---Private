@@ -38,14 +38,14 @@ PHASE 5 — Frontend (parallel from W4)
 MILESTONES               M0       M1            M2       M3       M4      LAUNCH
 ```
 
-Phase 6 (analytics, multi-exchange, webhooks, SDKs, reporting) is post-launch and unscheduled.
+Phase 6 as originally scoped (analytics, webhooks, SDKs, reporting) shipped in September 2026; multi-exchange execution stays switched off (Bitget only).
 
 ## Milestones
 
 | # | Date (target) | Milestone | Exit criteria |
 |---|---|---|---|
 | M0 | Sep 11 | **Foundation locked** | Alembic baseline live, cascade-delete fixed, router integration tests in CI |
-| M1 | Sep 25 | **First automated purchase** | Scheduler executes a testnet/dry-run buy end-to-end; transaction recorded |
+| M1 | Sep 25 | **First automated purchase** | Done early: the first real BTC buy executed on the production server on 2026-09-16 (dry-run mode preceded it; there is no testnet path) |
 | M2 | Oct 02 | **Compliance-ready** | Sumsub flow live in sandbox; self-serve KYC removed; email receipts sending |
 | M3 | Oct 09 | **Hardened** | Security audit closed, ≥80 % service coverage, e2e green in CI |
 | M4 | Oct 16 | **Deployable** | Prod compose profile + CI/CD + monitoring/alerts; API frozen & documented |
@@ -63,11 +63,11 @@ Phase 6 (analytics, multi-exchange, webhooks, SDKs, reporting) is post-launch an
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| **Real-money execution bug** (double-buy, wrong amount) | Medium | Critical | Idempotency per due-date (#1 AC), dry-run default, testnet first, small-amount canary launch, capped per-user amounts (#6 validation) |
+| **Real-money execution bug** (double-buy, wrong amount) | Medium | Critical | Idempotency per due-date (#1 AC), dry-run default, small-amount canary launch, capped per-user amounts (#6 validation) |
 | **Self-serve KYC reaches production** | Low | Critical (regulatory) | #3 removes user-writable `kyc_status` and gates the executor; M2 is a hard launch gate |
 | **API key compromise** | Low | Critical | Fernet at rest today; #11 splits encryption key from JWT secret + rotation script; #5 warns on withdrawal-permission keys |
 | **Cascade-delete destroys transaction history** | High (it's live behavior today) | High | Fixed in Sprint 0 (#12 `ON DELETE SET NULL`) before any real transactions exist |
-| **Single-venue dependency (Binance outage/geo-blocks)** | Medium | Medium | Accept for MVP; legacy repo already has Bitget/Bybit/OKX clients → Phase 6 multi-exchange is cheap insurance |
+| **Single-venue dependency (Bitget outage/geo-blocks)** | Medium | Medium | Accept for MVP; the venue-agnostic client still carries Binance/Bybit/OKX paths that are switched off by `SUPPORTED_EXCHANGES` |
 | **Timeline slip on solo staffing** | High | Medium | Cut line is explicit: Phase 6 entirely, admin panel (#18), perf tests (#10) can all slip without blocking launch |
 | **Scheduler double-execution across replicas** | Medium | High | Redis/advisory lock is an acceptance criterion of #2, not an afterthought; single-replica deploy until proven |
 | **Sumsub/Resend integration surprises** | Medium | Medium | Both are sandbox-testable; webhook contract tests with recorded payloads; email is fire-and-forget so it can't block trades |

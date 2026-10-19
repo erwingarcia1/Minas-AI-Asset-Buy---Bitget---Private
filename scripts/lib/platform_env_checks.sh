@@ -58,5 +58,11 @@ check_platform_env() {
     case "$(platform_lower "$(platform_envval "$f" LOG_RESET_LINKS)")" in
         1|true|yes) echo "ERROR: LOG_RESET_LINKS=1 writes password reset links to the log — it must be unset or 0 in production." >&2; return 1;;
     esac
+    # --- Guardian (read-only monitoring): the switch is 0, 1 or unset, never a lookalike ----
+    v="$(platform_envval "$f" GUARDIAN_ENABLED)"
+    case "$v" in
+        ""|0|1) ;;
+        *) echo "ERROR: GUARDIAN_ENABLED must be 0 or 1 in $f (is '$v') — the worker and the API both key on that exact value." >&2; return 1;;
+    esac
     return 0
 }

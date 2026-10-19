@@ -57,6 +57,22 @@ try {
 await client.logout();
 ```
 
+### Two-factor accounts
+
+When the account has two-factor authentication on, `login()` resolves to the
+`202` challenge (`{ mfa_required: true, mfa_token, expires_in }`) instead of a
+token pair and stores nothing. Check `mfa_required` and finish with
+`loginMfa()` within `expires_in` seconds, passing `{ code }` (authenticator)
+or `{ recovery_code }`:
+
+```js
+let result = await client.login("me@example.com", "Str0ng!Passw0rd");
+if (result.mfa_required) {
+  result = await client.loginMfa(result.mfa_token, { code: await promptForCode() });   // or { recovery_code }
+}
+// result is now the token pair and the client is signed in
+```
+
 Restore a session with `new AutoBuyClient({ baseUrl, tokens })` or `client.setTokens(tokens)`.
 
 ### Resource groups

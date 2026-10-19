@@ -1,3 +1,4 @@
+import { CSRF_HEADER } from "./http.js";
 /**
  * AutoBuy Crypto API — TypeScript client.
  *
@@ -7,7 +8,7 @@
  */
 import { buildApi, type Api } from "./api.js";
 import { FetchTransport, type FetchTransportOptions, type TokenPair } from "./http.js";
-import type { PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse, UserOut, UserProfile } from "./types.js";
+import type { MfaRequiredResponse, PurchaseCreateRequest, PurchaseCreatedOut, TokenResponse, UserOut, UserProfile } from "./types.js";
 
 export * from "./types.js";
 export * from "./api.js";
@@ -17,6 +18,14 @@ export {
 } from "./http.js";
 
 export type AutoBuyClientOptions = FetchTransportOptions;
+
+/** Second factor for `loginMfa`: the authenticator code or one of the recovery codes. */
+export type MfaFactor = { code: string } | { recovery_code: string };
+
+/** True when `login()` answered with a pending two-factor challenge (HTTP 202) instead of a token pair. */
+export function isMfaRequired(result: TokenResponse | MfaRequiredResponse): result is MfaRequiredResponse {
+  return typeof result === "object" && result !== null && Boolean((result as MfaRequiredResponse).mfa_required);
+}
 
 /** High-level client: resource groups from the OpenAPI spec plus token-lifecycle helpers. */
 export class AutoBuyClient {
@@ -63,9 +72,28 @@ export class AutoBuyClient {
     return this.api.auth.register({ email, password });
   }
 
-  /** `POST /api/auth/login` — authenticate and store the resulting tokens. */
-  async login(email: string, password: string): Promise<TokenResponse> {
-    const pair = await this.api.auth.login({ email, password });
+  /**
+   * `POST /api/auth/login` — authenticate and store the resulting tokens.
+   *
+   * An account with two-factor authentication on answers 202 with
+   * `{ mfa_required: true, mfa_token, expires_in }` instead of a token pair, and nothing is
+   * stored. Check the result with {@link isMfaRequired} and finish the sign-in with
+   * {@link AutoBuyClient.loginMfa} within `expires_in` seconds.
+   */
+  async login(email: string, password: string): Promise<TokenResponse | MfaRequiredResponse> {
+    const result = await this.api.auth.login({ email, password });
+    if (isMfaRequired(result)) return result;
+    this.transport.setTokens(result);
+    return result;
+  }
+
+  /**
+   * `POST /api/auth/login/mfa` — finish a two-factor sign-in and store the resulting tokens.
+   * `mfaToken` is the one returned by `login()`; `factor` is `{ code }` (authenticator) or `{ recovery_code }`.
+   */
+  async loginMfa(mfaToken: string, factor: MfaFactor): Promise<TokenResponse> {
+    if (!factor || !("code" in factor || "recovery_code" in factor)) throw new TypeError("loginMfa needs { code } or { recovery_code }");
+    const pair = await this.api.auth.loginMfa({ mfa_token: mfaToken, ...factor });
     this.transport.setTokens(pair);
     return pair;
   }
@@ -75,12 +103,10 @@ export class AutoBuyClient {
     return this.transport.refresh();
   }
 
-  /** `POST /api/auth/logout` — revoke the refresh token and clear local state. */
+  /** `POST /api/auth/logout` — revoke the refresh cookie server-side and clear local state. */
   async logout(): Promise<void> {
-    const refresh_token = this.tokens?.refresh_token;
-    if (refresh_token) {
-      await this.api.auth.logout({ refresh_token }).catch(() => undefined);
-    }
+    const csrf = this.tokens?.csrf_token;
+    await this.transport.request("POST", "/api/auth/logout", { auth: false, headers: csrf ? { [CSRF_HEADER]: csrf } : {} }).catch(() => undefined);
     this.transport.setTokens(null);
   }
 

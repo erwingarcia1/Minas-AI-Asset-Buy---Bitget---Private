@@ -4,16 +4,26 @@ import type { HttpTransport } from "./http.js";
 import type {
   APIKeyCreate,
   APIKeyResponse,
+  AdminPurchaseList,
+  AdminPurchaseRow,
   AdminTransactionList,
   AdminUserList,
   AlertItem,
   ApplicantStatusResponse,
   ChangePasswordRequest,
+  CoinMarketOut,
   ComparisonResponse,
+  ConfirmRequest,
   CreateApplicantRequest,
   CreateApplicantResponse,
   DashboardResponse,
+  DestinationCheckOut,
+  DisableRequest,
+  EmailOutboxView,
   EmailSentResponse,
+  EnrolRequest,
+  EnrolResponse,
+  FillDeviation,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
   HistoryResponse,
@@ -21,34 +31,46 @@ import type {
   IntegrationInfo,
   KeyVerifyResponse,
   KycOverride,
+  LiftWalletHold,
   LoginRequest,
-  LogoutRequest,
+  MfaLoginRequest,
+  MfaRequiredResponse,
   PerformanceResponse,
   PlatformStats,
+  PortfolioSeriesResponse,
   PreferencesPayload,
   PreferencesResponse,
   ProfileUpdateRequest,
+  PublicMeta,
   PurchaseCreateRequest,
   PurchaseCreatedOut,
   PurchaseDetailOut,
   PurchaseOut,
+  PurchaseReview,
   PurchaseUpdateRequest,
   QuickStats,
+  RecoveryCodesResponse,
   RecurringResponse,
-  RefreshRequest,
+  RegenerateRequest,
   RegisterRequest,
   ResetPasswordRequest,
   ResetTokenRequest,
   ResetTokenValidity,
+  ResetTwoFactorRequest,
+  ResolvePurchase,
+  RetryWithdrawalOut,
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
+  TelegramTestResult,
   TimelineResponse,
   TokenResponse,
   TransactionListResponse,
   TransactionOut,
   TransactionResponse,
   TransactionStats,
+  TwoFactorStatus,
+  UnsuspendPayload,
   UserOut,
   UserProfile,
   UserPublicProfile,
@@ -77,13 +99,17 @@ export declare class AuthApi {
   /** Register — `POST /api/auth/register` */
   register(body: RegisterRequest): Promise<UserOut>;
   /** Login — `POST /api/auth/login` */
-  login(body: LoginRequest): Promise<TokenResponse>;
+  login(body: LoginRequest): Promise<TokenResponse | MfaRequiredResponse>;
+  /** Login Mfa — `POST /api/auth/login/mfa` */
+  loginMfa(body: MfaLoginRequest): Promise<TokenResponse>;
+  /** Logout All — `POST /api/auth/logout-all` */
+  logoutAll(): Promise<unknown>;
   /** Verify — `POST /api/auth/verify` */
   verify(body: VerifyRequest): Promise<VerifyResponse>;
   /** Refresh — `POST /api/auth/refresh` */
-  refresh(body: RefreshRequest): Promise<TokenResponse>;
+  refresh(): Promise<TokenResponse>;
   /** Logout — `POST /api/auth/logout` */
-  logout(body: LogoutRequest): Promise<unknown>;
+  logout(): Promise<unknown>;
   /** Change Password — `POST /api/auth/change-password` */
   changePassword(body: ChangePasswordRequest): Promise<unknown>;
   /** Forgot Password — `POST /api/auth/forgot-password` */
@@ -94,9 +120,26 @@ export declare class AuthApi {
   resetPassword(body: ResetPasswordRequest): Promise<unknown>;
 }
 
+/** `public` endpoints. */
+export declare class PublicApi {
+  constructor(http: HttpTransport);
+  /** Public Meta — `GET /api/public/meta` */
+  publicMeta(): Promise<PublicMeta>;
+}
+
 /** `user` endpoints. */
 export declare class UserApi {
   constructor(http: HttpTransport);
+  /** Two Factor Status — `GET /api/user/2fa` */
+  twoFactorStatus(): Promise<TwoFactorStatus>;
+  /** Enrol — `POST /api/user/2fa/enrol` */
+  enrol(body: EnrolRequest): Promise<EnrolResponse>;
+  /** Confirm — `POST /api/user/2fa/confirm` */
+  confirm(body: ConfirmRequest): Promise<RecoveryCodesResponse>;
+  /** Regenerate Recovery Codes — `POST /api/user/2fa/recovery-codes` */
+  regenerateRecoveryCodes(body: RegenerateRequest): Promise<RecoveryCodesResponse>;
+  /** Disable — `POST /api/user/2fa/disable` */
+  disable(body: DisableRequest): Promise<unknown>;
   /** Get Profile — `GET /api/user/profile` */
   getProfile(): Promise<UserProfile>;
   /** Update Profile — `PUT /api/user/profile` */
@@ -108,6 +151,8 @@ export declare class UserApi {
 /** `exchange` endpoints. */
 export declare class ExchangeApi {
   constructor(http: HttpTransport);
+  /** Supported Exchanges — `GET /api/exchange/supported` */
+  supportedExchanges(): Promise<string[]>;
   /** List Keys — `GET /api/exchange/keys` */
   listKeys(): Promise<APIKeyResponse[]>;
   /** Add Or Update Key — `POST /api/exchange/keys` */
@@ -142,6 +187,8 @@ export declare class DashboardApi {
   quickStats(): Promise<QuickStats>;
   /** Analytics Timeline — `GET /api/dashboard/analytics/timeline` */
   analyticsTimeline(query?: { days?: number }): Promise<TimelineResponse>;
+  /** Portfolio Series — `GET /api/dashboard/portfolio/series` */
+  portfolioSeries(query?: { range?: string }): Promise<PortfolioSeriesResponse>;
 }
 
 /** `integrations` endpoints. */
@@ -186,28 +233,44 @@ export declare class NotificationsApi {
 /** `admin` endpoints. */
 export declare class AdminApi {
   constructor(http: HttpTransport);
-  /** Platform Stats — `GET /api/admin/stats` */
-  platformStats(): Promise<PlatformStats>;
   /** List Users — `GET /api/admin/users` */
   listUsers(query?: { q?: string | null; limit?: number; offset?: number }): Promise<AdminUserList>;
   /** Suspend User — `POST /api/admin/users/{user_id}/suspend` */
   suspendUser(userId: string): Promise<unknown>;
   /** Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend` */
-  unsuspendUser(userId: string): Promise<unknown>;
+  unsuspendUser(userId: string, body?: UnsuspendPayload | null): Promise<unknown>;
   /** Delete User — `DELETE /api/admin/users/{user_id}` */
   deleteUser(userId: string, query: { confirm: string }): Promise<unknown>;
+  /** Lift Wallet Hold — `POST /api/admin/users/{user_id}/lift-wallet-hold` */
+  liftWalletHold(userId: string, body: LiftWalletHold): Promise<unknown>;
   /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
   kycOverride(userId: string, body: KycOverride): Promise<unknown>;
-  /** All Transactions — `GET /api/admin/transactions` */
-  allTransactions(query?: { status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }): Promise<AdminTransactionList>;
+  /** Reset Two Factor — `POST /api/admin/users/{user_id}/2fa/reset` */
+  resetTwoFactor(userId: string, body?: ResetTwoFactorRequest | null): Promise<unknown>;
+  /** List Purchases — `GET /api/admin/purchases` */
+  listPurchases(query?: { status?: string | null; limit?: number; offset?: number }): Promise<AdminPurchaseList>;
+  /** Review Purchase — `GET /api/admin/purchases/{purchase_id}/review` */
+  reviewPurchase(purchaseId: string): Promise<PurchaseReview>;
+  /** Resolve Purchase — `POST /api/admin/purchases/{purchase_id}/resolve` */
+  resolvePurchase(purchaseId: string, body: ResolvePurchase): Promise<AdminPurchaseRow>;
   /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
   forceRetry(purchaseId: string): Promise<unknown>;
+  /** Fill Deviations — `GET /api/admin/fills/deviations` */
+  fillDeviations(query?: { limit?: number }): Promise<FillDeviation[]>;
+  /** Platform Stats — `GET /api/admin/stats` */
+  platformStats(): Promise<PlatformStats>;
+  /** All Transactions — `GET /api/admin/transactions` */
+  allTransactions(query?: { status_filter?: string | null; user_id?: string | null; limit?: number; offset?: number }): Promise<AdminTransactionList>;
+  /** Undelivered Emails — `GET /api/admin/emails/undelivered` */
+  undeliveredEmails(query?: { limit?: number }): Promise<EmailOutboxView>;
   /** Alerts — `GET /api/admin/alerts` */
   alerts(): Promise<AlertItem[]>;
   /** Pause Scheduler — `POST /api/admin/scheduler/pause` */
   pauseScheduler(): Promise<unknown>;
   /** Resume Scheduler — `POST /api/admin/scheduler/resume` */
   resumeScheduler(): Promise<unknown>;
+  /** Telegram Test — `POST /api/admin/telegram/test` */
+  telegramTest(): Promise<TelegramTestResult>;
 }
 
 /** `analytics` endpoints. */
@@ -243,8 +306,6 @@ export declare class WebhooksApi {
   constructor(http: HttpTransport);
   /** Sumsub Events — `POST /api/webhooks/sumsub` */
   sumsubEvents(): Promise<unknown>;
-  /** Resend Events — `POST /api/webhooks/resend` */
-  resendEvents(): Promise<unknown>;
 }
 
 /** `email` endpoints. */
@@ -269,8 +330,14 @@ export declare class V2Api {
   updatePurchase(purchaseId: string, body: PurchaseUpdateRequest): Promise<PurchaseOut>;
   /** Cancel Purchase — `DELETE /api/v2/purchases/{purchase_id}` */
   cancelPurchase(purchaseId: string): Promise<unknown>;
+  /** Retry Withdrawal — `POST /api/v2/purchases/{purchase_id}/retry-withdrawal` */
+  retryWithdrawal(purchaseId: string): Promise<RetryWithdrawalOut>;
   /** Purchase Transactions — `GET /api/v2/purchases/{purchase_id}/transactions` */
   purchaseTransactions(purchaseId: string, query?: { status_filter?: string | null }): Promise<TransactionOut[]>;
+  /** Coin Market — `GET /api/v2/market/coins/{coin}` */
+  coinMarket(coin: string, query?: { amount_usd?: number | null }): Promise<CoinMarketOut>;
+  /** Check Withdrawal Destination — `GET /api/v2/market/destination` */
+  checkWithdrawalDestination(query: { chain: string; address: string; destination_type?: string | null; memo?: string | null }): Promise<DestinationCheckOut>;
 }
 
 /** `wallets` endpoints. */
@@ -287,6 +354,7 @@ export declare class WalletsApi {
 export interface Api {
   readonly system: SystemApi;
   readonly auth: AuthApi;
+  readonly public: PublicApi;
   readonly user: UserApi;
   readonly exchange: ExchangeApi;
   readonly transactions: TransactionsApi;

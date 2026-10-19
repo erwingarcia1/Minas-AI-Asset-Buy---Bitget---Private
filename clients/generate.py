@@ -123,6 +123,23 @@ class TypeMapper:
 
 # --------------------------------------------------------------------------- operations model
 
+def success_schema(op: dict) -> dict | None:
+    """JSON schema of the operation's 2xx response.
+
+    When more than one 2xx response is documented the result is their ``anyOf``, which the
+    type mappers render as a union (login: 200 ``TokenResponse`` or 202 ``MfaRequiredResponse``).
+    Responses without a JSON body (204) contribute nothing.
+    """
+    schemas: list[dict] = []
+    for code in sorted(c for c in op.get("responses", {}) if re.fullmatch(r"2\d\d", c)):
+        schema = op["responses"][code].get("content", {}).get("application/json", {}).get("schema")
+        if schema is not None and schema not in schemas:
+            schemas.append(schema)
+    if not schemas:
+        return None
+    return schemas[0] if len(schemas) == 1 else {"anyOf": schemas}
+
+
 def collect_ops(spec: dict) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = {}
     for path, methods in spec["paths"].items():
@@ -134,8 +151,7 @@ def collect_ops(spec: dict) -> dict[str, list[dict]]:
             query_params = [p for p in op.get("parameters", []) if p["in"] == "query"]
             body = op.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema")
             body_required = op.get("requestBody", {}).get("required", False)
-            ok = op.get("responses", {}).get("200") or op.get("responses", {}).get("201") or {}
-            resp = ok.get("content", {}).get("application/json", {}).get("schema")
+            resp = success_schema(op)
             groups.setdefault(group_for(path), []).append({
                 "func": func,
                 "method": method,
@@ -291,6 +307,17 @@ def _refs_in_ops(ops: list[dict]) -> set[str]:
 
 # --------------------------------------------------------------------------- JavaScript
 
+def js_doc_type(ret: str) -> str:
+    """JSDoc spelling of a generated return type: schema names get the ``import('./types.js')`` prefix,
+    each member of a plain union on its own."""
+    if " | " in ret and "<" not in ret:
+        return " | ".join(f"import('./types.js').{v}" if re.fullmatch(r"[A-Z]\w*", v) else v for v in ret.split(" | "))
+    rt = ret if ret in ("unknown",) or "[" in ret else f"import('./types.js').{ret}"
+    if ret.endswith("[]"):
+        rt = f"import('./types.js').{ret[:-2]}[]"
+    return rt
+
+
 def gen_js_api(spec: dict, groups: dict[str, list[dict]]) -> tuple[str, str]:
     """Return (api.js, api.d.ts)."""
     tm = TypeMapper("ts")
@@ -332,10 +359,7 @@ def gen_js_api(spec: dict, groups: dict[str, list[dict]]) -> tuple[str, str]:
                 js.append(f"   * @param {{import('./types.js').{tm.map(op['body'])}}} body")
             if op["query_params"]:
                 js.append(f"   * @param {{{ts_query_type(op, tm)}}} [query]")
-            rt = ret if ret in ("unknown",) or "[" in ret else f"import('./types.js').{ret}"
-            if ret.endswith("[]"):
-                rt = f"import('./types.js').{ret[:-2]}[]"
-            js.append(f"   * @returns {{Promise<{rt}>}}")
+            js.append(f"   * @returns {{Promise<{js_doc_type(ret)}>}}")
             js.append("   */")
             js.append(f"  {camel(op['func'])}({', '.join(js_params)}) {{")
             js.append(f"    return this.http.request({ts_call_args(op)});")

@@ -32,14 +32,14 @@ async def test_autobuy_success_records_fill_and_emits_buy_then_withdrawal(db, us
     rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id)
                              .order_by(PurchaseTransaction.created_at))).scalars().all()
     buy, wd = rows
-    assert buy.status == "success" and buy.order_id == "ORD-1" and buy.fill_price == 50_000.0 and buy.cost_usd == 100
-    assert wd.tx_type == "withdrawal" and wd.withdrawal_id == "WD-1" and wd.withdrawal_fee == 0.0001
+    assert buy.status == "success" and buy.order_id.startswith("ORD-1-") and buy.fill_price == 50_000.0 and buy.cost_usd == 100
+    assert wd.tx_type == "withdrawal" and wd.withdrawal_id.startswith("WD-1-") and wd.withdrawal_fee == 0.0001
     assert wd.withdrawal_fee_currency == "BTC" and wd.parent_transaction_id == buy.id
     assert [e.type for e in captured] == ["buy_executed", "withdrawal_sent"]
     assert captured[0].tx.id == buy.id and captured[1].tx.id == wd.id
     assert captured[0].exchange == "binance" and captured[0].dry_run is True
     payload = captured[1].payload()
-    assert payload["wallet_address"] == p.wallet_address and payload["withdrawal_id"] == "WD-1"
+    assert payload["wallet_address"] == p.wallet_address and payload["withdrawal_id"].startswith("WD-1-")
 
 
 async def test_dca_success_emits_buy_only(db, user, binance_key, captured):
@@ -56,7 +56,7 @@ async def test_withdrawal_failure_keeps_fill_parks_purchase_and_never_rebuys(db,
     rows = (await db.execute(select(PurchaseTransaction).where(PurchaseTransaction.purchase_id == p.id)
                              .order_by(PurchaseTransaction.created_at))).scalars().all()
     buy, wd = rows
-    assert buy.status == "success" and buy.order_id == "ORD-1", "the buy that filled is recorded"
+    assert buy.status == "success" and buy.order_id.startswith("ORD-1-"), "the buy that filled is recorded"
     assert wd.status == "failed" and "exchange said no" in wd.error_message
     await db.refresh(p)
     assert p.status == "withdrawal_failed" and p.failure_count == 0 and p.next_execution is None
@@ -126,20 +126,28 @@ async def test_real_subscribers_email_campaign_webhook_slack(db, user, binance_k
 
     purchase_mails = [m for m in capture.sent if m["template"] == "purchase"]
     assert len(purchase_mails) == 1, "autobuy: one email per attempt, on the withdrawal outcome"
-    assert purchase_mails[0]["subject"].startswith("[DRY RUN] ✓ Purchase complete") and "sent to your wallet" in purchase_mails[0]["subject"]
+    # dry run: the withdrawal is simulated and the email must say so, never "sent to your wallet"
+    assert purchase_mails[0]["subject"].startswith("[DRY RUN] ✓ Purchase complete") and "withdrawal simulated" in purchase_mails[0]["subject"]
+    assert "sent to your wallet" not in purchase_mails[0]["subject"]
     assert p.wallet_address in purchase_mails[0]["text"] and "ORD-1" in purchase_mails[0]["text"]
     assert any(m["template"] == "first_purchase" for m in capture.sent)
     assert [d["event"] for d in delivered] == ["purchase.buy_executed", "purchase.withdrawal_sent"]
-    assert delivered[0]["data"]["order_id"] == "ORD-1" and delivered[1]["data"]["withdrawal_id"] == "WD-1"
+    assert delivered[0]["data"]["order_id"].startswith("ORD-1-") and delivered[1]["data"]["withdrawal_id"].startswith("WD-1-")
     assert delivered[0]["data"]["tx_type"] == "buy" and delivered[1]["data"]["tx_type"] == "withdrawal"
     assert slack_calls == [], "dry-run withdrawals do not page Slack"
 
-    # a failing second purchase alerts Slack and emails the failure
-    await make_purchase(db, user, binance_key, next_execution=NOW)
+    # a failing second purchase: Slack gets one run-summary line, the webhook fires per attempt,
+    # and the customer is emailed once the cycle is exhausted (a one-time purchase: after 3 attempts)
+    await make_purchase(db, user, binance_key, frequency="one_time", next_execution=NOW)
     await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
-    assert any("buy failed" in s for s in slack_calls)
-    assert any(m["subject"].startswith("[DRY RUN] ✗ Purchase failed") for m in capture.sent)
+    assert any("1 purchase(s) failed a buy attempt" in s for s in slack_calls)
+    assert not any(m["subject"].startswith("[DRY RUN] ✗ Purchase") or "stopped" in m["subject"] for m in capture.sent), \
+        "no email on attempt 1"
     assert delivered[-1]["event"] == "purchase.buy_failed" and delivered[-1]["data"]["error"]
+    for _ in range(2):
+        await ps.execute_due_purchases(db, now=NOW, gateway=BuyFails(), dry_run=True)
+    assert any("We've paused your" in m["subject"] for m in capture.sent), "the stop is the one email it gets"
+    assert any("PURCHASE STOPPED" in s for s in slack_calls)
     assert purchase_events.emit is not None
 
 

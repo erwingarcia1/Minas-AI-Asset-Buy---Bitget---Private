@@ -119,6 +119,18 @@ class BitgetClient:
             return float(v) if v not in (None, "") else None
         return {"last": num("lastPr"), "ask": num("askPr"), "bid": num("bidPr"), "ts": t.get("ts")}
 
+    def get_candles(self, symbol, granularity, limit=100, end_time_ms=None, history=False):
+        """Public OHLCV candles for a spot symbol, oldest first:
+        [[ts_ms, open, high, low, close, base_vol, quote_vol, usdt_vol], ...] as strings.
+        /api/v2/spot/market/candles serves recent data (up to 1000 rows);
+        /api/v2/spot/market/history-candles serves older data (up to 200 rows,
+        needs endTime). Granularities include 15min, 1h, 4h, 1day."""
+        params = {"symbol": symbol, "granularity": granularity, "limit": str(limit)}
+        if end_time_ms is not None:
+            params["endTime"] = str(int(end_time_ms))
+        path = "/api/v2/spot/market/history-candles" if history else "/api/v2/spot/market/candles"
+        return self._request("GET", path, params=params, auth=False) or []
+
     def get_ticker_price(self, symbol):
         price = self.get_ticker(symbol)["last"]
         if price is None:
@@ -243,18 +255,31 @@ class BitgetClient:
             raise BitgetAPIError("SYMBOL", f"unknown coin {coin!r}")
         return data[0].get("chains") or []
 
-    def withdraw(self, coin, address, amount, network=None, client_oid=None, tag=None, remark=None):
+    # Optional travel-rule / beneficiary fields Bitget accepts on a withdrawal,
+    # keyed by our snake_case names.
+    TRAVEL_RULE_FIELDS = {"first_name": "firstName", "last_name": "lastName", "identity_type": "identityType",
+                          "company_name": "companyName", "area_code": "areaCode", "member_code": "memberCode"}
+
+    def withdraw(self, coin, address, amount, network=None, client_oid=None, tag=None, remark=None,
+                 travel_rule=None):
         """On-chain withdrawal (POST /api/v2/spot/wallet/withdrawal). Needs the
         Withdraw permission, a whitelisted IP and the address in the account's
-        address book. Returns Bitget's withdrawal orderId."""
+        address book. `travel_rule` (dict, see TRAVEL_RULE_FIELDS) is sent when
+        given. Returns Bitget's withdrawal orderId."""
         body = {"coin": coin, "transferType": "on_chain", "address": address, "chain": network,
                 "size": str(amount)}
         if tag:
-            body["tag"] = tag
+            # Destination tag / memo for XRP, XLM and similar. Field name "tag" comes from
+            # Bitget's v2 withdrawal docs and SDK; NOT yet verified against a real tagged
+            # withdrawal (no live one has been sent as of 2026-09-16).
+            body["tag"] = str(tag)
         if remark:
             body["remark"] = remark
         if client_oid:
             body["clientOid"] = client_oid
+        for ours, theirs in self.TRAVEL_RULE_FIELDS.items():
+            if (travel_rule or {}).get(ours):
+                body[theirs] = str(travel_rule[ours])
         data = self._request("POST", "/api/v2/spot/wallet/withdrawal", body=body) or {}
         return str(data.get("orderId") or "")
 
@@ -269,3 +294,149 @@ class BitgetClient:
         if order_id:
             params["orderId"] = str(order_id)
         return self._request("GET", "/api/v2/spot/wallet/withdrawal-records", params=params) or []
+
+
+# ---------------------------------------------------------------------------
+# Unified Trading Account (UTA) client, Bitget API v3 (v0.8.0). The Classic client
+# above is untouched: this subclass overrides only the calls whose path or shape
+# changed. Signing and transport are identical (same headers, same prehash).
+# Field names from Bitget's UTA docs, read 2026-10-08:
+#   POST /api/v3/trade/place-order    {category, symbol, side, orderType, qty, clientOid}; qty of a
+#                                     market buy is in the QUOTE coin (USDT), like v2 size
+#   GET  /api/v3/trade/order-info  orderId | clientOid -> orderStatus (live|new|partially_filled|
+#                                     filled|cancelled), cumExecQty (base), cumExecValue (quote),
+#                                     avgPrice, feeDetail [{feeCoin, fee}]
+#   GET  /api/v3/trade/fills          category, orderId -> execPrice, execQty, execValue, feeDetail
+#   GET  /api/v3/account/assets       per coin: available ("Transferable amount"), locked, balance,
+#                                     equity, debt; account totals are never used
+#   GET  /api/v3/account/info         permType (read-only | read-and-write), permissions []
+#   Classic account on a v3 call -> error 40084; Unified account on a v2 call -> 40085.
+# ---------------------------------------------------------------------------
+UTA_CLASSIC_ONLY_CODE = "40085"   # the Classic (v2) API refused: the account is Unified
+UTA_UNIFIED_ONLY_CODE = "40084"   # the Unified (v3) API refused: the account is Classic
+UTA_ORDER_STATUS = {"filled": "filled", "cancelled": "cancelled", "partially_filled": "partially_filled",
+                    "live": "live", "new": "new"}
+UTA_ORDER_NOT_EXIST_CODE = "25204"   # v3 "Order does not exist": the honest "not found", like the v2 43001 family
+
+
+class BitgetUnifiedClient(BitgetClient):
+    """Same credentials, same signing; Unified (v3) endpoints for account, order and fills."""
+    account_mode = "unified"
+
+    def get_account_info(self):
+        """{"user_id", "ips", "authorities", "perm_type", "permissions"}: v3 account info.
+        ``authorities`` carries the v3 permission list so callers can keep one shape."""
+        data = self._request("GET", "/api/v3/account/info") or {}
+        perms = [str(p) for p in (data.get("permissions") or [])]
+        return {"user_id": str(data.get("userId") or ""), "ips": str(data.get("ips") or ""),
+                "authorities": perms, "perm_type": str(data.get("permType") or ""), "permissions": perms,
+                "parent_id": str(data.get("parentId") or "")}
+
+    def get_spot_available(self, coin):
+        """Available (transferable) `coin` in the unified account minus any debt in that coin.
+        Never equity or account totals (owner's decision, 2026-10-08)."""
+        data = self._request("GET", "/api/v3/account/assets", params={"coin": coin}) or {}
+        rows = data.get("assets") if isinstance(data, dict) else data
+        for row in rows or []:
+            if str(row.get("coin", "")).upper() == coin.upper():
+                available = float(row.get("available") or 0)
+                debt = float(row.get("debt") or 0)
+                return max(available - debt, 0.0)
+        return 0.0
+
+    def place_market_buy(self, symbol, quote_amount, client_oid=None):
+        """Market-buy `symbol` spending `quote_amount` USDT (v3: qty is the quote amount for a market buy).
+        Returns the order as get_order_info shapes it, so the caller sees the same keys as v2."""
+        body = {"category": "SPOT", "symbol": symbol, "side": "buy", "orderType": "market", "qty": str(quote_amount)}
+        if client_oid:
+            body["clientOid"] = client_oid
+        placed = self._request("POST", "/api/v3/trade/place-order", body=body) or {}
+        order_id = placed.get("orderId")
+        info = self.get_order_info(symbol, order_id=order_id, client_oid=client_oid) or {}
+        return {"orderId": order_id, "clientOid": placed.get("clientOid") or client_oid,
+                "executedQty": info.get("baseVolume") or "0", "cummulativeQuoteQty": info.get("quoteVolume") or "0",
+                "status": info.get("status"), "priceAvg": info.get("priceAvg"), "fee": info.get("fee"), "feeCoin": info.get("feeCoin")}
+
+    def get_order_info(self, symbol, order_id=None, client_oid=None):
+        """Same keys as the Classic client: {status, orderId, clientOid, baseVolume, quoteVolume, priceAvg,
+        fee, feeCoin, feeDetail}, or None when Bitget has no such order."""
+        params = {"orderId": str(order_id)} if order_id else {"clientOid": str(client_oid)}
+        try:
+            data = self._request("GET", "/api/v3/trade/order-info", params=params)
+        except BitgetAPIError as exc:
+            # 25204 "Order does not exist": an honest "not found" is not a transport error,
+            # exactly like the Classic client's 43001 family (seen live on the 2026-10-10 PEPE park)
+            if str(exc.code) == UTA_ORDER_NOT_EXIST_CODE or "not exist" in str(exc.message).lower():
+                return None
+            raise
+        order = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) and data else None)
+        if not order:
+            return None
+        fee, fee_coin = self._parse_fee_list(order.get("feeDetail"))
+        return {"status": UTA_ORDER_STATUS.get(str(order.get("orderStatus") or "").lower(), str(order.get("orderStatus") or "")),
+                "orderId": str(order.get("orderId") or ""), "clientOid": order.get("clientOid"),
+                "baseVolume": order.get("cumExecQty"), "quoteVolume": order.get("cumExecValue"), "priceAvg": order.get("avgPrice"),
+                "fee": fee, "feeCoin": fee_coin, "feeDetail": order.get("feeDetail")}
+
+    @staticmethod
+    def _parse_fee_list(raw):
+        """(total fee as a positive float, fee coin) from the v3 feeDetail list [{feeCoin, fee}]; fees may be negative."""
+        if not raw:
+            return None, None
+        total, coin = 0.0, None
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                total += abs(float(item.get("fee") or 0))
+            except (TypeError, ValueError):
+                continue
+            coin = coin or item.get("feeCoin")
+        return (total if coin else None), coin
+
+    def get_fills(self, symbol, order_id):
+        """Trade fills for an order, Classic shape: list of {"tradeId", "priceAvg", "size", "amount", "feeDetail"}."""
+        data = self._request("GET", "/api/v3/trade/fills", params={"category": "SPOT", "orderId": str(order_id)}) or {}
+        rows = data.get("list") if isinstance(data, dict) else data
+        return [{"tradeId": r.get("execId"), "priceAvg": r.get("execPrice"), "size": r.get("execQty"),
+                 "amount": r.get("execValue"), "feeDetail": r.get("feeDetail")} for r in rows or []]
+
+    # Every v3 path this client calls, with a harmless read-only request for each (place-order excluded):
+    def get_funding_available(self, coin):
+        """Available `coin` in the FUNDING account (read-only; #91's top-up hint).
+        Buys can never spend this balance — it exists only to tell the customer
+        where their money is sitting. Verified live 2026-10-12."""
+        data = self._request("GET", "/api/v3/account/funding-assets", params={"coin": coin}) or []
+        rows = data.get("assets") if isinstance(data, dict) else data
+        for row in rows or []:
+            if str(row.get("coin", "")).upper() == coin.upper():
+                return float(row.get("available") or 0)
+        return 0.0
+
+    # a made-up order id must get Bitget's normal "no such order" answer, never 40404 (unknown URL).
+    PROBE_PATHS = (
+        ("GET", "/api/v3/account/info", {}),
+        ("GET", "/api/v3/account/assets", {"coin": "USDT"}),
+        ("GET", "/api/v3/trade/order-info", {"clientOid": "ab-probe-000000000000000000"}),
+        ("GET", "/api/v3/trade/fills", {"category": "SPOT", "orderId": "1"}),
+    )
+    URL_NOT_FOUND = "40404"
+
+    def probe_endpoints(self):
+        """[(path, ok, note)]: ok is False only when Bitget answers 40404 (the path does not exist).
+        A normal answer, an empty list or a 'not found'/'parameter' error all mean the path is live."""
+        out = []
+        for method, path, params in self.PROBE_PATHS:
+            try:
+                data = self._request(method, path, params=params or None)
+                out.append((path, True, "ok" if data else "empty"))
+            except BitgetAPIError as exc:
+                code = str(getattr(exc, "code", ""))
+                out.append((path, code != self.URL_NOT_FOUND, f"error {code}: {str(exc)[:60]}"))
+            except Exception as exc:   # noqa: BLE001
+                out.append((path, False, f"{type(exc).__name__}: {str(exc)[:60]}"))
+        return out
+
+    def withdraw(self, *a, **k):
+        raise BitgetAPIError("UTA_WITHDRAW", "withdrawals from a Unified Trading Account are not supported by AutoBuy yet")
+
+    def get_withdrawal_records(self, *a, **k):
+        raise BitgetAPIError("UTA_WITHDRAW", "withdrawal records of a Unified Trading Account are not supported by AutoBuy yet")

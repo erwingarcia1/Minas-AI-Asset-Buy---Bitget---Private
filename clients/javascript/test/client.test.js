@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AutoBuyClient, ApiError, AuthenticationError, RateLimitError, ValidationError } from "../src/index.js";
+import { AutoBuyClient, ApiError, AuthenticationError, RateLimitError, ValidationError, isMfaRequired } from "../src/index.js";
 
 
 
@@ -158,4 +158,30 @@ test("health check is unauthenticated and 204/empty bodies resolve to undefined"
   assert.equal(h.status, "healthy");
   assert.equal(srv.calls[0].headers.authorization, undefined);
   assert.equal(await client.autoBuy.cancelPurchase("p1"), undefined);
+});
+
+test("login on a two-factor account returns the challenge without storing tokens; loginMfa completes it", async () => {
+  const srv = mockServer()
+    .on("POST", "/api/auth/login", () => json({ mfa_required: true, mfa_token: "pending-1", expires_in: 300 }, 202))
+    .on("POST", "/api/auth/login/mfa", ({ body }) => {
+      assert.deepEqual(body, { mfa_token: "pending-1", recovery_code: "abcd-efgh" });
+      return json(TOKENS);
+    });
+  const changes = [];
+  const client = new AutoBuyClient({ baseUrl: "http://api.test", fetch: srv.fetch, onTokensChanged: (t) => changes.push(t) });
+
+  const result = await client.login("a@b.co", "Str0ng!Passw0rd");
+  assert.equal(isMfaRequired(result), true);
+  assert.equal(result.mfa_required, true);
+  assert.equal(client.tokens, null, "the pending token is not a session");
+  assert.deepEqual(changes, [], "nothing is persisted on a 202");
+
+  await assert.rejects(client.loginMfa(result.mfa_token, {}), TypeError);
+  assert.equal(srv.calls.length, 1, "a missing factor never reaches the server");
+
+  const pair = await client.loginMfa(result.mfa_token, { recovery_code: "abcd-efgh" });
+  assert.equal(pair.access_token, "acc-1");
+  assert.deepEqual(client.tokens, TOKENS);
+  assert.deepEqual(changes, [TOKENS]);
+  assert.equal(srv.calls[1].headers.authorization, undefined, "login/mfa is unauthenticated");
 });

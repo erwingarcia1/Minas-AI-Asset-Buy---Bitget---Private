@@ -44,10 +44,27 @@ export class AuthApi {
   /**
    * Login — `POST /api/auth/login`
    * @param {import('./types.js').LoginRequest} body
-   * @returns {Promise<import('./types.js').TokenResponse>}
+   * @returns {Promise<import('./types.js').TokenResponse | import('./types.js').MfaRequiredResponse>}
    */
   login(body) {
     return this.http.request("POST", "/api/auth/login", { body, auth: false });
+  }
+
+  /**
+   * Login Mfa — `POST /api/auth/login/mfa`
+   * @param {import('./types.js').MfaLoginRequest} body
+   * @returns {Promise<import('./types.js').TokenResponse>}
+   */
+  loginMfa(body) {
+    return this.http.request("POST", "/api/auth/login/mfa", { body, auth: false });
+  }
+
+  /**
+   * Logout All — `POST /api/auth/logout-all`
+   * @returns {Promise<unknown>}
+   */
+  logoutAll() {
+    return this.http.request("POST", "/api/auth/logout-all", { auth: true });
   }
 
   /**
@@ -61,20 +78,18 @@ export class AuthApi {
 
   /**
    * Refresh — `POST /api/auth/refresh`
-   * @param {import('./types.js').RefreshRequest} body
    * @returns {Promise<import('./types.js').TokenResponse>}
    */
-  refresh(body) {
-    return this.http.request("POST", "/api/auth/refresh", { body, auth: false });
+  refresh() {
+    return this.http.request("POST", "/api/auth/refresh", { auth: false });
   }
 
   /**
    * Logout — `POST /api/auth/logout`
-   * @param {import('./types.js').LogoutRequest} body
    * @returns {Promise<unknown>}
    */
-  logout(body) {
-    return this.http.request("POST", "/api/auth/logout", { body, auth: false });
+  logout() {
+    return this.http.request("POST", "/api/auth/logout", { auth: false });
   }
 
   /**
@@ -115,11 +130,72 @@ export class AuthApi {
 
 }
 
+/** `public` endpoints. */
+export class PublicApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * Public Meta — `GET /api/public/meta`
+   * @returns {Promise<import('./types.js').PublicMeta>}
+   */
+  publicMeta() {
+    return this.http.request("GET", "/api/public/meta", { auth: false });
+  }
+
+}
+
 /** `user` endpoints. */
 export class UserApi {
   /** @param {import('./http.js').HttpTransport} http */
   constructor(http) {
     this.http = http;
+  }
+
+  /**
+   * Two Factor Status — `GET /api/user/2fa`
+   * @returns {Promise<import('./types.js').TwoFactorStatus>}
+   */
+  twoFactorStatus() {
+    return this.http.request("GET", "/api/user/2fa", { auth: true });
+  }
+
+  /**
+   * Enrol — `POST /api/user/2fa/enrol`
+   * @param {import('./types.js').EnrolRequest} body
+   * @returns {Promise<import('./types.js').EnrolResponse>}
+   */
+  enrol(body) {
+    return this.http.request("POST", "/api/user/2fa/enrol", { body, auth: true });
+  }
+
+  /**
+   * Confirm — `POST /api/user/2fa/confirm`
+   * @param {import('./types.js').ConfirmRequest} body
+   * @returns {Promise<import('./types.js').RecoveryCodesResponse>}
+   */
+  confirm(body) {
+    return this.http.request("POST", "/api/user/2fa/confirm", { body, auth: true });
+  }
+
+  /**
+   * Regenerate Recovery Codes — `POST /api/user/2fa/recovery-codes`
+   * @param {import('./types.js').RegenerateRequest} body
+   * @returns {Promise<import('./types.js').RecoveryCodesResponse>}
+   */
+  regenerateRecoveryCodes(body) {
+    return this.http.request("POST", "/api/user/2fa/recovery-codes", { body, auth: true });
+  }
+
+  /**
+   * Disable — `POST /api/user/2fa/disable`
+   * @param {import('./types.js').DisableRequest} body
+   * @returns {Promise<unknown>}
+   */
+  disable(body) {
+    return this.http.request("POST", "/api/user/2fa/disable", { body, auth: true });
   }
 
   /**
@@ -155,6 +231,14 @@ export class ExchangeApi {
   /** @param {import('./http.js').HttpTransport} http */
   constructor(http) {
     this.http = http;
+  }
+
+  /**
+   * Supported Exchanges — `GET /api/exchange/supported`
+   * @returns {Promise<import('./types.js').string[]>}
+   */
+  supportedExchanges() {
+    return this.http.request("GET", "/api/exchange/supported", { auth: false });
   }
 
   /**
@@ -279,6 +363,15 @@ export class DashboardApi {
    */
   analyticsTimeline(query) {
     return this.http.request("GET", "/api/dashboard/analytics/timeline", { query, auth: true });
+  }
+
+  /**
+   * Portfolio Series — `GET /api/dashboard/portfolio/series`
+   * @param {{ range?: string }} [query]
+   * @returns {Promise<import('./types.js').PortfolioSeriesResponse>}
+   */
+  portfolioSeries(query) {
+    return this.http.request("GET", "/api/dashboard/portfolio/series", { query, auth: true });
   }
 
 }
@@ -421,14 +514,6 @@ export class AdminApi {
   }
 
   /**
-   * Platform Stats — `GET /api/admin/stats`
-   * @returns {Promise<import('./types.js').PlatformStats>}
-   */
-  platformStats() {
-    return this.http.request("GET", "/api/admin/stats", { auth: true });
-  }
-
-  /**
    * List Users — `GET /api/admin/users`
    * @param {{ q?: string | null; limit?: number; offset?: number }} [query]
    * @returns {Promise<import('./types.js').AdminUserList>}
@@ -449,10 +534,11 @@ export class AdminApi {
   /**
    * Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend`
    * @param {string} userId
+   * @param {import('./types.js').UnsuspendPayload | null} body
    * @returns {Promise<unknown>}
    */
-  unsuspendUser(userId) {
-    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { auth: true });
+  unsuspendUser(userId, body) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { body, auth: true });
   }
 
   /**
@@ -466,6 +552,16 @@ export class AdminApi {
   }
 
   /**
+   * Lift Wallet Hold — `POST /api/admin/users/{user_id}/lift-wallet-hold`
+   * @param {string} userId
+   * @param {import('./types.js').LiftWalletHold} body
+   * @returns {Promise<unknown>}
+   */
+  liftWalletHold(userId, body) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/lift-wallet-hold", { body, auth: true });
+  }
+
+  /**
    * Kyc Override — `POST /api/admin/users/{user_id}/kyc-override`
    * @param {string} userId
    * @param {import('./types.js').KycOverride} body
@@ -473,6 +569,70 @@ export class AdminApi {
    */
   kycOverride(userId, body) {
     return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/kyc-override", { body, auth: true });
+  }
+
+  /**
+   * Reset Two Factor — `POST /api/admin/users/{user_id}/2fa/reset`
+   * @param {string} userId
+   * @param {import('./types.js').ResetTwoFactorRequest | null} body
+   * @returns {Promise<unknown>}
+   */
+  resetTwoFactor(userId, body) {
+    return this.http.request("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/2fa/reset", { body, auth: true });
+  }
+
+  /**
+   * List Purchases — `GET /api/admin/purchases`
+   * @param {{ status?: string | null; limit?: number; offset?: number }} [query]
+   * @returns {Promise<import('./types.js').AdminPurchaseList>}
+   */
+  listPurchases(query) {
+    return this.http.request("GET", "/api/admin/purchases", { query, auth: true });
+  }
+
+  /**
+   * Review Purchase — `GET /api/admin/purchases/{purchase_id}/review`
+   * @param {string} purchaseId
+   * @returns {Promise<import('./types.js').PurchaseReview>}
+   */
+  reviewPurchase(purchaseId) {
+    return this.http.request("GET", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/review", { auth: true });
+  }
+
+  /**
+   * Resolve Purchase — `POST /api/admin/purchases/{purchase_id}/resolve`
+   * @param {string} purchaseId
+   * @param {import('./types.js').ResolvePurchase} body
+   * @returns {Promise<import('./types.js').AdminPurchaseRow>}
+   */
+  resolvePurchase(purchaseId, body) {
+    return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/resolve", { body, auth: true });
+  }
+
+  /**
+   * Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry`
+   * @param {string} purchaseId
+   * @returns {Promise<unknown>}
+   */
+  forceRetry(purchaseId) {
+    return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
+  }
+
+  /**
+   * Fill Deviations — `GET /api/admin/fills/deviations`
+   * @param {{ limit?: number }} [query]
+   * @returns {Promise<import('./types.js').FillDeviation[]>}
+   */
+  fillDeviations(query) {
+    return this.http.request("GET", "/api/admin/fills/deviations", { query, auth: true });
+  }
+
+  /**
+   * Platform Stats — `GET /api/admin/stats`
+   * @returns {Promise<import('./types.js').PlatformStats>}
+   */
+  platformStats() {
+    return this.http.request("GET", "/api/admin/stats", { auth: true });
   }
 
   /**
@@ -485,12 +645,12 @@ export class AdminApi {
   }
 
   /**
-   * Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry`
-   * @param {string} purchaseId
-   * @returns {Promise<unknown>}
+   * Undelivered Emails — `GET /api/admin/emails/undelivered`
+   * @param {{ limit?: number }} [query]
+   * @returns {Promise<import('./types.js').EmailOutboxView>}
    */
-  forceRetry(purchaseId) {
-    return this.http.request("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
+  undeliveredEmails(query) {
+    return this.http.request("GET", "/api/admin/emails/undelivered", { query, auth: true });
   }
 
   /**
@@ -515,6 +675,14 @@ export class AdminApi {
    */
   resumeScheduler() {
     return this.http.request("POST", "/api/admin/scheduler/resume", { auth: true });
+  }
+
+  /**
+   * Telegram Test — `POST /api/admin/telegram/test`
+   * @returns {Promise<import('./types.js').TelegramTestResult>}
+   */
+  telegramTest() {
+    return this.http.request("POST", "/api/admin/telegram/test", { auth: true });
   }
 
 }
@@ -627,14 +795,6 @@ export class WebhooksApi {
     return this.http.request("POST", "/api/webhooks/sumsub", { auth: false });
   }
 
-  /**
-   * Resend Events — `POST /api/webhooks/resend`
-   * @returns {Promise<unknown>}
-   */
-  resendEvents() {
-    return this.http.request("POST", "/api/webhooks/resend", { auth: false });
-  }
-
 }
 
 /** `email` endpoints. */
@@ -717,6 +877,15 @@ export class V2Api {
   }
 
   /**
+   * Retry Withdrawal — `POST /api/v2/purchases/{purchase_id}/retry-withdrawal`
+   * @param {string} purchaseId
+   * @returns {Promise<import('./types.js').RetryWithdrawalOut>}
+   */
+  retryWithdrawal(purchaseId) {
+    return this.http.request("POST", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)) + "/retry-withdrawal", { auth: true });
+  }
+
+  /**
    * Purchase Transactions — `GET /api/v2/purchases/{purchase_id}/transactions`
    * @param {string} purchaseId
    * @param {{ status_filter?: string | null }} [query]
@@ -724,6 +893,25 @@ export class V2Api {
    */
   purchaseTransactions(purchaseId, query) {
     return this.http.request("GET", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)) + "/transactions", { query, auth: true });
+  }
+
+  /**
+   * Coin Market — `GET /api/v2/market/coins/{coin}`
+   * @param {string} coin
+   * @param {{ amount_usd?: number | null }} [query]
+   * @returns {Promise<import('./types.js').CoinMarketOut>}
+   */
+  coinMarket(coin, query) {
+    return this.http.request("GET", "/api/v2/market/coins/" + encodeURIComponent(String(coin)), { query, auth: true });
+  }
+
+  /**
+   * Check Withdrawal Destination — `GET /api/v2/market/destination`
+   * @param {{ chain: string; address: string; destination_type?: string | null; memo?: string | null }} [query]
+   * @returns {Promise<import('./types.js').DestinationCheckOut>}
+   */
+  checkWithdrawalDestination(query) {
+    return this.http.request("GET", "/api/v2/market/destination", { query, auth: true });
   }
 
 }
@@ -769,6 +957,7 @@ export function buildApi(http) {
   return {
     system: new SystemApi(http),
     auth: new AuthApi(http),
+    public: new PublicApi(http),
     user: new UserApi(http),
     exchange: new ExchangeApi(http),
     transactions: new TransactionsApi(http),

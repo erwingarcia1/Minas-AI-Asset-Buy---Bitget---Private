@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_db
 from api.models import User
 from api.routes.user import UTCModel, get_current_user
+from api.routes._deps import PrecisionMemo, precision_memo
 from api.services import history
 from api.services.rate_limit import limiter, user_or_ip_key
 
@@ -42,9 +43,11 @@ class TransactionResponse(UTCModel):
     crypto: str
     purchase_type: str                 # autobuy | dca
     tx_type: str                       # withdrawal | accumulation
-    amount_crypto: float
+    amount_crypto: float               # gross fill, as the exchange's order history shows it
+    net_amount: float = 0.0            # what the account received: gross minus the trading fee charged in the coin
     cost_usdt: float
     exchange_rate: Optional[float] = None
+    price_precision: int = 8           # decimals Bitget quotes the pair in; show exchange_rate with exactly these
     exchange: Optional[str] = None
     order_id: Optional[str] = None
     binance_order_id: Optional[str] = None   # = order_id (compatibility)
@@ -62,10 +65,10 @@ class TransactionResponse(UTCModel):
     created_at: datetime
 
     @classmethod
-    def from_row(cls, r: history.HistoryRow) -> "TransactionResponse":
+    def from_row(cls, r: history.HistoryRow, price_precision: int = 8) -> "TransactionResponse":
         return cls(id=r.id, purchase_id=r.purchase_id, crypto=r.crypto, purchase_type=r.purchase_type,
-                   tx_type=r.tx_type, amount_crypto=r.amount_crypto, cost_usdt=r.cost_usd,
-                   exchange_rate=r.exchange_rate, exchange=r.exchange, order_id=r.order_id,
+                   tx_type=r.tx_type, amount_crypto=r.amount_crypto, net_amount=r.net_amount, cost_usdt=r.cost_usd,
+                   exchange_rate=r.exchange_rate, price_precision=price_precision, exchange=r.exchange, order_id=r.order_id,
                    binance_order_id=r.order_id, fee=r.fee, fee_currency=r.fee_currency,
                    withdrawal_id=r.withdrawal_id, wallet_address=r.wallet_address,
                    blockchain_network=r.blockchain_network, withdrawal_fee=r.withdrawal_fee,
@@ -88,6 +91,7 @@ class TransactionStats(BaseModel):
     completed_count: int
     failed_count: int
     pending_count: int
+    needs_review_count: int = 0   # attempts parked for a human (implausible or unreadable fill)
 
 
 # --------------------------------------------------------------------------
@@ -103,11 +107,12 @@ async def list_transactions(
     status_filter: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """List the authenticated user's execution attempts, newest first, paginated."""
     status = _validate_status(status_filter) if status_filter is not None else None
     rows, total = await history.list_rows(db, current_user.id, status=status, limit=limit, offset=offset)
-    return TransactionListResponse(items=[TransactionResponse.from_row(r) for r in rows],
+    return TransactionListResponse(items=[TransactionResponse.from_row(r, await prec.get(r.crypto)) for r in rows],
                                    total=total, limit=limit, offset=offset)
 
 
@@ -127,10 +132,11 @@ async def transactions_by_crypto(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """List the user's attempts for one cryptocurrency."""
     rows, _ = await history.list_rows(db, current_user.id, crypto=crypto, limit=limit, offset=offset)
-    return [TransactionResponse.from_row(r) for r in rows]
+    return [TransactionResponse.from_row(r, await prec.get(r.crypto)) for r in rows]
 
 
 @router.get("/status/{tx_status}", response_model=List[TransactionResponse])
@@ -140,11 +146,12 @@ async def transactions_by_status(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """List the user's attempts with a given status."""
     rows, _ = await history.list_rows(db, current_user.id, status=_validate_status(tx_status),
                                       limit=limit, offset=offset)
-    return [TransactionResponse.from_row(r) for r in rows]
+    return [TransactionResponse.from_row(r, await prec.get(r.crypto)) for r in rows]
 
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
@@ -152,9 +159,10 @@ async def get_transaction(
     transaction_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    prec: PrecisionMemo = Depends(precision_memo),
 ):
     """Get one attempt by id."""
     row = await history.get_row(db, current_user.id, transaction_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    return TransactionResponse.from_row(row)
+    return TransactionResponse.from_row(row, await prec.get(row.crypto))

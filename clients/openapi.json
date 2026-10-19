@@ -62,7 +62,7 @@
           "auth"
         ],
         "summary": "Register",
-        "description": "Register a new user with email and password.",
+        "description": "Register a new user with email and password. During the private beta\nthe request must carry the invite code; the refusal is the same whatever\nwas wrong (missing, mismatched, or no code configured in production), so\nit never reveals whether the code or the email was the problem.",
         "operationId": "register_api_auth_register_post",
         "requestBody": {
           "content": {
@@ -104,13 +104,65 @@
           "auth"
         ],
         "summary": "Login",
-        "description": "Authenticate with email/password and receive access + refresh tokens.",
+        "description": "Authenticate with email/password. The body carries the short-lived access\ntoken (keep it in memory) and a CSRF token; the refresh token is set as an\nhttpOnly cookie scoped to /api/auth. An account with two-factor\nauthentication on gets **202** `{mfa_required, mfa_token, expires_in}`\ninstead, and finishes at /login/mfa.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Password accepted; the account has two-factor authentication on. No session yet and no cookies: finish at /login/mfa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaRequiredResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login/mfa": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login Mfa",
+        "description": "Second step of sign-in for an account with two-factor authentication on:\nthe `mfa_token` from the 202 answer of /login plus either a six-digit\nauthenticator `code` or one of the account's `recovery_code`s. Answers the\nsame body and cookies as /login. The token is single-use, lives five\nminutes, allows five attempts and dies if the password changes; a wrong\ncode counts towards the account lockout exactly like a wrong password.",
+        "operationId": "login_mfa_api_auth_login_mfa_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaLoginRequest"
               }
             }
           },
@@ -138,6 +190,26 @@
             }
           }
         }
+      }
+    },
+    "/api/auth/logout-all": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout All",
+        "description": "Sign out everywhere: every access and refresh token issued before now\nstops working, including the one making this request, and the session\ncookies are cleared. Needs a valid bearer token and no CSRF header: a\ncross-site page cannot forge the Authorization header.",
+        "operationId": "logout_all_api_auth_logout_all_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/auth/verify": {
@@ -188,18 +260,8 @@
           "auth"
         ],
         "summary": "Refresh",
-        "description": "Exchange a valid refresh token for a new access + refresh token pair.",
+        "description": "Silent session refresh: needs the refresh cookie and the X-CSRF-Token\nheader matching the CSRF cookie. Answers a new access token and rotates\nboth cookies (the previous refresh token is revoked). 401 without a valid\ncookie, 403 without a valid CSRF header.",
         "operationId": "refresh_api_auth_refresh_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -207,16 +269,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TokenResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -230,31 +282,11 @@
           "auth"
         ],
         "summary": "Logout",
-        "description": "Revoke a refresh token. The short-lived access token simply expires.",
+        "description": "Sign out: revoke the refresh token from the cookie server-side and clear\nboth session cookies. The short-lived access token simply expires. Always\n204 once the cookie holds a valid refresh token, **even when the CSRF\nheader does not match**: the cookies are SameSite=Lax, so a cross-site\nPOST cannot carry them and a forged sign-out is not possible, while a tab\nwhose CSRF value went stale after another tab rotated the cookies must\nstill be able to sign out for real (issue #64). Without a valid refresh\ncookie the CSRF check applies as before (there is nothing to revoke).",
         "operationId": "logout_api_auth_logout_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LogoutRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
           }
         }
       }
@@ -428,13 +460,243 @@
         }
       }
     },
+    "/api/public/meta": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Public Meta",
+        "description": "Supported coins and exchanges, the support address and the server IP to\nallowlist on an exchange API key. Anonymous, cacheable for 5 minutes.",
+        "operationId": "public_meta_api_public_meta_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicMeta"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/2fa": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Two Factor Status",
+        "description": "Whether two-factor authentication is on for the signed-in account, when\nit was enabled, how many recovery codes are unused, and whether an\nenrolment is waiting to be confirmed.",
+        "operationId": "two_factor_status_api_user_2fa_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/user/2fa/enrol": {
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Enrol",
+        "description": "Start two-factor enrolment: needs the current password and answers a\nfresh secret with its otpauth:// URI for the authenticator app. Nothing is\nin force until /confirm succeeds. 409 when two-factor is already on (turn\nit off first); starting again replaces an unconfirmed enrolment.",
+        "operationId": "enrol_api_user_2fa_enrol_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrolResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/user/2fa/confirm": {
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Confirm",
+        "description": "Prove the authenticator works and switch two-factor on. Answers the ten\nrecovery codes, shown this once. 400 when no enrolment is pending or the\ncode is wrong.",
+        "operationId": "confirm_api_user_2fa_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/user/2fa/recovery-codes": {
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Regenerate Recovery Codes",
+        "description": "A new set of recovery codes against a current authenticator code (a\nrecovery code cannot mint more). The previous set stops working.",
+        "operationId": "regenerate_recovery_codes_api_user_2fa_recovery_codes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/user/2fa/disable": {
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Disable",
+        "description": "Turn two-factor off: needs the current password and either an\nauthenticator code or a recovery code. Refused for admin accounts while\nADMIN_MFA_REQUIRED is on. A wrong password or code counts towards the\naccount lockout; the account is emailed when it succeeds.",
+        "operationId": "disable_api_user_2fa_disable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/user/profile": {
       "get": {
         "tags": [
           "user"
         ],
         "summary": "Get Profile",
-        "description": "Return the authenticated user's own profile.",
+        "description": "Return the authenticated user's own profile, including any active\nwallet-change hold (`wallet_hold_until`).",
         "operationId": "get_profile_api_user_profile_get",
         "responses": {
           "200": {
@@ -549,6 +811,32 @@
         }
       }
     },
+    "/api/exchange/supported": {
+      "get": {
+        "tags": [
+          "exchange"
+        ],
+        "summary": "Supported Exchanges",
+        "description": "Exchanges this deployment offers (SUPPORTED_EXCHANGES); keys for others are refused.",
+        "operationId": "supported_exchanges_api_exchange_supported_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response Supported Exchanges Api Exchange Supported Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/exchange/keys": {
       "get": {
         "tags": [
@@ -631,7 +919,7 @@
           "exchange"
         ],
         "summary": "Verify Key",
-        "description": "Check the stored key against Binance and mark it verified if usable.",
+        "description": "Check the stored key against its exchange with one harmless authenticated\ncall (account info on Binance/Bitget, a balance read elsewhere) and record\nthe outcome on the key: verified | failed with a readable reason,\nverified_at / last_checked_at, and whether the key can withdraw. Always\n200; ``verified`` and ``result`` carry the outcome.",
         "operationId": "verify_key_api_exchange_keys__key_id__verify_post",
         "security": [
           {
@@ -1125,6 +1413,59 @@
         }
       }
     },
+    "/api/dashboard/portfolio/series": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Portfolio Series",
+        "description": "Read-only. Portfolio value and amount invested over the range, built from\nthis customer's successful buys and Bitget candles (see\napi/services/portfolio_series.py). 503 when Bitget is unreachable and no\ncandle page is cached; the rest of the dashboard is unaffected.",
+        "operationId": "portfolio_series_api_dashboard_portfolio_series_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(1D|7D|30D|90D|All)$",
+              "default": "30D",
+              "title": "Range"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioSeriesResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bitget candles unavailable and nothing cached"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/integrations/available": {
       "get": {
         "tags": [
@@ -1497,7 +1838,7 @@
           "user"
         ],
         "summary": "Update Preferences",
-        "description": "Update channel toggles, quiet hours (UTC), phone number, device token.",
+        "description": "Update channel toggles, optional email categories (purchase confirmations,\nweekly summary, milestones, low-balance warnings), quiet hours (UTC), phone number, device token.\nSecurity and failure emails cannot be switched off.",
         "operationId": "update_preferences_api_notifications_preferences_put",
         "requestBody": {
           "content": {
@@ -1614,33 +1955,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/admin/stats": {
-      "get": {
-        "tags": [
-          "user"
-        ],
-        "summary": "Platform Stats",
-        "description": "Platform-wide totals and 7-day trend inputs.",
-        "operationId": "platform_stats_api_admin_stats_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformStats"
-                }
               }
             }
           }
@@ -1779,7 +2093,7 @@
           "user"
         ],
         "summary": "Unsuspend User",
-        "description": "Reactivate a suspended account.",
+        "description": "Reactivate a suspended account. During the private beta an account that\nowns ACTIVE withdraw-mode purchases and isn't allowed withdrawals is refused\n(403, the purchase ids listed), because the executor would run them again;\nsend `{\"pause_withdraw_mode\": true}` to pause those purchases and reactivate\nthe account (the owner can switch them to accumulate and resume).",
         "operationId": "unsuspend_user_api_admin_users__user_id__unsuspend_post",
         "security": [
           {
@@ -1798,6 +2112,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/UnsuspendPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -1868,6 +2199,58 @@
         }
       }
     },
+    "/api/admin/users/{user_id}/lift-wallet-hold": {
+      "post": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Lift Wallet Hold",
+        "description": "Support override: clear the 24-hour wallet-change hold for a customer who\nreset their own password and proved their identity. Requires the user's\nemail typed exactly and a reason; writes an audit entry (admin, when, why)\nand emails the user that the hold was lifted. 409 when no hold is active.",
+        "operationId": "lift_wallet_hold_api_admin_users__user_id__lift_wallet_hold_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiftWalletHold"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/users/{user_id}/kyc-override": {
       "post": {
         "tags": [
@@ -1918,6 +2301,376 @@
             }
           }
         }
+      }
+    },
+    "/api/admin/users/{user_id}/2fa/reset": {
+      "post": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Reset Two Factor",
+        "description": "Support path for a lost authenticator: remove the user's two-factor\nenrolment and recovery codes so they can sign in with the password alone\nand enrol again. Never for the caller's own account (a stolen admin session\nmust not strip its owner's second factor: use Settings \u2192 Security, or ask\nanother admin), and an admin who has two-factor on proves it with their\ncurrent code. Audited; the user is emailed when something was removed.",
+        "operationId": "reset_two_factor_api_admin_users__user_id__2fa_reset_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ResetTwoFactorRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/purchases": {
+      "get": {
+        "tags": [
+          "user"
+        ],
+        "summary": "List Purchases",
+        "description": "Purchases by status (default: the parked ones), with their parked attempts.",
+        "operationId": "list_purchases_api_admin_purchases_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "needs_review",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPurchaseList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/purchases/{purchase_id}/review": {
+      "get": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Review Purchase",
+        "description": "Inspect a parked purchase: its attempts and, live from the exchange, what\nbecame of each order (state, fill, and whether the fill would pass the\nguard). Read-only. Then POST /resolve.",
+        "operationId": "review_purchase_api_admin_purchases__purchase_id__review_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseReview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/purchases/{purchase_id}/resolve": {
+      "post": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Resolve Purchase",
+        "description": "Clear a needs_review purchase after checking the exchange:\n\n- record_fill: the exchange shows the order FILLED and the fill passes the\n  guard -> recorded as the buy (never re-bought), schedule resumes, and for\n  withdraw-immediately purchases the withdrawal is sent now;\n- mark_not_sent: the exchange shows NOT FOUND or CANCELLED -> the attempt is\n  marked failed and the purchase is due again (a new buy, after the usual\n  reconciliation);\n- cancel: stop the purchase; the attempt stays on record.\nEvery resolution is audited with the admin's note.",
+        "operationId": "resolve_purchase_api_admin_purchases__purchase_id__resolve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolvePurchase"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPurchaseRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/purchases/{purchase_id}/force-retry": {
+      "post": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Force Retry",
+        "description": "Make an Auto-Buy purchase due immediately (the next execute_purchases\nrun picks it up). A failed purchase is re-armed: status back to active and\nthe attempt counter reset. Refused for withdrawal_failed / needs_info:\nthose buys already filled and re-arming would buy again \u2014 the owner (or\nan admin acting as them) must use retry-withdrawal instead.",
+        "operationId": "force_retry_api_admin_purchases__purchase_id__force_retry_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/fills/deviations": {
+      "get": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Fill Deviations",
+        "description": "Recent successful buys whose fill deviated beyond FILL_WARN_PCT (newest first).",
+        "operationId": "fill_deviations_api_admin_fills_deviations_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FillDeviation"
+                  },
+                  "title": "Response Fill Deviations Api Admin Fills Deviations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/stats": {
+      "get": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Platform Stats",
+        "description": "Platform-wide totals and 7-day trend inputs.",
+        "operationId": "platform_stats_api_admin_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformStats"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/admin/transactions": {
@@ -2015,14 +2768,14 @@
         }
       }
     },
-    "/api/admin/purchases/{purchase_id}/force-retry": {
-      "post": {
+    "/api/admin/emails/undelivered": {
+      "get": {
         "tags": [
           "user"
         ],
-        "summary": "Force Retry",
-        "description": "Make an Auto-Buy purchase due immediately (the next execute_purchases\nrun picks it up). A failed purchase is re-armed: status back to active and\nthe attempt counter reset.",
-        "operationId": "force_retry_api_admin_purchases__purchase_id__force_retry_post",
+        "summary": "Undelivered Emails",
+        "description": "What the email outbox could not deliver (and what is still retrying).",
+        "operationId": "undelivered_emails_api_admin_emails_undelivered_get",
         "security": [
           {
             "HTTPBearer": []
@@ -2030,19 +2783,28 @@
         ],
         "parameters": [
           {
-            "name": "purchase_id",
-            "in": "path",
-            "required": true,
+            "name": "limit",
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Purchase Id"
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
             }
           }
         ],
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailOutboxView"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -2063,7 +2825,7 @@
           "user"
         ],
         "summary": "Alerts",
-        "description": "Live evaluation of the docs/ALERTING.md conditions the app can see for\nthe Auto-Buy execute_purchases job. Heartbeats come from Redis, so they\ndescribe whichever worker actually ran, not the one answering.",
+        "description": "Live evaluation of the docs/ALERTING.md conditions (see api/services/admin_alerts.py).",
         "operationId": "alerts_api_admin_alerts_get",
         "responses": {
           "200": {
@@ -2128,13 +2890,40 @@
         ]
       }
     },
+    "/api/admin/telegram/test": {
+      "post": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Telegram Test",
+        "description": "Send one test message to the configured Telegram chat and report the\noutcome, so the alert channel can be checked without a real buy.",
+        "operationId": "telegram_test_api_admin_telegram_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramTestResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/analytics/performance": {
       "get": {
         "tags": [
           "dashboard"
         ],
         "summary": "Performance",
-        "description": "Unrealized P&L per holding against live prices, with best/worst performers.",
+        "description": "Unrealized P&L per holding against live prices.",
         "operationId": "performance_api_analytics_performance_get",
         "responses": {
           "200": {
@@ -2161,7 +2950,7 @@
           "dashboard"
         ],
         "summary": "Comparison",
-        "description": "Average buy price vs the market now, plus a diversification score\n(100 \u00d7 (1 \u2212 Herfindahl index) over invested value).",
+        "description": "Average buy price vs the market now, and each coin's share of the\ntotal cost invested.",
         "operationId": "comparison_api_analytics_comparison_get",
         "responses": {
           "200": {
@@ -2215,7 +3004,7 @@
           "dashboard"
         ],
         "summary": "Volatility",
-        "description": "30-day daily-return volatility per held/scheduled coin, with a DCA-cadence\nsuggestion: higher volatility rewards smaller, more frequent buys.",
+        "description": "30-day daily-return volatility per held or scheduled coin, bucketed\nlow (< 2%) / moderate (2\u20135%) / high (>= 5%). A description of the\nmetric only; no cadence or sizing guidance is produced.",
         "operationId": "volatility_api_analytics_volatility_get",
         "responses": {
           "200": {
@@ -2449,26 +3238,6 @@
         }
       }
     },
-    "/api/webhooks/resend": {
-      "post": {
-        "tags": [
-          "webhooks"
-        ],
-        "summary": "Resend Events",
-        "description": "Accept Resend delivery events (bounce/complaint). Stub: log only.",
-        "operationId": "resend_events_api_webhooks_resend_post",
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/email/send-verification": {
       "post": {
         "tags": [
@@ -2598,7 +3367,7 @@
           "auto-buy"
         ],
         "summary": "Create Purchase",
-        "description": "Create a purchase. `purchase_type` selects the mode: `autobuy` (default:\nbuy, then withdraw the coins to `wallet_address`) or `dca` (buy and\naccumulate on the exchange; the wallet is kept for later withdrawals).\nBoth modes require a wallet address and network. Rejects (422 with\n`{error, details}`) when the wallet address does not match the coin's\nchain or the declared network, when the exchange account cannot withdraw\nto that network (autobuy), or when the exchange account is not the caller's.",
+        "description": "Create a purchase. `purchase_type` selects the mode: `autobuy` (default:\nbuy, then withdraw the coins to `wallet_address`, which is required) or\n`dca` (buy and accumulate on the exchange; no wallet needed \u2014 one may be\ngiven for a later switch). Rejects (422 with `{error, details}`) when a\nwallet address does not match the chain's format, is a known burn address,\nwhen Bitget has no online USDT pair for the coin, when the order is below\nBitget's minimum, when the chain is not withdrawable, when the amount after\nfees is below Bitget's minimum withdrawal (autobuy), or when the exchange\naccount is not the caller's.",
         "operationId": "create_purchase_api_v2_purchases_post",
         "requestBody": {
           "content": {
@@ -2692,7 +3461,7 @@
           "auto-buy"
         ],
         "summary": "Update Purchase",
-        "description": "Pause (`status: paused`), resume (`status: active`) or change amount/frequency.\nCancelled, completed and failed purchases cannot be changed.",
+        "description": "Pause (`status: paused`), resume (`status: active`), change amount/frequency,\nor switch mode. Switching to `autobuy` (withdraw immediately) requires\n`wallet_address`, `blockchain_network` and `confirm_wallet_address` equal to\nthe address; the address must be valid, spendable and supported by the\nexchange. Cancelled, completed and failed purchases cannot be changed.",
         "operationId": "update_purchase_api_v2_purchases__purchase_id__put",
         "security": [
           {
@@ -2785,6 +3554,55 @@
         }
       }
     },
+    "/api/v2/purchases/{purchase_id}/retry-withdrawal": {
+      "post": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Retry Withdrawal",
+        "description": "Send the coins of the last filled buy to the wallet again. Only for\npurchases parked as `withdrawal_failed` or `needs_info`; the buy is never\nrepeated. The wallet, chain and Bitget minimum are re-checked first. On\nsuccess the purchase becomes `active` again and the schedule resumes; a\nfailed retry leaves it parked with the new error. Runs in dry-run mode\nwhen AUTOBUY_DRY_RUN is set (nothing is sent).",
+        "operationId": "retry_withdrawal_api_v2_purchases__purchase_id__retry_withdrawal_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "purchase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Purchase Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetryWithdrawalOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/purchases/{purchase_id}/transactions": {
       "get": {
         "tags": [
@@ -2860,7 +3678,7 @@
           "auto-buy"
         ],
         "summary": "Add Wallet",
-        "description": "Save a wallet. The address must be a valid Bitcoin, Ethereum or Solana\naddress usable on the declared network; addresses are unique platform-wide.",
+        "description": "Save a wallet. The address must match the declared chain's format\n(Bitcoin mainnet, EVM 0x\u2026, Solana, Tron); addresses are unique platform-wide.",
         "operationId": "add_wallet_api_wallets_post",
         "security": [
           {
@@ -2905,7 +3723,7 @@
           "auto-buy"
         ],
         "summary": "List Wallets",
-        "description": "The caller's wallets, newest first; filter with `?blockchain_network=mainnet|testnet`.",
+        "description": "The caller's wallets, newest first; filter with `?blockchain_network=BTC|ERC20|...`.",
         "operationId": "list_wallets_api_wallets_get",
         "security": [
           {
@@ -2999,6 +3817,166 @@
           }
         }
       }
+    },
+    "/api/v2/market/coins/{coin}": {
+      "get": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Coin Market",
+        "description": "Bitget pair + withdrawal chains for a coin; with `amount_usd`, each chain\nalso reports the fee in USD, what the wallet would receive and whether the\namount clears the minimum withdrawal.",
+        "operationId": "coin_market_api_v2_market_coins__coin__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "coin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Coin"
+            }
+          },
+          {
+            "name": "amount_usd",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 1.0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Amount Usd"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoinMarketOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/market/destination": {
+      "get": {
+        "tags": [
+          "auto-buy"
+        ],
+        "summary": "Check Withdrawal Destination",
+        "description": "Validate an address (+ destination type + memo) for a chain with the same\nrule the purchase and wallet endpoints enforce, and on tag chains ask the\npublic ledger whether the account exists (a never-funded address is a\nwarning, not a refusal: Bitget's minimums exceed both reserves).",
+        "operationId": "check_withdrawal_destination_api_v2_market_destination_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "title": "Chain"
+            }
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Address"
+            }
+          },
+          {
+            "name": "destination_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Destination Type"
+            }
+          },
+          {
+            "name": "memo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Memo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationCheckOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3054,6 +4032,78 @@
           "verified": {
             "type": "boolean",
             "title": "Verified"
+          },
+          "verification_status": {
+            "type": "string",
+            "title": "Verification Status",
+            "default": "pending"
+          },
+          "verification_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Error"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "withdrawal_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Enabled"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions",
+            "default": []
+          },
+          "extra_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extra Permissions",
+            "default": []
+          },
+          "account_mode": {
+            "type": "string",
+            "title": "Account Mode",
+            "default": "unknown"
           },
           "created_at": {
             "type": "string",
@@ -3123,6 +4173,125 @@
         ],
         "title": "ActivePurchase",
         "description": "An active Auto-Buy purchase (either type). Field names are kept from the\noriginal schedule shape so existing clients keep working: ``crypto`` is\nthe purchase's crypto_symbol, ``amount_usdt`` its amount_usd and\n``next_purchase_date`` its next_execution."
+      },
+      "AdminPurchaseList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPurchaseRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "AdminPurchaseList"
+      },
+      "AdminPurchaseRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "crypto_symbol": {
+            "type": "string",
+            "title": "Crypto Symbol"
+          },
+          "amount_usd": {
+            "type": "number",
+            "title": "Amount Usd"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "purchase_type": {
+            "type": "string",
+            "title": "Purchase Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "failure_count": {
+            "type": "integer",
+            "title": "Failure Count"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "next_execution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Execution"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "parked_attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ParkedAttempt"
+            },
+            "type": "array",
+            "title": "Parked Attempts",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "crypto_symbol",
+          "amount_usd",
+          "frequency",
+          "purchase_type",
+          "status",
+          "failure_count",
+          "updated_at"
+        ],
+        "title": "AdminPurchaseRow"
       },
       "AdminTransactionList": {
         "properties": {
@@ -3250,6 +4419,34 @@
             "type": "number",
             "title": "Invested Usdt",
             "default": 0.0
+          },
+          "wallet_hold_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Until"
+          },
+          "wallet_hold_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Reason"
+          },
+          "totp_enabled": {
+            "type": "boolean",
+            "title": "Totp Enabled",
+            "default": false
           }
         },
         "type": "object",
@@ -3333,6 +4530,163 @@
         ],
         "title": "ApplicantStatusResponse"
       },
+      "ChainOut": {
+        "properties": {
+          "chain": {
+            "type": "string",
+            "title": "Chain"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "family_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family Label"
+          },
+          "supported": {
+            "type": "boolean",
+            "title": "Supported"
+          },
+          "withdrawable": {
+            "type": "boolean",
+            "title": "Withdrawable"
+          },
+          "withdraw_fee": {
+            "type": "number",
+            "title": "Withdraw Fee"
+          },
+          "extra_withdraw_fee_pct": {
+            "type": "number",
+            "title": "Extra Withdraw Fee Pct"
+          },
+          "min_withdraw_amount": {
+            "type": "number",
+            "title": "Min Withdraw Amount"
+          },
+          "withdraw_min_scale": {
+            "type": "integer",
+            "title": "Withdraw Min Scale"
+          },
+          "withdraw_confirm": {
+            "type": "integer",
+            "title": "Withdraw Confirm"
+          },
+          "need_tag": {
+            "type": "boolean",
+            "title": "Need Tag"
+          },
+          "tag_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Label"
+          },
+          "browser_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Url"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "default": false
+          },
+          "fee_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee Usd"
+          },
+          "min_purchase_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Purchase Usd"
+          },
+          "estimated_sent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Sent"
+          },
+          "estimated_received": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Received"
+          },
+          "meets_minimum": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meets Minimum"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chain",
+          "supported",
+          "withdrawable",
+          "withdraw_fee",
+          "extra_withdraw_fee_pct",
+          "min_withdraw_amount",
+          "withdraw_min_scale",
+          "withdraw_confirm",
+          "need_tag"
+        ],
+        "title": "ChainOut"
+      },
       "ChangePasswordRequest": {
         "properties": {
           "current_password": {
@@ -3353,6 +4707,170 @@
         ],
         "title": "ChangePasswordRequest"
       },
+      "CoinCategory": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "accumulate_only": {
+            "type": "boolean",
+            "title": "Accumulate Only"
+          },
+          "risk_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Note"
+          },
+          "coins": {
+            "items": {
+              "$ref": "#/components/schemas/CoinEntry"
+            },
+            "type": "array",
+            "title": "Coins"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "label",
+          "accumulate_only",
+          "coins"
+        ],
+        "title": "CoinCategory"
+      },
+      "CoinEntry": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "name"
+        ],
+        "title": "CoinEntry"
+      },
+      "CoinMarketOut": {
+        "properties": {
+          "coin": {
+            "type": "string",
+            "title": "Coin"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": "main"
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label",
+            "default": "Main coins"
+          },
+          "accumulate_only": {
+            "type": "boolean",
+            "title": "Accumulate Only",
+            "default": false
+          },
+          "risk_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Note"
+          },
+          "pair": {
+            "type": "string",
+            "title": "Pair"
+          },
+          "online": {
+            "type": "boolean",
+            "title": "Online"
+          },
+          "min_trade_usdt": {
+            "type": "number",
+            "title": "Min Trade Usdt"
+          },
+          "taker_fee_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taker Fee Rate"
+          },
+          "quantity_precision": {
+            "type": "integer",
+            "title": "Quantity Precision"
+          },
+          "price_ask": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Ask"
+          },
+          "chains": {
+            "items": {
+              "$ref": "#/components/schemas/ChainOut"
+            },
+            "type": "array",
+            "title": "Chains"
+          },
+          "fee_mode": {
+            "type": "string",
+            "title": "Fee Mode",
+            "default": "exclusive"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": "Fees and minimums are Bitget's live values, cached for up to an hour."
+          }
+        },
+        "type": "object",
+        "required": [
+          "coin",
+          "pair",
+          "online",
+          "min_trade_usdt",
+          "quantity_precision",
+          "chains"
+        ],
+        "title": "CoinMarketOut"
+      },
       "ComparisonEntry": {
         "properties": {
           "crypto": {
@@ -3362,6 +4880,11 @@
           "average_buy_price": {
             "type": "number",
             "title": "Average Buy Price"
+          },
+          "price_precision": {
+            "type": "integer",
+            "title": "Price Precision",
+            "default": 8
           },
           "current_price": {
             "anyOf": [
@@ -3402,17 +4925,35 @@
             "type": "array",
             "title": "Entries"
           },
-          "diversification_score": {
-            "type": "number",
-            "title": "Diversification Score"
+          "share_of_invested": {
+            "items": {
+              "$ref": "#/components/schemas/InvestedShare"
+            },
+            "type": "array",
+            "title": "Share Of Invested"
           }
         },
         "type": "object",
         "required": [
           "entries",
-          "diversification_score"
+          "share_of_invested"
         ],
-        "title": "ComparisonResponse"
+        "title": "ComparisonResponse",
+        "description": "Average buy price vs the market, and each coin's share of invested\ncost. No score is derived from the shares: the shares are the fact."
+      },
+      "ConfirmRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ConfirmRequest"
       },
       "CreateApplicantRequest": {
         "properties": {
@@ -3475,9 +5016,24 @@
             "type": "number",
             "title": "Total Amount"
           },
+          "on_exchange": {
+            "type": "number",
+            "title": "On Exchange",
+            "default": 0.0
+          },
+          "sent_to_wallet": {
+            "type": "number",
+            "title": "Sent To Wallet",
+            "default": 0.0
+          },
           "total_cost_usdt": {
             "type": "number",
             "title": "Total Cost Usdt"
+          },
+          "price_precision": {
+            "type": "integer",
+            "title": "Price Precision",
+            "default": 8
           }
         },
         "type": "object",
@@ -3486,7 +5042,8 @@
           "total_amount",
           "total_cost_usdt"
         ],
-        "title": "CryptoHolding"
+        "title": "CryptoHolding",
+        "description": "What the customer owns of a coin and where it is. total_amount is the\nquantity ACQUIRED (net of the trading fee charged in the coin); on_exchange\nis what is still on Bitget after real withdrawals (matches Bitget's balance);\nsent_to_wallet is what those withdrawals delivered."
       },
       "DashboardResponse": {
         "properties": {
@@ -3525,6 +5082,168 @@
         ],
         "title": "DashboardResponse"
       },
+      "DestinationCheckOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "needs_tag": {
+            "type": "boolean",
+            "title": "Needs Tag"
+          },
+          "tag_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Label"
+          },
+          "embedded_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedded Tag"
+          },
+          "funded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Funded"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "message",
+          "needs_tag"
+        ],
+        "title": "DestinationCheckOut",
+        "description": "Server-side verdict on a withdrawal destination before the form submits."
+      },
+      "DisableRequest": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Password"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "recovery_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "DisableRequest"
+      },
+      "EmailOutboxView": {
+        "properties": {
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "failures_this_hour": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failures This Hour"
+          },
+          "alert_threshold": {
+            "type": "integer",
+            "title": "Alert Threshold"
+          },
+          "pending": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Pending"
+          },
+          "undelivered": {
+            "items": {
+              "$ref": "#/components/schemas/UndeliveredEmail"
+            },
+            "type": "array",
+            "title": "Undelivered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "queued",
+          "alert_threshold",
+          "pending",
+          "undelivered"
+        ],
+        "title": "EmailOutboxView"
+      },
       "EmailSentResponse": {
         "properties": {
           "sent": {
@@ -3548,6 +5267,172 @@
           "sent"
         ],
         "title": "EmailSentResponse"
+      },
+      "EnrolRequest": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "EnrolRequest"
+      },
+      "EnrolResponse": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "otpauth_uri": {
+            "type": "string",
+            "title": "Otpauth Uri"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "otpauth_uri"
+        ],
+        "title": "EnrolResponse",
+        "description": "Shown once. The secret never comes back from the API again."
+      },
+      "ExchangeLookup": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Attempt Id"
+          },
+          "client_oid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Oid"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "fill": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fill"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id"
+        ],
+        "title": "ExchangeLookup"
+      },
+      "FillDeviation": {
+        "properties": {
+          "purchase_id": {
+            "type": "string",
+            "title": "Purchase Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "coin": {
+            "type": "string",
+            "title": "Coin"
+          },
+          "deviation_pct": {
+            "type": "number",
+            "title": "Deviation Pct"
+          },
+          "expected_amount": {
+            "type": "number",
+            "title": "Expected Amount"
+          },
+          "actual_amount": {
+            "type": "number",
+            "title": "Actual Amount"
+          },
+          "requested_usd": {
+            "type": "number",
+            "title": "Requested Usd"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "at": {
+            "type": "number",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purchase_id",
+          "user_id",
+          "coin",
+          "deviation_pct",
+          "expected_amount",
+          "actual_amount",
+          "requested_usd",
+          "cost_usd",
+          "at"
+        ],
+        "title": "FillDeviation"
       },
       "ForgotPasswordRequest": {
         "properties": {
@@ -3625,6 +5510,11 @@
           "average_buy_price": {
             "type": "number",
             "title": "Average Buy Price"
+          },
+          "price_precision": {
+            "type": "integer",
+            "title": "Price Precision",
+            "default": 8
           },
           "current_price": {
             "anyOf": [
@@ -3726,6 +5616,24 @@
         ],
         "title": "IntegrationInfo"
       },
+      "InvestedShare": {
+        "properties": {
+          "crypto": {
+            "type": "string",
+            "title": "Crypto"
+          },
+          "share_pct": {
+            "type": "number",
+            "title": "Share Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "crypto",
+          "share_pct"
+        ],
+        "title": "InvestedShare"
+      },
       "KeyVerifyResponse": {
         "properties": {
           "verified": {
@@ -3744,6 +5652,75 @@
             "type": "boolean",
             "title": "Withdrawal Permission Warning",
             "default": false
+          },
+          "verification_status": {
+            "type": "string",
+            "title": "Verification Status",
+            "default": "pending"
+          },
+          "verification_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Error"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "withdrawal_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Enabled"
+          },
+          "extra_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extra Permissions",
+            "default": []
+          },
+          "key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/APIKeyResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3774,6 +5751,28 @@
         ],
         "title": "KycOverride"
       },
+      "LiftWalletHold": {
+        "properties": {
+          "confirm_email": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Confirm Email"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 5,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm_email",
+          "reason"
+        ],
+        "title": "LiftWalletHold"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -3793,18 +5792,98 @@
         ],
         "title": "LoginRequest"
       },
-      "LogoutRequest": {
+      "LowBalanceNotice": {
         "properties": {
-          "refresh_token": {
+          "purchase_id": {
             "type": "string",
-            "title": "Refresh Token"
+            "format": "uuid",
+            "title": "Purchase Id"
+          },
+          "crypto_symbol": {
+            "type": "string",
+            "title": "Crypto Symbol"
+          },
+          "amount_usd": {
+            "type": "number",
+            "title": "Amount Usd"
+          },
+          "next_execution": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Execution"
           }
         },
         "type": "object",
         "required": [
-          "refresh_token"
+          "purchase_id",
+          "crypto_symbol",
+          "amount_usd",
+          "next_execution"
         ],
-        "title": "LogoutRequest"
+        "title": "LowBalanceNotice"
+      },
+      "MfaLoginRequest": {
+        "properties": {
+          "mfa_token": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 20,
+            "title": "Mfa Token"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "recovery_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mfa_token"
+        ],
+        "title": "MfaLoginRequest"
+      },
+      "MfaRequiredResponse": {
+        "properties": {
+          "mfa_required": {
+            "type": "boolean",
+            "title": "Mfa Required",
+            "default": true
+          },
+          "mfa_token": {
+            "type": "string",
+            "title": "Mfa Token"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mfa_token",
+          "expires_in"
+        ],
+        "title": "MfaRequiredResponse",
+        "description": "The password was accepted but the account has two-factor authentication\non. No session is issued and no cookie is set: exchange `mfa_token` plus a\ncode at /login/mfa within `expires_in` seconds."
       },
       "NotificationRow": {
         "properties": {
@@ -3845,6 +5924,76 @@
           "created_at"
         ],
         "title": "NotificationRow"
+      },
+      "ParkedAttempt": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "client_oid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Oid"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "ParkedAttempt"
       },
       "PerformanceResponse": {
         "properties": {
@@ -3895,28 +6044,6 @@
               }
             ],
             "title": "Total Pnl Pct"
-          },
-          "best_performer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Best Performer"
-          },
-          "worst_performer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Worst Performer"
           }
         },
         "type": "object",
@@ -3925,7 +6052,8 @@
           "holdings",
           "total_invested_usdt"
         ],
-        "title": "PerformanceResponse"
+        "title": "PerformanceResponse",
+        "description": "Per-holding figures only. No ranking (best/worst) is produced: every\npercentage is in the table and ordering them adds judgement, not fact."
       },
       "PlatformStats": {
         "properties": {
@@ -3964,6 +6092,14 @@
           "volume_7d_usdt": {
             "type": "number",
             "title": "Volume 7D Usdt"
+          },
+          "signups_by_day": {
+            "items": {
+              "$ref": "#/components/schemas/SignupDay"
+            },
+            "type": "array",
+            "title": "Signups By Day",
+            "default": []
           }
         },
         "type": "object",
@@ -3980,6 +6116,102 @@
         ],
         "title": "PlatformStats"
       },
+      "PortfolioSeriesResponse": {
+        "properties": {
+          "range": {
+            "type": "string",
+            "title": "Range"
+          },
+          "granularity": {
+            "type": "string",
+            "title": "Granularity"
+          },
+          "bucket_seconds": {
+            "type": "integer",
+            "title": "Bucket Seconds"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "buys": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesBuy"
+            },
+            "type": "array",
+            "title": "Buys"
+          },
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value"
+          },
+          "invested": {
+            "type": "number",
+            "title": "Invested"
+          },
+          "change_usdt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Usdt"
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "carried_forward": {
+            "type": "integer",
+            "title": "Carried Forward",
+            "default": 0
+          },
+          "unpriced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unpriced",
+            "default": []
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "range",
+          "granularity",
+          "bucket_seconds",
+          "points",
+          "buys",
+          "invested",
+          "note"
+        ],
+        "title": "PortfolioSeriesResponse",
+        "description": "Portfolio value over a range: history from Bitget candle closes, the last\npoint at the same current price the performance card uses. A bucket with\nno candle carries the previous close forward (carried_forward counts them)."
+      },
       "PreferencesPayload": {
         "properties": {
           "email_enabled": {
@@ -3992,6 +6224,50 @@
               }
             ],
             "title": "Email Enabled"
+          },
+          "email_purchase_confirmations": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Purchase Confirmations"
+          },
+          "email_weekly_summary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Weekly Summary"
+          },
+          "email_milestones": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Milestones"
+          },
+          "email_low_balance": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Low Balance"
           },
           "sms_enabled": {
             "anyOf": [
@@ -4075,6 +6351,36 @@
             "type": "boolean",
             "title": "Email Enabled"
           },
+          "email_purchase_confirmations": {
+            "type": "boolean",
+            "title": "Email Purchase Confirmations"
+          },
+          "email_weekly_summary": {
+            "type": "boolean",
+            "title": "Email Weekly Summary"
+          },
+          "email_milestones": {
+            "type": "boolean",
+            "title": "Email Milestones"
+          },
+          "email_low_balance": {
+            "type": "boolean",
+            "title": "Email Low Balance"
+          },
+          "always_on_emails": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Always On Emails",
+            "default": [
+              "password reset",
+              "password changed",
+              "purchase failed",
+              "withdrawal failed",
+              "withdrawal needs information"
+            ]
+          },
           "sms_enabled": {
             "type": "boolean",
             "title": "Sms Enabled"
@@ -4110,6 +6416,10 @@
         "type": "object",
         "required": [
           "email_enabled",
+          "email_purchase_confirmations",
+          "email_weekly_summary",
+          "email_milestones",
+          "email_low_balance",
           "sms_enabled",
           "push_enabled",
           "quiet_hours_start",
@@ -4136,6 +6446,56 @@
         "type": "object",
         "title": "ProfileUpdateRequest"
       },
+      "PublicMeta": {
+        "properties": {
+          "coins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Coins"
+          },
+          "coin_categories": {
+            "items": {
+              "$ref": "#/components/schemas/CoinCategory"
+            },
+            "type": "array",
+            "title": "Coin Categories",
+            "default": []
+          },
+          "accumulate_only": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accumulate Only",
+            "default": []
+          },
+          "exchanges": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Exchanges"
+          },
+          "support_email": {
+            "type": "string",
+            "title": "Support Email"
+          },
+          "server_ip": {
+            "type": "string",
+            "title": "Server Ip"
+          }
+        },
+        "type": "object",
+        "required": [
+          "coins",
+          "exchanges",
+          "support_email",
+          "server_ip"
+        ],
+        "title": "PublicMeta"
+      },
       "PurchaseCreateRequest": {
         "properties": {
           "crypto_symbol": {
@@ -4147,17 +6507,30 @@
           "amount_usd": {
             "type": "number",
             "maximum": 1000000.0,
-            "minimum": 10.0,
+            "minimum": 0.01,
             "title": "Amount Usd"
           },
           "wallet_address": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 20,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Wallet Address"
           },
           "blockchain_network": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Blockchain Network"
           },
           "frequency": {
@@ -4172,7 +6545,7 @@
           "purchase_type": {
             "type": "string",
             "title": "Purchase Type",
-            "default": "autobuy"
+            "default": "dca"
           },
           "withdraw_immediately": {
             "anyOf": [
@@ -4184,14 +6557,46 @@
               }
             ],
             "title": "Withdraw Immediately"
+          },
+          "travel_rule_info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TravelRuleInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
           }
         },
         "type": "object",
         "required": [
           "crypto_symbol",
           "amount_usd",
-          "wallet_address",
-          "blockchain_network",
           "frequency",
           "exchange_account_id"
         ],
@@ -4248,12 +6653,48 @@
             "title": "Frequency"
           },
           "wallet_address": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Wallet Address"
           },
           "blockchain_network": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Blockchain Network"
+          },
+          "wallet_destination_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Destination Type"
+          },
+          "wallet_memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Memo"
           },
           "purchase_type": {
             "type": "string",
@@ -4286,6 +6727,22 @@
             ],
             "title": "Exchange"
           },
+          "exchange_key_removed": {
+            "type": "boolean",
+            "title": "Exchange Key Removed",
+            "default": false
+          },
+          "exchange_key_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Key Error"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -4317,6 +6774,23 @@
             ],
             "title": "Next Execution"
           },
+          "low_balance_for_next_run": {
+            "type": "boolean",
+            "title": "Low Balance For Next Run",
+            "default": false
+          },
+          "low_balance_alerted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Balance Alerted At"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -4331,6 +6805,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/TransactionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "travel_rule_info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TravelRuleInfo"
               },
               {
                 "type": "null"
@@ -4352,8 +6836,6 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
-          "wallet_address",
-          "blockchain_network",
           "purchase_type",
           "withdraw_immediately",
           "status",
@@ -4383,12 +6865,48 @@
             "title": "Frequency"
           },
           "wallet_address": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Wallet Address"
           },
           "blockchain_network": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Blockchain Network"
+          },
+          "wallet_destination_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Destination Type"
+          },
+          "wallet_memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Memo"
           },
           "purchase_type": {
             "type": "string",
@@ -4421,6 +6939,22 @@
             ],
             "title": "Exchange"
           },
+          "exchange_key_removed": {
+            "type": "boolean",
+            "title": "Exchange Key Removed",
+            "default": false
+          },
+          "exchange_key_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Key Error"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -4452,6 +6986,23 @@
             ],
             "title": "Next Execution"
           },
+          "low_balance_for_next_run": {
+            "type": "boolean",
+            "title": "Low Balance For Next Run",
+            "default": false
+          },
+          "low_balance_alerted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Balance Alerted At"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -4471,6 +7022,16 @@
                 "type": "null"
               }
             ]
+          },
+          "travel_rule_info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TravelRuleInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4479,8 +7040,6 @@
           "crypto_symbol",
           "amount_usd",
           "frequency",
-          "wallet_address",
-          "blockchain_network",
           "purchase_type",
           "withdraw_immediately",
           "status",
@@ -4489,6 +7048,34 @@
           "updated_at"
         ],
         "title": "PurchaseOut"
+      },
+      "PurchaseReview": {
+        "properties": {
+          "purchase": {
+            "$ref": "#/components/schemas/AdminPurchaseRow"
+          },
+          "lookups": {
+            "items": {
+              "$ref": "#/components/schemas/ExchangeLookup"
+            },
+            "type": "array",
+            "title": "Lookups"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purchase",
+          "lookups",
+          "actions"
+        ],
+        "title": "PurchaseReview"
       },
       "PurchaseUpdateRequest": {
         "properties": {
@@ -4508,7 +7095,7 @@
               {
                 "type": "number",
                 "maximum": 1000000.0,
-                "minimum": 10.0
+                "minimum": 0.01
               },
               {
                 "type": "null"
@@ -4526,6 +7113,85 @@
               }
             ],
             "title": "Frequency"
+          },
+          "purchase_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Type"
+          },
+          "wallet_address": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Address"
+          },
+          "blockchain_network": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockchain Network"
+          },
+          "confirm_wallet_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Wallet Address"
+          },
+          "travel_rule_info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TravelRuleInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
           }
         },
         "type": "object",
@@ -4548,6 +7214,14 @@
           "kyc_status": {
             "type": "string",
             "title": "Kyc Status"
+          },
+          "low_balance": {
+            "items": {
+              "$ref": "#/components/schemas/LowBalanceNotice"
+            },
+            "type": "array",
+            "title": "Low Balance",
+            "default": []
           }
         },
         "type": "object",
@@ -4558,6 +7232,23 @@
           "kyc_status"
         ],
         "title": "QuickStats"
+      },
+      "RecoveryCodesResponse": {
+        "properties": {
+          "recovery_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recovery Codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recovery_codes"
+        ],
+        "title": "RecoveryCodesResponse",
+        "description": "Shown once; the previous codes stop working."
       },
       "RecurringProjection": {
         "properties": {
@@ -4623,18 +7314,19 @@
         ],
         "title": "RecurringResponse"
       },
-      "RefreshRequest": {
+      "RegenerateRequest": {
         "properties": {
-          "refresh_token": {
+          "code": {
             "type": "string",
-            "title": "Refresh Token"
+            "maxLength": 32,
+            "title": "Code"
           }
         },
         "type": "object",
         "required": [
-          "refresh_token"
+          "code"
         ],
-        "title": "RefreshRequest"
+        "title": "RegenerateRequest"
       },
       "RegisterRequest": {
         "properties": {
@@ -4648,6 +7340,18 @@
             "maxLength": 128,
             "minLength": 8,
             "title": "Password"
+          },
+          "invite_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invite Code"
           }
         },
         "type": "object",
@@ -4707,6 +7411,98 @@
         ],
         "title": "ResetTokenValidity"
       },
+      "ResetTwoFactorRequest": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "title": "ResetTwoFactorRequest",
+        "description": "The calling admin's own current authenticator code; required when two-factor is on for their account."
+      },
+      "ResolvePurchase": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "pattern": "^(record_fill|mark_not_sent|cancel)$",
+            "title": "Action"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 5,
+            "title": "Note"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
+          "keep_on_exchange": {
+            "type": "boolean",
+            "title": "Keep On Exchange",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "note"
+        ],
+        "title": "ResolvePurchase"
+      },
+      "RetryWithdrawalOut": {
+        "properties": {
+          "purchase_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Purchase Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "next_execution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Execution"
+          },
+          "withdrawal": {
+            "$ref": "#/components/schemas/TransactionOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purchase_id",
+          "status",
+          "withdrawal"
+        ],
+        "title": "RetryWithdrawalOut"
+      },
       "SendNotificationRequest": {
         "properties": {
           "email": {
@@ -4748,6 +7544,75 @@
           "email"
         ],
         "title": "SendVerificationRequest"
+      },
+      "SeriesBuy": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T"
+          },
+          "crypto": {
+            "type": "string",
+            "title": "Crypto"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t",
+          "crypto",
+          "amount",
+          "cost_usd"
+        ],
+        "title": "SeriesBuy"
+      },
+      "SeriesPoint": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "invested": {
+            "type": "number",
+            "title": "Invested"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t",
+          "value",
+          "invested"
+        ],
+        "title": "SeriesPoint"
+      },
+      "SignupDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "title": "Day"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "count"
+        ],
+        "title": "SignupDay"
       },
       "StatusResponse": {
         "properties": {
@@ -4813,6 +7678,35 @@
         ],
         "title": "StatusResponse"
       },
+      "TelegramTestResult": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "sent": {
+            "type": "boolean",
+            "title": "Sent"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "sent"
+        ],
+        "title": "TelegramTestResult"
+      },
       "TimelinePoint": {
         "properties": {
           "date": {
@@ -4864,10 +7758,6 @@
             "type": "string",
             "title": "Access Token"
           },
-          "refresh_token": {
-            "type": "string",
-            "title": "Refresh Token"
-          },
           "token_type": {
             "type": "string",
             "title": "Token Type",
@@ -4876,15 +7766,20 @@
           "expires_in": {
             "type": "integer",
             "title": "Expires In"
+          },
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token"
           }
         },
         "type": "object",
         "required": [
           "access_token",
-          "refresh_token",
-          "expires_in"
+          "expires_in",
+          "csrf_token"
         ],
-        "title": "TokenResponse"
+        "title": "TokenResponse",
+        "description": "The access token is returned in the body and must be kept in memory only.\nThe refresh token never appears in a body: it travels in an httpOnly cookie\nscoped to /api/auth, and `csrf_token` (also set as a readable cookie) must\nbe echoed in the X-CSRF-Token header on /refresh and /logout."
       },
       "TransactionListResponse": {
         "properties": {
@@ -4998,6 +7893,150 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
+          },
+          "fill_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fill Price"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "fee_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee Currency"
+          },
+          "parent_transaction_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Transaction Id"
+          },
+          "withdrawal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Id"
+          },
+          "withdrawal_chain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Chain"
+          },
+          "withdrawal_fee": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Fee"
+          },
+          "withdrawal_fee_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Fee Currency"
+          },
+          "expected_received": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Received"
+          },
+          "withdrawal_memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawal Memo"
+          },
+          "tx_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Hash"
+          },
+          "raw_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Status"
           }
         },
         "type": "object",
@@ -5037,6 +8076,11 @@
             "type": "number",
             "title": "Amount Crypto"
           },
+          "net_amount": {
+            "type": "number",
+            "title": "Net Amount",
+            "default": 0.0
+          },
           "cost_usdt": {
             "type": "number",
             "title": "Cost Usdt"
@@ -5051,6 +8095,11 @@
               }
             ],
             "title": "Exchange Rate"
+          },
+          "price_precision": {
+            "type": "integer",
+            "title": "Price Precision",
+            "default": 8
           },
           "exchange": {
             "anyOf": [
@@ -5246,6 +8295,11 @@
           "pending_count": {
             "type": "integer",
             "title": "Pending Count"
+          },
+          "needs_review_count": {
+            "type": "integer",
+            "title": "Needs Review Count",
+            "default": 0
           }
         },
         "type": "object",
@@ -5258,6 +8312,231 @@
           "pending_count"
         ],
         "title": "TransactionStats"
+      },
+      "TravelRuleInfo": {
+        "properties": {
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "identity_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Type"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "area_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Code"
+          },
+          "member_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Code"
+          }
+        },
+        "type": "object",
+        "title": "TravelRuleInfo",
+        "description": "Optional beneficiary / travel-rule details some venues require before an\nAPI withdrawal (Bitget: firstName, lastName, identityType, companyName,\nareaCode, memberCode). Stored on the purchase and sent with withdrawals.\nNothing is prefilled: the KYC provider's data is not stored on the user."
+      },
+      "TwoFactorStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "enrolled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrolled At"
+          },
+          "recovery_codes_remaining": {
+            "type": "integer",
+            "title": "Recovery Codes Remaining",
+            "default": 0
+          },
+          "pending_enrolment": {
+            "type": "boolean",
+            "title": "Pending Enrolment",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "TwoFactorStatus"
+      },
+      "UndeliveredEmail": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "to": {
+            "type": "string",
+            "title": "To"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "gave_up_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gave Up At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "to",
+          "subject"
+        ],
+        "title": "UndeliveredEmail"
+      },
+      "UnsuspendPayload": {
+        "properties": {
+          "pause_withdraw_mode": {
+            "type": "boolean",
+            "title": "Pause Withdraw Mode",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "UnsuspendPayload"
       },
       "UpcomingPurchase": {
         "properties": {
@@ -5377,6 +8656,34 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "wallet_hold_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Until"
+          },
+          "wallet_hold_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Hold Reason"
+          },
+          "withdrawals_allowed": {
+            "type": "boolean",
+            "title": "Withdrawals Allowed",
+            "default": false
           }
         },
         "type": "object",
@@ -5511,16 +8818,16 @@
             "type": "string",
             "title": "Level"
           },
-          "recommendation": {
+          "summary": {
             "type": "string",
-            "title": "Recommendation"
+            "title": "Summary"
           }
         },
         "type": "object",
         "required": [
           "crypto",
           "level",
-          "recommendation"
+          "summary"
         ],
         "title": "VolatilityEntry"
       },
@@ -5563,6 +8870,30 @@
               }
             ],
             "title": "Label"
+          },
+          "destination_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
           }
         },
         "type": "object",
@@ -5608,6 +8939,44 @@
               }
             ],
             "title": "Label"
+          },
+          "destination_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Type"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
+          },
+          "needs_tag": {
+            "type": "boolean",
+            "title": "Needs Tag",
+            "default": false
+          },
+          "unfunded_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unfunded Warning"
           },
           "verified_at": {
             "anyOf": [
@@ -5749,6 +9118,10 @@
     {
       "name": "auth",
       "description": "Registration, login, JWT lifecycle (refresh, logout, password change)."
+    },
+    {
+      "name": "security",
+      "description": "Two-factor authentication (TOTP with recovery codes) and sign out everywhere."
     },
     {
       "name": "user",

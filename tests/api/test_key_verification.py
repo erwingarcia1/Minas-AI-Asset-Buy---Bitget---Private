@@ -8,18 +8,18 @@ import pytest
 
 from api.auth import create_access_token
 from api.services import key_verification as kv
-from api.services.binance_client import BinanceClientError
+from api.services.exchange_client import ExchangeClientError
 
 SECRETS = ("test-api-key-000001", "test-api-secret-01")
 
 
 class Venue:
-    """Fake BinanceClient: records what it was built with, answers get_account_info."""
+    """Fake ExchangeClient: records what it was built with, answers get_account_info."""
     built = []
     info = {"can_trade": True, "can_withdraw": False, "permissions": ["readonly", "trade"], "permissions_known": True}
     error = None
 
-    def __init__(self, api_key, api_secret, passphrase="", exchange="binance"):
+    def __init__(self, api_key, api_secret, passphrase="", exchange="binance", account_mode="unknown"):
         Venue.built.append((exchange, api_key, api_secret, passphrase))
         self.exchange = exchange
 
@@ -33,7 +33,7 @@ class Venue:
 def reset_venue(monkeypatch):
     Venue.built, Venue.error = [], None
     Venue.info = {"can_trade": True, "can_withdraw": False, "permissions": ["readonly", "trade"], "permissions_known": True}
-    monkeypatch.setattr(kv, "BinanceClient", Venue)
+    monkeypatch.setattr(kv, "ExchangeClient", Venue)
     yield
 
 
@@ -95,7 +95,7 @@ async def test_withdrawal_permission_is_recorded_and_warned(db, user, binance_ke
 
 
 async def test_bad_credentials(db, user, binance_key, client, caplog):
-    Venue.error = BinanceClientError("Bitget error 40012: apikey/password is incorrect", "40012")
+    Venue.error = ExchangeClientError("Bitget error 40012: apikey/password is incorrect", "40012")
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
@@ -110,7 +110,7 @@ async def test_bad_credentials(db, user, binance_key, client, caplog):
 
 
 async def test_ip_allowlist_rejection(db, user, binance_key, client):
-    Venue.error = BinanceClientError("Bitget error 40018: Invalid IP", "40018")
+    Venue.error = ExchangeClientError("Bitget error 40018: Invalid IP", "40018")
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
@@ -119,7 +119,7 @@ async def test_ip_allowlist_rejection(db, user, binance_key, client):
     assert "IP" in body["detail"] and "allowlist" in body["detail"]
     await assert_row(db, binance_key, verified=False, status="failed", error_contains="IP", before=before)
     # Binance folds the IP case into -2015; the message decides
-    Venue.error = BinanceClientError("Binance error -2015: Invalid API-key, IP, or permissions for action", "-2015")
+    Venue.error = ExchangeClientError("Binance error -2015: Invalid API-key, IP, or permissions for action", "-2015")
     binance_key.exchange = "binance"
     await db.commit()
     body = (await verify(client, user, binance_key)).json()
@@ -127,7 +127,7 @@ async def test_ip_allowlist_rejection(db, user, binance_key, client):
 
 
 async def test_venue_unreachable(db, user, binance_key, client):
-    Venue.error = BinanceClientError("Bitget error NETWORK: GET /api/v2/spot/account/info: ConnectionError: boom", "NETWORK")
+    Venue.error = ExchangeClientError("Bitget error NETWORK: GET /api/v2/spot/account/info: ConnectionError: boom", "NETWORK")
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
@@ -146,9 +146,58 @@ async def test_no_trade_permission(db, user, binance_key, client):
     await assert_row(db, binance_key, verified=False, status="failed", error_contains="spot trading", withdrawal=False, before=before)
 
 
+async def test_read_only_bitget_key_is_refused_with_the_fix_it_message(db, user, binance_key, client):
+    """Seen live on 2026-10-06: a Read-only Bitget key with Spot ticked reports 'stor', passed
+    verification as 'verified' (unconfirmed code) and then every buy failed with 40014."""
+    from api.services.exchange_client import interpret_bitget_authorities
+    Venue.info = {**interpret_bitget_authorities(["stor"]), "permissions": ["stor"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is False and body["result"] == "read_only_key"
+    assert body["detail"] == ("This key is Read-only, so AutoBuy can't place buys. In Bitget, edit the key to Read-write "
+                              "with only Spot → Trade ticked, then verify again.")
+    await assert_row(db, binance_key, verified=False, status="failed", error_contains="Read-only", withdrawal=False, before=before)
+
+
+async def test_read_write_bitget_key_with_spot_trade_verifies(db, user, binance_key, client):
+    from api.services.exchange_client import interpret_bitget_authorities
+    Venue.info = {**interpret_bitget_authorities(["stow"]), "permissions": ["stow"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["result"] == "ok" and body["withdrawal_enabled"] is False
+    await assert_row(db, binance_key, verified=True, status="verified", withdrawal=False, before=before)
+
+
+async def test_unified_account_is_refused_with_the_fix_it_message(db, user, binance_key, client, caplog):
+    """Bitget answers every Classic (v2) call with 40085 once the account is migrated to Unified Trading mode."""
+    Venue.error = ExchangeClientError("Bitget error 40085: You are in Unified Account mode, and the Classic Account API is not supported at this time", "40085")
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is False and body["result"] == "unified_account"
+    from api.config import settings
+    assert body["detail"] == ("This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet. We're adding it now. "
+                              f"Please contact {settings.support_email or 'support'} and we'll let you know as soon as it's ready.")
+    await assert_row(db, binance_key, verified=False, status="failed", error_contains="Unified Trading mode", withdrawal=None, before=before)
+
+
+async def test_classic_account_with_spot_trade_still_verifies_after_the_unified_rule(db, user, binance_key, client):
+    from api.services.exchange_client import interpret_bitget_authorities
+    Venue.info = {**interpret_bitget_authorities(["stow"]), "permissions": ["stow"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["result"] == "ok"
+
+
 async def test_permissions_not_reported_still_verifies(db, user, binance_key, client):
     Venue.info = {"can_trade": None, "can_withdraw": None, "permissions": [], "permissions_known": False}
-    binance_key.exchange = "bybit"
+    binance_key.exchange = "bitget"   # a Bitget key whose authorities list is empty/unrecognised
     await db.commit()
     before = binance_key.updated_at
     body = (await verify(client, user, binance_key)).json()
@@ -158,7 +207,7 @@ async def test_permissions_not_reported_still_verifies(db, user, binance_key, cl
 
 
 async def test_failed_then_retry_succeeds_and_clears_error(db, user, binance_key, client):
-    Venue.error = BinanceClientError("Bitget error 40037: Apikey does not exist", "40037")
+    Venue.error = ExchangeClientError("Bitget error 40037: Apikey does not exist", "40037")
     await verify(client, user, binance_key)
     await db.refresh(binance_key)
     assert binance_key.verification_status == "failed" and binance_key.verified_at is None
@@ -170,7 +219,9 @@ async def test_failed_then_retry_succeeds_and_clears_error(db, user, binance_key
     assert binance_key.verified_at is not None
 
 
-async def test_credential_change_resets_verification(db, user, binance_key, client):
+async def test_credential_change_resets_verification(db, user, binance_key, client, monkeypatch):
+    from api.config import settings
+    monkeypatch.setattr(settings, "supported_exchanges_csv", "bitget,binance")
     await verify(client, user, binance_key)
     async with client as c:
         r = await c.post("/api/exchange/keys", headers=auth(user),
@@ -190,14 +241,12 @@ async def test_verify_unknown_key_is_404(user, client):
 
 
 def test_classify_covers_every_venue_family():
-    assert kv.classify("bitget", BinanceClientError("x", "40006"))[0] == "invalid_key"
-    assert kv.classify("bitget", BinanceClientError("x", "40009"))[0] == "invalid_key"
-    assert kv.classify("bitget", BinanceClientError("Invalid IP", "40018"))[0] == "ip_not_allowed"
-    assert kv.classify("okx", BinanceClientError("x", "50110"))[0] == "ip_not_allowed"
-    assert kv.classify("bybit", BinanceClientError("x", "10003"))[0] == "invalid_key"
-    assert kv.classify("bitget", BinanceClientError("x", "HTTP"))[0] == "unreachable"
-    assert kv.classify("bitget", BinanceClientError("request IP is not in the whitelist", "99999"))[0] == "ip_not_allowed"
-    assert kv.classify("bitget", BinanceClientError("something else", "40001"))[0] == "error"
+    assert kv.classify("bitget", ExchangeClientError("x", "40006"))[0] == "invalid_key"
+    assert kv.classify("bitget", ExchangeClientError("x", "40009"))[0] == "invalid_key"
+    assert kv.classify("bitget", ExchangeClientError("Invalid IP", "40018"))[0] == "ip_not_allowed"
+    assert kv.classify("bitget", ExchangeClientError("x", "HTTP"))[0] == "unreachable"
+    assert kv.classify("bitget", ExchangeClientError("request IP is not in the whitelist", "99999"))[0] == "ip_not_allowed"
+    assert kv.classify("bitget", ExchangeClientError("something else", "40001"))[0] == "error"
 
 
 async def test_executor_refuses_unverified_key(db, user, binance_key):
@@ -219,30 +268,101 @@ async def test_executor_refuses_unverified_key(db, user, binance_key):
 
 
 def test_bitget_authorities_interpretation():
-    from api.services.binance_client import interpret_bitget_authorities as f
+    from api.services.exchange_client import interpret_bitget_authorities as f
     # documented words
-    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": []}
-    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": []}
-    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True, "unconfirmed": []}
-    # the undocumented codes a live read + spot-trade key returns: trade recognised, withdrawal POSSIBLE (None)
-    live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
-    assert live == {"can_trade": True, "can_withdraw": None, "permissions_known": True, "unconfirmed": ["p2pw", "smow", "taxw", "wtow"]}
+    assert f(["readonly", "trade"]) == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
+    assert f(["readonly"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
+    assert f(["trade", "withdraw"]) == {"can_trade": True, "can_withdraw": True, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": False}
     # nothing / only unknown codes: never a rejection, never "safe"
-    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": []}
-    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": ["zzz"]}
+    assert f([]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": [], "extra": [], "read_only": False}
+    assert f(["zzz"]) == {"can_trade": None, "can_withdraw": None, "permissions_known": False, "unconfirmed": ["zzz"], "extra": [], "read_only": False}
+    # Bitget v2 codes seen live: stor = Spot -> Read (Read-only key), stow = Spot -> Trade (Read-write key)
+    assert f(["stor"]) == {"can_trade": False, "can_withdraw": False, "permissions_known": True, "unconfirmed": [], "extra": [], "read_only": True}
+    assert f(["stor", "stow"])["read_only"] is False and f(["stor", "stow"])["can_trade"] is True
 
 
-async def test_bitget_live_shaped_authorities_verify_with_unknown_withdrawal(db, user, binance_key, client):
-    Venue.info = {"can_trade": True, "can_withdraw": None, "permissions": ["taxw", "p2pw", "wtow", "stow", "smow"],
-                  "permissions_known": True}
+@pytest.mark.parametrize("code, trade, extra", [
+    ("stow", True, []),         # Spot -> Trade: the one AutoBuy needs
+    ("smow", False, ["smow"]),  # Margin -> Trade
+    ("taxw", False, ["taxw"]),  # Taxation -> Search
+    ("p2pw", False, ["p2pw"]),  # P2P -> Search
+    ("wtow", False, ["wtow"]),  # Wallet -> Transfer (internal, not an external withdrawal)
+])
+def test_each_confirmed_bitget_code_is_mapped_and_none_grants_withdrawal(code, trade, extra):
+    from api.services.exchange_client import interpret_bitget_authorities as f
+    r = f([code])
+    assert r["can_trade"] is trade and r["can_withdraw"] is False and r["unconfirmed"] == [] and r["extra"] == extra
+    assert r["permissions_known"] is True
+
+
+def test_live_bitget_key_with_all_five_codes_cannot_withdraw():
+    from api.services.exchange_client import interpret_bitget_authorities as f
+    live = f(["taxw", "p2pw", "wtow", "stow", "smow"])
+    assert live == {"can_trade": True, "can_withdraw": False, "permissions_known": True, "unconfirmed": [],
+                    "extra": ["p2pw", "smow", "taxw", "wtow"], "read_only": False}
+    # any other code (e.g. whatever Bitget uses for Withdraw) still means "withdrawal possible"
+    unknown = f(["stow", "wdxx"])
+    assert unknown["can_trade"] is True and unknown["can_withdraw"] is None and unknown["unconfirmed"] == ["wdxx"]
+
+
+async def test_bitget_key_with_confirmed_codes_verifies_with_withdrawal_false_and_extra_warning(db, user, binance_key, client):
+    Venue.info = {"can_trade": True, "can_withdraw": False, "permissions": ["taxw", "p2pw", "wtow", "stow", "smow"],
+                  "permissions_known": True, "unconfirmed": [], "extra": ["p2pw", "smow", "taxw", "wtow"]}
     binance_key.exchange = "bitget"
     await db.commit()
     before = binance_key.updated_at
     body = (await verify(client, user, binance_key)).json()
     assert body["verified"] is True and body["result"] == "ok"
-    assert "treat this key as able to withdraw" in body["detail"] and "taxw" in body["detail"]
+    assert body["withdrawal_enabled"] is False and body["withdrawal_permission_warning"] is False
+    assert body["extra_permissions"] == ["p2pw", "smow", "taxw", "wtow"]
+    assert "more permissions than AutoBuy needs (p2pw, smow, taxw, wtow)" in body["detail"]
+    assert "use a key with only Spot -> Trade" in body["detail"]
+    assert body["key"]["permissions"] == ["taxw", "p2pw", "wtow", "stow", "smow"] and body["key"]["extra_permissions"] == ["p2pw", "smow", "taxw", "wtow"]
+    await assert_row(db, binance_key, verified=True, status="verified", withdrawal=False, before=before)
+    assert binance_key.permissions == "taxw,p2pw,wtow,stow,smow"
+    # the stored codes come back on the key list
+    async with fresh() as c:
+        keys = (await c.get("/api/exchange/keys", headers=auth(user))).json()
+    assert next(k for k in keys if k["id"] == str(binance_key.id))["extra_permissions"] == ["p2pw", "smow", "taxw", "wtow"]
+
+
+async def test_bitget_key_without_stow_fails_with_clear_reason(db, user, binance_key, client):
+    Venue.info = {"can_trade": False, "can_withdraw": False, "permissions": ["taxw", "wtow"],
+                  "permissions_known": True, "unconfirmed": [], "extra": ["taxw", "wtow"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is False and body["result"] == "no_trade_permission"
+    assert body["detail"].startswith("Spot trading permission is required")
+    assert "no Spot -> Trade permission" in body["detail"] and "taxw, wtow" in body["detail"]
+    await assert_row(db, binance_key, verified=False, status="failed", error_contains="Spot trading permission is required",
+                     withdrawal=False, before=before)
+
+
+async def test_spot_trade_only_key_has_no_extra_warning(db, user, binance_key, client):
+    Venue.info = {"can_trade": True, "can_withdraw": False, "permissions": ["stow"], "permissions_known": True,
+                  "unconfirmed": [], "extra": []}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["extra_permissions"] == [] and "more permissions" not in body["detail"]
+    assert body["withdrawal_enabled"] is False and body["withdrawal_permission_warning"] is False
+
+
+async def test_bitget_unconfirmed_code_still_means_withdrawal_possible(db, user, binance_key, client):
+    """Whatever code Bitget uses for Withdraw is not confirmed yet: it must never be reported as safe."""
+    Venue.info = {"can_trade": True, "can_withdraw": None, "permissions": ["stow", "taxw", "wdxx"],
+                  "permissions_known": True, "unconfirmed": ["wdxx"], "extra": ["taxw"]}
+    binance_key.exchange = "bitget"
+    await db.commit()
+    before = binance_key.updated_at
+    body = (await verify(client, user, binance_key)).json()
+    assert body["verified"] is True and body["result"] == "ok"
+    assert "treat this key as able to withdraw" in body["detail"] and "wdxx" in body["detail"]
     assert body["withdrawal_enabled"] is None and body["withdrawal_permission_warning"] is True, \
         "unconfirmed codes are never reported as safe"
+    assert body["extra_permissions"] == ["taxw"]
     await assert_row(db, binance_key, verified=True, status="verified", withdrawal=None, before=before)
 
 

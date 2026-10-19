@@ -1,4 +1,4 @@
-"""Re-encrypt all stored exchange API keys under a new ENCRYPTION_KEY.
+"""Re-encrypt every stored secret (exchange API keys, TOTP secrets, Guardian monitoring keys) under a new ENCRYPTION_KEY.
 
 Usage:
     OLD_ENCRYPTION_KEY=<previous key material> ENCRYPTION_KEY=<new key material> \
@@ -6,7 +6,11 @@ Usage:
 
 OLD_ENCRYPTION_KEY may be empty ("") when rotating off the legacy
 SECRET_KEY-derived cipher — the script then uses SECRET_KEY as the old material.
-Run with the API stopped; the change is transactional (all rows or none).
+Run with the API and the Guardian worker stopped
+(`docker compose -p autobuy-platform --profile prod stop api guardian`): a worker left
+running decrypts with the old key mid-rotation, and every failure reaches customers as
+an alert that their account is not being watched. The change is transactional (all rows
+or none).
 """
 import base64
 import hashlib
@@ -34,16 +38,35 @@ def main() -> None:
     url = settings.database_url.replace("+asyncpg", "+psycopg2")
     engine = create_engine(url)
     with engine.begin() as conn:
+        def rotate(token):
+            """None stays None (Binance keys carry no passphrase)."""
+            return None if token is None else new_f.encrypt(old_f.decrypt(token.encode())).decode()
+
         rows = conn.execute(
-            text("SELECT id, encrypted_api_key, encrypted_api_secret FROM api_keys")).all()
+            text("SELECT id, encrypted_api_key, encrypted_api_secret, encrypted_passphrase FROM api_keys")).all()
         for row in rows:
             conn.execute(
-                text("UPDATE api_keys SET encrypted_api_key=:k, encrypted_api_secret=:s "
+                text("UPDATE api_keys SET encrypted_api_key=:k, encrypted_api_secret=:s, encrypted_passphrase=:p "
                      "WHERE id=:id"),
                 {"id": row.id,
-                 "k": new_f.encrypt(old_f.decrypt(row.encrypted_api_key.encode())).decode(),
-                 "s": new_f.encrypt(old_f.decrypt(row.encrypted_api_secret.encode())).decode()})
+                 "k": rotate(row.encrypted_api_key),
+                 "s": rotate(row.encrypted_api_secret),
+                 "p": rotate(row.encrypted_passphrase)})
         print(f"re-encrypted {len(rows)} api_keys row(s)")
+        totp_rows = conn.execute(text("SELECT user_id, encrypted_secret FROM user_totp")).all()
+        for row in totp_rows:
+            conn.execute(text("UPDATE user_totp SET encrypted_secret=:s WHERE user_id=:id"),
+                         {"id": row.user_id, "s": new_f.encrypt(old_f.decrypt(row.encrypted_secret.encode())).decode()})
+        print(f"re-encrypted {len(totp_rows)} user_totp row(s)")
+        guardian_rows = conn.execute(text("SELECT id, encrypted_api_key, encrypted_secret, encrypted_passphrase FROM guardian_accounts")).all()
+        for row in guardian_rows:
+            conn.execute(
+                text("UPDATE guardian_accounts SET encrypted_api_key=:k, encrypted_secret=:s, encrypted_passphrase=:p WHERE id=:id"),
+                {"id": row.id,
+                 "k": rotate(row.encrypted_api_key),
+                 "s": rotate(row.encrypted_secret),
+                 "p": rotate(row.encrypted_passphrase)})   # None for exchanges without a passphrase
+        print(f"re-encrypted {len(guardian_rows)} guardian_accounts row(s)")
 
 
 if __name__ == "__main__":

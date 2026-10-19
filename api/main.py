@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 OPENAPI_TAGS = [
     {"name": "auth", "description": "Registration, login, JWT lifecycle (refresh, logout, password change)."},
+    {"name": "security", "description": "Two-factor authentication (TOTP with recovery codes) and sign out everywhere."},
     {"name": "user", "description": "Profile management. `kyc_status` is read-only here — it is owned by the KYC flow."},
     {"name": "kyc", "description": "Sumsub identity verification: widget token, status sync, review webhook."},
     {"name": "exchange", "description": "Exchange API keys: encrypted at rest, masked on read, verified against Binance."},
@@ -90,6 +91,20 @@ app.middleware("http")(platform_middleware)
 # Unhandled exceptions: JSON 500 with request id, no stack trace to the client
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
+# Validation errors: FastAPI's default body echoes the submitted input back, which for a
+# password or one-time-code field is the secret itself. Keep location and message, drop the echo.
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
+
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -100,6 +115,19 @@ app.add_middleware(
 )
 
 # Health check endpoint
+def build_commit() -> str:
+    """Commit stamped into the image by Dockerfile.api (GIT_COMMIT build arg)."""
+    import pathlib
+    for candidate in (pathlib.Path(__file__).resolve().parent.parent / "GIT_COMMIT", pathlib.Path("/app/GIT_COMMIT")):
+        try:
+            value = candidate.read_text().strip()
+            if value:
+                return value
+        except OSError:
+            continue
+    return "unknown"
+
+
 @app.get("/health")
 @limiter.exempt
 async def health_check(request: Request):
@@ -112,18 +140,23 @@ async def health_check(request: Request):
     consecutive-failure count.
     """
     from api.services import scheduler_state
-    from api.tasks.purchase_scheduler import INTERVAL_MINUTES
+    from api.tasks.purchase_scheduler import INTERVAL_MINUTES, WITHDRAWAL_POLL_INTERVAL_MINUTES
     try:
         pause = await scheduler_state.pause_info()
     except scheduler_state.PauseStateUnavailable:
         pause = {"paused": None, "since": None, "by": None}
     autobuy = await scheduler_state.status("autobuy")
+    withdrawals = await scheduler_state.status("withdrawals")
     autobuy_sched = getattr(request.app.state, "autobuy_scheduler", None)
+    from api.services import guardian_state
     return {
         "status": "healthy",
         "environment": settings.api_env,
         "version": "1.0.0",
+        "commit": build_commit(),   # the git commit this image was built from ("unknown" outside a stamped image)
         "dry_run": settings.autobuy_dry_run,
+        # the Guardian worker (separate container): alive = a heartbeat younger than 180 s, flag on or off
+        "guardian": await guardian_state.health(),
         "schedulers": {
             "paused": pause["paused"],           # None = Redis unreadable (the job fails closed)
             "paused_since": pause["since"],
@@ -138,6 +171,15 @@ async def health_check(request: Request):
                 "last_detail": autobuy["last_detail"],
                 "last_counts": autobuy["last_counts"],
                 "consecutive_failures": autobuy["consecutive_failures"],
+            },
+            # confirms sent withdrawals with the exchange (tx hash / final status)
+            "withdrawals": {
+                "running": bool(autobuy_sched is not None and autobuy_sched.running),
+                "paused": pause["paused"],
+                "interval_minutes": WITHDRAWAL_POLL_INTERVAL_MINUTES,
+                "last_run_at": withdrawals["last_run_at"],
+                "last_result": withdrawals["last_result"],
+                "last_counts": withdrawals["last_counts"],
             },
         },
     }
@@ -162,9 +204,13 @@ async def root():
         "openapi_schema": "/openapi.json"
     }
 
-from api.routes import auth, dashboard, exchange, transactions, user
+from api.routes import auth, dashboard, exchange, transactions, user, public
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(public.router, prefix="/api/public", tags=["public"])
+from api.routes import twofactor
+# Before the user router: its GET /api/user/{user_id} would otherwise capture /api/user/2fa.
+app.include_router(twofactor.router, prefix="/api/user/2fa", tags=["security"])
 app.include_router(user.router, prefix="/api/user", tags=["user"])
 app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
@@ -188,6 +234,8 @@ app.include_router(email.router, prefix="/api/email", tags=["user"])
 from api.routes import autobuy_purchases, wallets
 app.include_router(autobuy_purchases.router, prefix="/api/v2/purchases", tags=["auto-buy"])
 app.include_router(wallets.router, prefix="/api/wallets", tags=["auto-buy"])
+from api.routes import market
+app.include_router(market.router, prefix="/api/v2/market", tags=["auto-buy"])
 
 if __name__ == "__main__":
     import uvicorn

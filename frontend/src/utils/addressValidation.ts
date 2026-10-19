@@ -24,7 +24,7 @@ function b58decode(s: string): Uint8Array | null {
 }
 
 // SHA-256 (sync, tiny) for Base58Check — avoids pulling in a crypto dependency.
-function sha256(data: Uint8Array): Uint8Array {
+export function sha256(data: Uint8Array): Uint8Array {
   const K = new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
   const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
   const len = data.length, bitLen = len * 8;
@@ -138,15 +138,6 @@ export function getAddressNetwork(address: string): Network | null {
   return chain ? "mainnet" : null;
 }
 
-export const CRYPTO_CHAINS: Record<string, Chain> = { BTC: "bitcoin", ETH: "ethereum", USDT: "ethereum", USDC: "ethereum", SOL: "solana" };
-
-export function validateAddressForNetwork(address: string, network: Network, chain?: Chain): boolean {
-  const actual = detectChain(address.trim());
-  if (!actual || (chain && actual !== chain)) return false;
-  if (actual === "bitcoin") return bitcoinNetwork(address.trim()) === network;
-  return true;
-}
-
 /** Known unspendable / burn / placeholder addresses (mirrors api/utils/address_denylist.py). Always rejected. */
 export const ADDRESS_DENYLIST = new Set([
   "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "1111111111111111111114oLvT2", "1BitcoinEaterAddressDontSendf59kuE",
@@ -160,17 +151,4 @@ export const DENYLIST_REASON = "This is a known unspendable, burn or placeholder
 export function isDenylisted(address: string): boolean {
   const a = address.trim();
   return ADDRESS_DENYLIST.has(a) || (a.toLowerCase().startsWith("0x") && ADDRESS_DENYLIST.has(a.toLowerCase()));
-}
-
-/** Form helper: null while empty, otherwise a verdict with a human reason. */
-export function addressVerdict(address: string, crypto: string, network: Network): { ok: boolean; reason: string } | null {
-  const a = address.trim();
-  if (!a) return null;
-  if (isDenylisted(a)) return { ok: false, reason: DENYLIST_REASON };
-  const chain = CRYPTO_CHAINS[crypto];
-  const actual = detectChain(a);
-  if (!actual) return { ok: false, reason: "Not a valid Bitcoin, Ethereum or Solana address" };
-  if (chain && actual !== chain) return { ok: false, reason: `${crypto} needs a ${chain} address; this looks like ${actual}` };
-  if (actual === "bitcoin" && bitcoinNetwork(a) !== network) return { ok: false, reason: `This is a Bitcoin ${bitcoinNetwork(a)} address, not ${network}` };
-  return { ok: true, reason: `Valid ${actual} address for ${network}` };
 }

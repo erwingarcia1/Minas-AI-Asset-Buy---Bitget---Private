@@ -14,8 +14,10 @@ from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import token_cutoff
 from api.config import settings
 from api.database import get_db
+from api.routes._deps import user_or_404
 from api.models import User
 
 router = APIRouter()
@@ -66,7 +68,7 @@ async def get_current_user(
         )
     except JWTError:
         raise unauthorized
-    if payload.get("type") in ("refresh", "email_verify", "password_reset"):  # only access tokens log in
+    if payload.get("type") in ("refresh", "email_verify", "password_reset", "mfa_pending"):  # only access tokens log in
         raise unauthorized
     sub = payload.get("sub")
     if not sub:
@@ -81,10 +83,11 @@ async def get_current_user(
         raise unauthorized
     if user.suspended:
         raise HTTPException(status_code=403, detail="Account suspended — contact support")
-    if user.password_changed_at is not None and payload.get("iat") is not None:
+    cutoff = token_cutoff(user)
+    if cutoff is not None and payload.get("iat") is not None:
         issued = datetime.fromtimestamp(payload["iat"], tz=timezone.utc)
-        if issued < user.password_changed_at:
-            raise unauthorized  # token predates the last password change
+        if issued < cutoff:
+            raise unauthorized  # token predates the last password change or "sign out everywhere"
     return user
 
 
@@ -100,6 +103,11 @@ class UserProfile(UTCModel):
     kyc_sumsub_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    # active 24h hold on new withdrawal addresses (after a password reset/change), else null
+    wallet_hold_until: Optional[datetime] = None
+    wallet_hold_reason: Optional[str] = None
+    # private beta: may this user create/switch withdraw-immediately purchases? (server-enforced; the UI hides the controls)
+    withdrawals_allowed: bool = False
 
 
 class UserPublicProfile(UTCModel):
@@ -119,10 +127,22 @@ class ProfileUpdateRequest(BaseModel):
 # Routes
 # --------------------------------------------------------------------------
 
+def _profile(user: User) -> UserProfile:
+    from api.services.wallet_hold import active_hold
+    out = UserProfile.model_validate(user, from_attributes=True)
+    until = active_hold(user)
+    out.wallet_hold_until = until
+    out.wallet_hold_reason = user.wallet_hold_reason if until else None
+    from api.services.withdraw_gate import withdrawals_allowed
+    out.withdrawals_allowed = withdrawals_allowed(user)
+    return out
+
+
 @router.get("/profile", response_model=UserProfile)
 async def get_profile(current_user: User = Depends(get_current_user)):
-    """Return the authenticated user's own profile."""
-    return current_user
+    """Return the authenticated user's own profile, including any active
+    wallet-change hold (`wallet_hold_until`)."""
+    return _profile(current_user)
 
 
 @router.put("/profile", response_model=UserProfile)
@@ -156,8 +176,4 @@ async def get_user_by_id(
     db: AsyncSession = Depends(get_db),
 ):
     """Get any user's public profile by ID (requires authentication)."""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return await user_or_404(db, user_id)

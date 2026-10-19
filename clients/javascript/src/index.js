@@ -11,6 +11,15 @@ import { FetchTransport } from "./http.js";
 export * from "./api.js";
 export { ApiError, AuthenticationError, RateLimitError, ValidationError, FetchTransport } from "./http.js";
 
+/**
+ * True when `login()` answered with a pending two-factor challenge (HTTP 202) instead of a token pair.
+ * @param {import('./types.js').TokenResponse | import('./types.js').MfaRequiredResponse} result
+ * @returns {result is import('./types.js').MfaRequiredResponse}
+ */
+export function isMfaRequired(result) {
+  return typeof result === "object" && result !== null && Boolean(/** @type {import('./types.js').MfaRequiredResponse} */ (result).mfa_required);
+}
+
 /** High-level client: resource groups from the OpenAPI spec plus token-lifecycle helpers. */
 export class AutoBuyClient {
   /** @param {import('./http.js').FetchTransportOptions} opts */
@@ -59,11 +68,31 @@ export class AutoBuyClient {
 
   /**
    * `POST /api/auth/login` — authenticate and store the resulting tokens.
+   *
+   * An account with two-factor authentication on answers 202 with
+   * `{ mfa_required: true, mfa_token, expires_in }` instead of a token pair, and nothing is
+   * stored. Check `result.mfa_required` (or `isMfaRequired(result)`) and finish the sign-in
+   * with `loginMfa()` within `expires_in` seconds.
    * @param {string} email @param {string} password
-   * @returns {Promise<import('./types.js').TokenResponse>}
+   * @returns {Promise<import('./types.js').TokenResponse | import('./types.js').MfaRequiredResponse>}
    */
   async login(email, password) {
-    const pair = await this.auth.login({ email, password });
+    const result = await this.auth.login({ email, password });
+    if (isMfaRequired(result)) return result;
+    this.transport.setTokens(result);
+    return result;
+  }
+
+  /**
+   * `POST /api/auth/login/mfa` — finish a two-factor sign-in and store the resulting tokens.
+   * `mfaToken` is the one returned by `login()`; `factor` is `{ code }` (authenticator) or `{ recovery_code }`.
+   * @param {string} mfaToken
+   * @param {{ code: string } | { recovery_code: string }} factor
+   * @returns {Promise<import('./types.js').TokenResponse>}
+   */
+  async loginMfa(mfaToken, factor) {
+    if (!factor || !("code" in factor || "recovery_code" in factor)) throw new TypeError("loginMfa needs { code } or { recovery_code }");
+    const pair = await this.auth.loginMfa({ mfa_token: mfaToken, ...factor });
     this.transport.setTokens(pair);
     return pair;
   }
@@ -75,10 +104,8 @@ export class AutoBuyClient {
 
   /** `POST /api/auth/logout` — revoke the refresh token and clear local state. */
   async logout() {
-    const refresh_token = this.tokens?.refresh_token;
-    if (refresh_token) {
-      await this.auth.logout({ refresh_token }).catch(() => undefined);
-    }
+    const csrf = this.tokens?.csrf_token;
+    await this.transport.request("POST", "/api/auth/logout", { auth: false, headers: csrf ? { "X-CSRF-Token": csrf } : {} }).catch(() => undefined);
     this.transport.setTokens(null);
   }
 

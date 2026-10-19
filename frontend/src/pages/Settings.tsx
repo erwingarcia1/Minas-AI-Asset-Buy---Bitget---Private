@@ -1,30 +1,52 @@
-import { useState, type FormEvent } from "react";
-import { authAPI, userAPI } from "@/api/endpoints";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
+import { authAPI, notificationAPI, publicAPI, userAPI } from "@/api/endpoints";
 import { errorMessage } from "@/api/client";
-import { Alert, Loading, StatusBadge } from "@/components/Common";
+import { Alert, CopyButton, Loading, SecretInput, StatusBadge } from "@/components/Common";
+import { NO_AUTOFILL } from "@/utils/noAutofill";
 import Integrations from "@/components/Settings/Integrations";
 import Reports from "@/components/Settings/Reports";
 import { useAsync } from "@/hooks/useAsync";
 import { useAuth } from "@/hooks/useAuth";
 import { passwordProblem } from "@/utils/validation";
 import { capitalize, fmtDate } from "@/utils/format";
+import NotificationSettings from "@/components/Settings/NotificationSettings";
+import SecuritySettings from "@/components/Settings/SecuritySettings";
+import WalletHoldNotice from "@/components/Common/WalletHoldNotice";
 
 type Msg = { kind: "error" | "success"; text: string } | null;
 
+/** Bitget permission codes AutoBuy recognises but does not need (confirmed from Bitget's "Edit API key" screen). */
+const PERMISSION_LABELS: Record<string, string> = {
+  smow: "Margin → Trade", wtow: "Wallet → Transfer (internal)", taxw: "Taxation → Search", p2pw: "P2P → Search", transfer: "Transfer (internal)",
+};
+
 export default function Settings() {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const notificationsRef = useRef<HTMLElement | null>(null);
+  const securityRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    // the "unsubscribe" link in emails lands on /settings/notifications; security emails link to /settings/security
+    if (location.pathname.endsWith("/notifications") && typeof notificationsRef.current?.scrollIntoView === "function") notificationsRef.current.scrollIntoView({ block: "start" });
+    if (location.pathname.endsWith("/security") && typeof securityRef.current?.scrollIntoView === "function") securityRef.current.scrollIntoView({ block: "start" });
+  }, [location.pathname]);
   const keys = useAsync(() => userAPI.exchangeKeys());
+  const supported = useAsync(() => userAPI.supportedExchanges().catch(() => ["bitget"]));
+  const meta = useAsync(() => publicAPI.meta().catch(() => null));
   const [pwMsg, setPwMsg] = useState<Msg>(null);
   const [mailMsg, setMailMsg] = useState<Msg>(null);
   const [keyMsg, setKeyMsg] = useState<Msg>(null);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
-  const [exchange, setExchange] = useState("binance");
+  const [exchange, setExchange] = useState("bitget");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [passphrase, setPassphrase] = useState("");
+  const [verifying, setVerifying] = useState<string | null>(null);   // must sit above the early return: hooks run in the same order on every render
 
   if (!user) return <Loading />;
+  const withdrawAllowed = user.withdrawals_allowed === true;   // private beta: withdraw guidance only for allowlisted users
 
   async function changePassword(e: FormEvent) {
     e.preventDefault();
@@ -46,7 +68,6 @@ export default function Settings() {
     } catch (err) { setMailMsg({ kind: "error", text: errorMessage(err) }); }
   }
 
-  const [verifying, setVerifying] = useState<string | null>(null);
 
   async function verifyKey(id: string) {
     setKeyMsg(null); setVerifying(id);
@@ -57,8 +78,9 @@ export default function Settings() {
     finally { setVerifying(null); await keys.reload(); }
   }
 
-  async function addKey(e: FormEvent) {
-    e.preventDefault();
+  async function addKey() {
+    // no <form>: the key fields are never submitted natively, so the browser
+    // has no submission to attach a "save password" prompt to
     setKeyMsg(null);
     try {
       const k = await userAPI.addExchangeKey({ exchange, api_key: apiKey, api_secret: apiSecret, passphrase: passphrase || undefined });
@@ -80,20 +102,57 @@ export default function Settings() {
           <div><dt className="text-slate-500">Member since</dt><dd>{fmtDate(user.created_at)}</dd></div>
           <div><dt className="text-slate-500">User ID</dt><dd className="font-mono text-xs">{user.id}</dd></div>
         </dl>
+        <WalletHoldNotice user={user} />
         {mailMsg && <Alert kind={mailMsg.kind}>{mailMsg.text}</Alert>}
         <button className="btn-secondary" onClick={() => void sendVerification()}>Send verification email</button>
       </section>
 
+      <NotificationSettings ref={notificationsRef} highlight={location.pathname.endsWith("/notifications")} api={notificationAPI} />
+
       <section className="card space-y-4">
         <h2 className="font-semibold">Exchange API keys</h2>
-        <p className="text-sm text-slate-600">Keys are encrypted at rest and verified against the exchange before purchases can execute. Use spot-trade-only keys with withdrawals disabled.</p>
+        <p className="text-sm text-slate-600">Keys are encrypted at rest and verified against the exchange before purchases can execute.</p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" data-testid="key-guidance">
+          <p className="font-medium">Which Bitget key permissions do I need?</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            <li><span className="font-medium">Accumulate on exchange:</span> a key with <span className="font-medium">Read</span> and <span className="font-medium">Spot trade</span> only. Leave Withdraw off.</li>
+            {withdrawAllowed ? (
+            <li><span className="font-medium">Withdraw immediately (send each buy to your wallet):</span> the key also needs <span className="font-medium">Withdraw</span>, and Bitget requires two things before it will send anything:
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                <li>Whitelist our server's IP on the key.{" "}
+                  {meta.data?.server_ip ? (
+                    <span className="inline-flex flex-wrap items-center gap-2 align-middle">
+                      <code className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs" data-testid="server-ip">{meta.data.server_ip}</code>
+                      <CopyButton value={meta.data.server_ip} label="Copy IP" />
+                    </span>
+                  ) : <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span>}</li>
+                <li>Add your wallet address to your Bitget address book (withdrawal whitelist) first — Bitget rejects API withdrawals to unknown addresses.</li>
+              </ul>
+            </li>
+            ) : (
+            <li>Whitelist our server's IP on the key.{" "}
+                  {meta.data?.server_ip ? (
+                    <span className="inline-flex flex-wrap items-center gap-2 align-middle">
+                      <code className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs" data-testid="server-ip">{meta.data.server_ip}</code>
+                      <CopyButton value={meta.data.server_ip} label="Copy IP" />
+                    </span>
+                  ) : <span className="font-mono text-xs" data-testid="server-ip-placeholder">our server IP will be shown here</span>}</li>
+            )}
+            <li data-testid="fee-note">Fees: Bitget's trading fee applies, taken from the coin you receive. AutoBuy adds no fee of its own.</li>
+            <li data-testid="classic-account-line">Classic and Unified Trading Bitget accounts both work for buying and holding. Sending coins to a wallet needs a Classic account for now.</li>
+            <li>Create the key as <b>Read-write</b>. A Read-only key won&apos;t work: AutoBuy will refuse it and ask you to change it. Bitget reports permissions as codes. Spot → Trade is required; Margin → Trade, Wallet → Transfer, Taxation → Search and P2P → Search are recognised as not needed (a warning, nothing blocked). Any code we have not confirmed yet is treated as "withdrawal possible": use such a key only where that is intended.</li>
+          </ul>
+          {!withdrawAllowed && (
+            <p className="mt-2 text-slate-600" data-testid="withdraw-unavailable">Sending to your own wallet is coming later. For now, coins stay in your Bitget sub-account.</p>
+          )}
+        </div>
         {keys.loading ? <Loading /> : keys.error ? <Alert kind="error">{keys.error}</Alert> : (
           <ul className="divide-y divide-slate-100 text-sm">
             {keys.data?.length === 0 && <li className="py-2 text-slate-500">No keys on file.</li>}
             {keys.data?.map((k) => (
               <li key={k.id} className="py-2" data-testid="exchange-key">
                 <div className="flex items-center justify-between gap-3">
-                  <span><span className="font-medium capitalize">{k.exchange}</span> <span className="text-slate-500">{String(k.api_key_masked ?? "")}</span> <StatusBadge status={k.verification_status ?? (k.verified ? "verified" : "pending")} /></span>
+                  <span><span className="font-medium capitalize">{k.exchange}</span> <span className="text-slate-500">{String(k.api_key_masked ?? "")}</span>{k.account_mode === "unified" && <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600" data-testid="account-mode">Unified</span>}{k.account_mode === "classic" && <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600" data-testid="account-mode">Classic</span>} <StatusBadge status={k.verification_status ?? (k.verified ? "verified" : "pending")} /></span>
                   <span className="space-x-2 whitespace-nowrap">
                     {k.verification_status !== "verified" && (
                       <button className="btn-secondary !py-1" disabled={verifying === k.id} onClick={() => void verifyKey(k.id)}>
@@ -112,6 +171,9 @@ export default function Settings() {
                 {k.verification_status === "verified" && k.withdrawal_enabled == null && (
                   <p className="mt-1 text-xs text-amber-700" role="status">Withdrawal permission could not be confirmed for this key — treat it as able to withdraw. Use it for accumulate purchases only unless you have disabled withdrawals on {capitalize(k.exchange)}.</p>
                 )}
+                {k.verification_status === "verified" && (k.extra_permissions?.length ?? 0) > 0 && (
+                  <p className="mt-1 text-xs text-amber-700" data-testid="extra-permissions">This key has more permissions than AutoBuy needs ({k.extra_permissions!.map((c) => PERMISSION_LABELS[c] ?? c).join(", ")}). For safety, use a key with only Spot → Trade.</p>
+                )}
                 {k.verification_status === "verified" && k.verified_at && (
                   <p className="mt-1 text-xs text-slate-400">Verified {fmtDate(k.verified_at)}</p>
                 )}
@@ -120,14 +182,19 @@ export default function Settings() {
           </ul>
         )}
         {keyMsg && <Alert kind={keyMsg.kind}>{keyMsg.text}</Alert>}
-        <form onSubmit={addKey} className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2" role="group" aria-label="Add an exchange API key" data-testid="exchange-key-fields">
           <div><label className="label" htmlFor="key-exchange">Exchange</label>
-            <select id="key-exchange" className="input" value={exchange} onChange={(e) => setExchange(e.target.value)}><option value="binance">Binance</option><option value="bitget">Bitget</option><option value="bybit">Bybit</option><option value="okx">OKX</option></select></div>
-          <div><label className="label" htmlFor="key-passphrase">Passphrase (Bitget/OKX)</label><input id="key-passphrase" className="input" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} /></div>
-          <div><label className="label" htmlFor="key-api-key">API key</label><input id="key-api-key" className="input" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" /></div>
-          <div><label className="label" htmlFor="key-api-secret">API secret</label><input id="key-api-secret" className="input" type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} autoComplete="off" /></div>
-          <div className="sm:col-span-2"><button className="btn-primary" type="submit" disabled={!apiKey || !apiSecret}>Save key</button></div>
-        </form>
+            <select id="key-exchange" className="input" value={exchange} onChange={(e) => setExchange(e.target.value)}>
+              {(supported.data ?? ["bitget"]).map((x) => <option key={x} value={x}>{x === "okx" ? "OKX" : capitalize(x)}</option>)}
+            </select></div>
+          <div><label className="label" htmlFor="exchange_credential_phrase">Passphrase (Bitget/OKX)</label>
+            <input id="exchange_credential_phrase" name="exchange_credential_phrase" className="input" type="text" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} {...NO_AUTOFILL} /></div>
+          <div><label className="label" htmlFor="exchange_credential_public">API key</label>
+            <input id="exchange_credential_public" name="exchange_credential_public" className="input" type="text" value={apiKey} onChange={(e) => setApiKey(e.target.value)} {...NO_AUTOFILL} /></div>
+          <div><label className="label" htmlFor="exchange_credential_private">API secret</label>
+            <SecretInput id="exchange_credential_private" name="exchange_credential_private" label="API secret" value={apiSecret} onChange={setApiSecret} /></div>
+          <div className="sm:col-span-2"><button className="btn-primary" type="button" disabled={!apiKey || !apiSecret} onClick={() => void addKey()}>Save key</button></div>
+        </div>
       </section>
 
       <section className="card space-y-4">
@@ -139,6 +206,8 @@ export default function Settings() {
           <div className="sm:col-span-2"><button className="btn-primary" type="submit" disabled={!current || !next}>Update password</button></div>
         </form>
       </section>
+
+      <SecuritySettings ref={securityRef} highlight={location.pathname.endsWith("/security")} />
 
       <Reports />
       <Integrations />

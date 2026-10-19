@@ -11,10 +11,10 @@ from datetime import datetime, timezone
 from api.services import history
 
 CSV_COLUMNS = [
-    "datetime_utc", "crypto", "quantity", "fill_price_usd", "usd_amount",
+    "datetime_utc", "crypto", "quantity", "net_quantity", "fill_price_usd", "usd_amount",
     "fee", "fee_currency", "exchange", "order_id", "purchase_type", "tx_type",
     "withdrawal_address", "network", "withdrawal_fee", "withdrawal_fee_currency", "tx_hash",
-    "method",
+    "withdrawal_status", "method",
 ]
 
 
@@ -22,15 +22,20 @@ def _lot(r: history.HistoryRow, wd: history.HistoryRow | None = None) -> dict:
     """One buy lot; when the buy was withdrawn (separate row), the withdrawal's
     address, chain, fee and tx hash are reported on the lot."""
     when = r.happened_at.astimezone(timezone.utc)
-    if wd is not None and wd.status == "completed":
+    withdrawal_status = None
+    if wd is not None and wd.status in ("completed", "simulated"):
+        withdrawal_status = wd.status
         r = history.HistoryRow(**{**r.__dict__, "withdrawal_id": wd.withdrawal_id, "wallet_address": wd.wallet_address,
                                   "blockchain_network": wd.blockchain_network, "withdrawal_fee": wd.withdrawal_fee,
                                   "withdrawal_fee_currency": wd.withdrawal_fee_currency, "tx_hash": wd.tx_hash,
                                   "tx_type": "withdrawal"})
+    elif wd is not None:
+        withdrawal_status = wd.status
     return {
         "datetime_utc": when.strftime("%Y-%m-%d %H:%M:%S"),
         "date": when.date().isoformat(),
-        "amount": r.amount_crypto,
+        "amount": r.amount_crypto,          # gross fill (matches the exchange's order history)
+        "net_amount": r.net_amount,         # the lot actually received, net of the coin-denominated fee
         "cost_usdt": r.cost_usd,
         "price": r.exchange_rate or 0.0,
         "fee": r.fee, "fee_currency": r.fee_currency,
@@ -39,6 +44,7 @@ def _lot(r: history.HistoryRow, wd: history.HistoryRow | None = None) -> dict:
         "withdrawal_address": r.wallet_address, "network": r.blockchain_network,
         "withdrawal_fee": r.withdrawal_fee, "withdrawal_fee_currency": r.withdrawal_fee_currency,
         "tx_hash": r.tx_hash,
+        "withdrawal_status": withdrawal_status,
     }
 
 
@@ -60,7 +66,7 @@ async def tax_summary(db, user_id, year: int) -> dict:
             "crypto": crypto, "lots": lot_list,
             "total_amount": round(amount, 8),
             "total_cost_usdt": round(cost, 2),
-            "average_price_usdt": round(cost / amount, 8) if amount else 0.0,
+            "average_price_usdt": round(cost / amount, 12) if amount else 0.0,   # 12: sub-cent coins keep 4 significant digits
         })
     return {
         "year": year, "method": "FIFO",
@@ -123,7 +129,11 @@ async def performance(db, user_id, market) -> dict:
 
 
 def _fmt(value, digits: int) -> str:
-    return "" if value is None else f"{value:.{digits}f}"
+    """CSV cells are machine-readable: money keeps its 2 decimals; crypto amounts (8)
+    are trimmed of trailing zeros; never any thousands grouping."""
+    if value is None:
+        return ""
+    return history.fmt_amount_plain(value, digits) if digits >= 8 else f"{value:.{digits}f}"
 
 
 def tax_summary_csv(summary: dict) -> str:
@@ -134,14 +144,14 @@ def tax_summary_csv(summary: dict) -> str:
     for holding in summary["acquisitions"]:
         for lot in holding["lots"]:
             writer.writerow([
-                lot["datetime_utc"], holding["crypto"], f"{lot['amount']:.8f}",
-                _fmt(lot["price"], 2), f"{lot['cost_usdt']:.2f}",
+                lot["datetime_utc"], holding["crypto"], _fmt(lot["amount"], 8), _fmt(lot.get("net_amount"), 8),
+                history.fmt_price_plain(lot["price"]), f"{lot['cost_usdt']:.2f}",
                 _fmt(lot["fee"], 8), lot["fee_currency"] or "",
                 lot["exchange"] or "", lot["order_id"] or "",
                 lot["purchase_type"], lot["tx_type"],
                 lot["withdrawal_address"] or "", lot["network"] or "",
                 _fmt(lot["withdrawal_fee"], 8), lot["withdrawal_fee_currency"] or "",
-                lot["tx_hash"] or "", summary["method"],
+                lot["tx_hash"] or "", lot.get("withdrawal_status") or "", summary["method"],
             ])
     return buf.getvalue()
 
@@ -168,9 +178,9 @@ def tax_summary_pdf(summary: dict, email: str) -> bytes:
     ]
     data = [["Crypto", "Amount", "Cost (USD)", "Avg price"]]
     for h in summary["acquisitions"]:
-        data.append([h["crypto"], f"{h['total_amount']:.8f}",
-                     f"{h['total_cost_usdt']:.2f}",
-                     f"{h['average_price_usdt']:.2f}"])
+        data.append([h["crypto"], history.fmt_amount(h['total_amount']),
+                     f"{h['total_cost_usdt']:,.2f}",
+                     history.fmt_price(h['average_price_usdt'])])
     data.append(["TOTAL", "", f"{summary['total_acquired_usdt']:.2f}", ""])
     table = Table(data, colWidths=[3 * cm, 5 * cm, 4 * cm, 4 * cm])
     table.setStyle(TableStyle([
@@ -185,7 +195,7 @@ def tax_summary_pdf(summary: dict, email: str) -> bytes:
     for h in summary["acquisitions"]:
         for lot in h["lots"]:
             sent = f"{lot['withdrawal_address'][:10]}… ({lot['network']})" if lot["withdrawal_address"] else "held"
-            detail.append([lot["datetime_utc"], h["crypto"], f"{lot['amount']:.8f}", _fmt(lot["price"], 2),
+            detail.append([lot["datetime_utc"], h["crypto"], _fmt(lot['amount'], 8), _fmt(lot["price"], 2),
                            f"{lot['cost_usdt']:.2f}", lot["exchange"] or "", (lot["order_id"] or "")[:14], sent])
     if len(detail) > 1:
         lots_table = Table(detail, colWidths=[3.2 * cm, 1.4 * cm, 2.4 * cm, 2 * cm, 1.8 * cm, 1.8 * cm, 2.6 * cm, 3 * cm])

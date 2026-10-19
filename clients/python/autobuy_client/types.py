@@ -24,6 +24,14 @@ class APIKeyResponse(TypedDict):
     exchange: str
     api_key_masked: str
     verified: bool
+    verification_status: NotRequired[str]
+    verification_error: NotRequired[Optional[str]]
+    verified_at: NotRequired[Optional[str]]
+    last_checked_at: NotRequired[Optional[str]]
+    withdrawal_enabled: NotRequired[Optional[bool]]
+    permissions: NotRequired[List[str]]
+    extra_permissions: NotRequired[List[str]]
+    account_mode: NotRequired[str]
     created_at: str
     updated_at: str
 
@@ -36,6 +44,29 @@ class ActivePurchase(TypedDict):
     frequency: str
     next_purchase_date: NotRequired[Optional[str]]
     purchase_type: NotRequired[str]
+
+
+class AdminPurchaseList(TypedDict):
+    """AdminPurchaseList."""
+    items: List[AdminPurchaseRow]
+    total: int
+
+
+class AdminPurchaseRow(TypedDict):
+    """AdminPurchaseRow."""
+    id: str
+    user_id: str
+    email: NotRequired[Optional[str]]
+    crypto_symbol: str
+    amount_usd: float
+    frequency: str
+    purchase_type: str
+    status: str
+    failure_count: int
+    last_error: NotRequired[Optional[str]]
+    next_execution: NotRequired[Optional[str]]
+    updated_at: str
+    parked_attempts: NotRequired[List[ParkedAttempt]]
 
 
 class AdminTransactionList(TypedDict):
@@ -70,6 +101,9 @@ class AdminUserRow(TypedDict):
     suspended: bool
     created_at: str
     invested_usdt: NotRequired[float]
+    wallet_hold_until: NotRequired[Optional[str]]
+    wallet_hold_reason: NotRequired[Optional[str]]
+    totp_enabled: NotRequired[bool]
 
 
 class AlertItem(TypedDict):
@@ -89,24 +123,87 @@ class ApplicantStatusResponse(TypedDict):
     reject_labels: NotRequired[List[str]]
 
 
+class ChainOut(TypedDict):
+    """ChainOut."""
+    chain: str
+    family: NotRequired[Optional[str]]
+    family_label: NotRequired[Optional[str]]
+    supported: bool
+    withdrawable: bool
+    withdraw_fee: float
+    extra_withdraw_fee_pct: float
+    min_withdraw_amount: float
+    withdraw_min_scale: int
+    withdraw_confirm: int
+    need_tag: bool
+    tag_label: NotRequired[Optional[str]]
+    browser_url: NotRequired[Optional[str]]
+    is_default: NotRequired[bool]
+    fee_usd: NotRequired[Optional[float]]
+    min_purchase_usd: NotRequired[Optional[float]]
+    estimated_sent: NotRequired[Optional[float]]
+    estimated_received: NotRequired[Optional[float]]
+    meets_minimum: NotRequired[Optional[bool]]
+
+
 class ChangePasswordRequest(TypedDict):
     """ChangePasswordRequest."""
     current_password: str
     new_password: str
 
 
+class CoinCategory(TypedDict):
+    """CoinCategory."""
+    category: str
+    label: str
+    accumulate_only: bool
+    risk_note: NotRequired[Optional[str]]
+    coins: List[CoinEntry]
+
+
+class CoinEntry(TypedDict):
+    """CoinEntry."""
+    symbol: str
+    name: str
+
+
+class CoinMarketOut(TypedDict):
+    """CoinMarketOut."""
+    coin: str
+    name: NotRequired[str]
+    category: NotRequired[str]
+    category_label: NotRequired[str]
+    accumulate_only: NotRequired[bool]
+    risk_note: NotRequired[Optional[str]]
+    pair: str
+    online: bool
+    min_trade_usdt: float
+    taker_fee_rate: NotRequired[Optional[float]]
+    quantity_precision: int
+    price_ask: NotRequired[Optional[float]]
+    chains: List[ChainOut]
+    fee_mode: NotRequired[str]
+    note: NotRequired[str]
+
+
 class ComparisonEntry(TypedDict):
     """ComparisonEntry."""
     crypto: str
     average_buy_price: float
+    price_precision: NotRequired[int]
     current_price: NotRequired[Optional[float]]
     buy_price_vs_market_pct: NotRequired[Optional[float]]
 
 
 class ComparisonResponse(TypedDict):
-    """ComparisonResponse."""
+    """Average buy price vs the market, and each coin's share of invested cost. No score is derived from the shares: the shares are the fact."""
     entries: List[ComparisonEntry]
-    diversification_score: float
+    share_of_invested: List[InvestedShare]
+
+
+class ConfirmRequest(TypedDict):
+    """ConfirmRequest."""
+    code: str
 
 
 class CreateApplicantRequest(TypedDict):
@@ -124,10 +221,13 @@ class CreateApplicantResponse(TypedDict):
 
 
 class CryptoHolding(TypedDict):
-    """CryptoHolding."""
+    """What the customer owns of a coin and where it is. total_amount is the quantity ACQUIRED (net of the trading fee charged in the coin); on_exchange is what is still on Bitget after real withdrawals (matches Bitget's balance); sent_to_wallet is what those withdrawals delivered."""
     crypto: str
     total_amount: float
+    on_exchange: NotRequired[float]
+    sent_to_wallet: NotRequired[float]
     total_cost_usdt: float
+    price_precision: NotRequired[int]
 
 
 class DashboardResponse(TypedDict):
@@ -138,10 +238,73 @@ class DashboardResponse(TypedDict):
     monthly_average_usdt: float
 
 
+class DestinationCheckOut(TypedDict):
+    """Server-side verdict on a withdrawal destination before the form submits."""
+    ok: bool
+    error: NotRequired[Optional[str]]
+    message: str
+    needs_tag: bool
+    tag_label: NotRequired[Optional[str]]
+    embedded_tag: NotRequired[Optional[str]]
+    funded: NotRequired[Optional[bool]]
+    warning: NotRequired[Optional[str]]
+
+
+class DisableRequest(TypedDict):
+    """DisableRequest."""
+    password: str
+    code: NotRequired[Optional[str]]
+    recovery_code: NotRequired[Optional[str]]
+
+
+class EmailOutboxView(TypedDict):
+    """EmailOutboxView."""
+    queued: int
+    failures_this_hour: NotRequired[Optional[int]]
+    alert_threshold: int
+    pending: List[Dict[str, Any]]
+    undelivered: List[UndeliveredEmail]
+
+
 class EmailSentResponse(TypedDict):
     """EmailSentResponse."""
     sent: bool
     email_id: NotRequired[Optional[str]]
+
+
+class EnrolRequest(TypedDict):
+    """EnrolRequest."""
+    password: str
+
+
+class EnrolResponse(TypedDict):
+    """Shown once. The secret never comes back from the API again."""
+    secret: str
+    otpauth_uri: str
+
+
+class ExchangeLookup(TypedDict):
+    """ExchangeLookup."""
+    attempt_id: str
+    client_oid: NotRequired[Optional[str]]
+    state: NotRequired[Optional[str]]
+    fill: NotRequired[Optional[Dict[str, Any]]]
+    verdict: NotRequired[Optional[str]]
+    error: NotRequired[Optional[str]]
+
+
+class FillDeviation(TypedDict):
+    """FillDeviation."""
+    purchase_id: str
+    user_id: str
+    coin: str
+    deviation_pct: float
+    expected_amount: float
+    actual_amount: float
+    requested_usd: float
+    cost_usd: float
+    price: NotRequired[Optional[float]]
+    at: float
 
 
 class ForgotPasswordRequest(TypedDict):
@@ -171,6 +334,7 @@ class HoldingPerformance(TypedDict):
     total_amount: float
     invested_usdt: float
     average_buy_price: float
+    price_precision: NotRequired[int]
     current_price: NotRequired[Optional[float]]
     market_value: NotRequired[Optional[float]]
     unrealized_pnl_usdt: NotRequired[Optional[float]]
@@ -191,12 +355,25 @@ class IntegrationInfo(TypedDict):
     detail: str
 
 
+class InvestedShare(TypedDict):
+    """InvestedShare."""
+    crypto: str
+    share_pct: float
+
+
 class KeyVerifyResponse(TypedDict):
     """KeyVerifyResponse."""
     verified: bool
     result: str
     detail: str
     withdrawal_permission_warning: NotRequired[bool]
+    verification_status: NotRequired[str]
+    verification_error: NotRequired[Optional[str]]
+    verified_at: NotRequired[Optional[str]]
+    last_checked_at: NotRequired[Optional[str]]
+    withdrawal_enabled: NotRequired[Optional[bool]]
+    extra_permissions: NotRequired[List[str]]
+    key: NotRequired[Optional[APIKeyResponse]]
 
 
 class KycOverride(TypedDict):
@@ -205,15 +382,38 @@ class KycOverride(TypedDict):
     note: str
 
 
+class LiftWalletHold(TypedDict):
+    """LiftWalletHold."""
+    confirm_email: str
+    reason: str
+
+
 class LoginRequest(TypedDict):
     """LoginRequest."""
     email: str
     password: str
 
 
-class LogoutRequest(TypedDict):
-    """LogoutRequest."""
-    refresh_token: str
+class LowBalanceNotice(TypedDict):
+    """LowBalanceNotice."""
+    purchase_id: str
+    crypto_symbol: str
+    amount_usd: float
+    next_execution: str
+
+
+class MfaLoginRequest(TypedDict):
+    """MfaLoginRequest."""
+    mfa_token: str
+    code: NotRequired[Optional[str]]
+    recovery_code: NotRequired[Optional[str]]
+
+
+class MfaRequiredResponse(TypedDict):
+    """The password was accepted but the account has two-factor authentication on. No session is issued and no cookie is set: exchange `mfa_token` plus a code at /login/mfa within `expires_in` seconds."""
+    mfa_required: NotRequired[bool]
+    mfa_token: str
+    expires_in: int
 
 
 class NotificationRow(TypedDict):
@@ -226,16 +426,25 @@ class NotificationRow(TypedDict):
     created_at: str
 
 
+class ParkedAttempt(TypedDict):
+    """ParkedAttempt."""
+    id: str
+    client_oid: NotRequired[Optional[str]]
+    order_id: NotRequired[Optional[str]]
+    status: str
+    error_message: NotRequired[Optional[str]]
+    created_at: str
+    executed_at: NotRequired[Optional[str]]
+
+
 class PerformanceResponse(TypedDict):
-    """PerformanceResponse."""
+    """Per-holding figures only. No ranking (best/worst) is produced: every percentage is in the table and ordering them adds judgement, not fact."""
     price_available: bool
     holdings: List[HoldingPerformance]
     total_invested_usdt: float
     total_market_value: NotRequired[Optional[float]]
     total_pnl_usdt: NotRequired[Optional[float]]
     total_pnl_pct: NotRequired[Optional[float]]
-    best_performer: NotRequired[Optional[str]]
-    worst_performer: NotRequired[Optional[str]]
 
 
 class PlatformStats(TypedDict):
@@ -249,11 +458,32 @@ class PlatformStats(TypedDict):
     active_purchases: int
     signups_7d: int
     volume_7d_usdt: float
+    signups_by_day: NotRequired[List[SignupDay]]
+
+
+class PortfolioSeriesResponse(TypedDict):
+    """Portfolio value over a range: history from Bitget candle closes, the last point at the same current price the performance card uses. A bucket with no candle carries the previous close forward (carried_forward counts them)."""
+    range: str
+    granularity: str
+    bucket_seconds: int
+    points: List[SeriesPoint]
+    buys: List[SeriesBuy]
+    current_value: NotRequired[Optional[float]]
+    invested: float
+    change_usdt: NotRequired[Optional[float]]
+    change_pct: NotRequired[Optional[float]]
+    carried_forward: NotRequired[int]
+    unpriced: NotRequired[List[str]]
+    note: str
 
 
 class PreferencesPayload(TypedDict):
     """PreferencesPayload."""
     email_enabled: NotRequired[Optional[bool]]
+    email_purchase_confirmations: NotRequired[Optional[bool]]
+    email_weekly_summary: NotRequired[Optional[bool]]
+    email_milestones: NotRequired[Optional[bool]]
+    email_low_balance: NotRequired[Optional[bool]]
     sms_enabled: NotRequired[Optional[bool]]
     push_enabled: NotRequired[Optional[bool]]
     quiet_hours_start: NotRequired[Optional[int]]
@@ -265,6 +495,11 @@ class PreferencesPayload(TypedDict):
 class PreferencesResponse(TypedDict):
     """PreferencesResponse."""
     email_enabled: bool
+    email_purchase_confirmations: bool
+    email_weekly_summary: bool
+    email_milestones: bool
+    email_low_balance: bool
+    always_on_emails: NotRequired[List[str]]
     sms_enabled: bool
     push_enabled: bool
     quiet_hours_start: int
@@ -278,16 +513,29 @@ class ProfileUpdateRequest(TypedDict):
     email: NotRequired[Optional[str]]
 
 
+class PublicMeta(TypedDict):
+    """PublicMeta."""
+    coins: List[str]
+    coin_categories: NotRequired[List[CoinCategory]]
+    accumulate_only: NotRequired[List[str]]
+    exchanges: List[str]
+    support_email: str
+    server_ip: str
+
+
 class PurchaseCreateRequest(TypedDict):
     """PurchaseCreateRequest."""
     crypto_symbol: str
     amount_usd: float
-    wallet_address: str
-    blockchain_network: str
+    wallet_address: NotRequired[Optional[str]]
+    blockchain_network: NotRequired[Optional[str]]
     frequency: str
     exchange_account_id: str
     purchase_type: NotRequired[str]
     withdraw_immediately: NotRequired[Optional[bool]]
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
+    destination_type: NotRequired[Optional[str]]
+    memo: NotRequired[Optional[str]]
 
 
 class PurchaseCreatedOut(TypedDict):
@@ -303,19 +551,26 @@ class PurchaseDetailOut(TypedDict):
     crypto_symbol: str
     amount_usd: float
     frequency: str
-    wallet_address: str
-    blockchain_network: str
+    wallet_address: NotRequired[Optional[str]]
+    blockchain_network: NotRequired[Optional[str]]
+    wallet_destination_type: NotRequired[Optional[str]]
+    wallet_memo: NotRequired[Optional[str]]
     purchase_type: str
     withdraw_immediately: bool
     exchange_account_id: NotRequired[Optional[str]]
     exchange: NotRequired[Optional[str]]
+    exchange_key_removed: NotRequired[bool]
+    exchange_key_error: NotRequired[Optional[str]]
     status: str
     failure_count: int
     last_error: NotRequired[Optional[str]]
     next_execution: NotRequired[Optional[str]]
+    low_balance_for_next_run: NotRequired[bool]
+    low_balance_alerted_at: NotRequired[Optional[str]]
     created_at: str
     updated_at: str
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
     transactions: NotRequired[List[TransactionOut]]
 
 
@@ -325,19 +580,33 @@ class PurchaseOut(TypedDict):
     crypto_symbol: str
     amount_usd: float
     frequency: str
-    wallet_address: str
-    blockchain_network: str
+    wallet_address: NotRequired[Optional[str]]
+    blockchain_network: NotRequired[Optional[str]]
+    wallet_destination_type: NotRequired[Optional[str]]
+    wallet_memo: NotRequired[Optional[str]]
     purchase_type: str
     withdraw_immediately: bool
     exchange_account_id: NotRequired[Optional[str]]
     exchange: NotRequired[Optional[str]]
+    exchange_key_removed: NotRequired[bool]
+    exchange_key_error: NotRequired[Optional[str]]
     status: str
     failure_count: int
     last_error: NotRequired[Optional[str]]
     next_execution: NotRequired[Optional[str]]
+    low_balance_for_next_run: NotRequired[bool]
+    low_balance_alerted_at: NotRequired[Optional[str]]
     created_at: str
     updated_at: str
     latest_transaction: NotRequired[Optional[TransactionOut]]
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
+
+
+class PurchaseReview(TypedDict):
+    """PurchaseReview."""
+    purchase: AdminPurchaseRow
+    lookups: List[ExchangeLookup]
+    actions: List[str]
 
 
 class PurchaseUpdateRequest(TypedDict):
@@ -345,6 +614,13 @@ class PurchaseUpdateRequest(TypedDict):
     status: NotRequired[Optional[str]]
     amount_usd: NotRequired[Optional[float]]
     frequency: NotRequired[Optional[str]]
+    purchase_type: NotRequired[Optional[str]]
+    wallet_address: NotRequired[Optional[str]]
+    blockchain_network: NotRequired[Optional[str]]
+    confirm_wallet_address: NotRequired[Optional[str]]
+    travel_rule_info: NotRequired[Optional[TravelRuleInfo]]
+    destination_type: NotRequired[Optional[str]]
+    memo: NotRequired[Optional[str]]
 
 
 class QuickStats(TypedDict):
@@ -353,6 +629,12 @@ class QuickStats(TypedDict):
     transaction_count: int
     active_purchases: int
     kyc_status: str
+    low_balance: NotRequired[List[LowBalanceNotice]]
+
+
+class RecoveryCodesResponse(TypedDict):
+    """Shown once; the previous codes stop working."""
+    recovery_codes: List[str]
 
 
 class RecurringProjection(TypedDict):
@@ -372,15 +654,16 @@ class RecurringResponse(TypedDict):
     note: NotRequired[str]
 
 
-class RefreshRequest(TypedDict):
-    """RefreshRequest."""
-    refresh_token: str
+class RegenerateRequest(TypedDict):
+    """RegenerateRequest."""
+    code: str
 
 
 class RegisterRequest(TypedDict):
     """RegisterRequest."""
     email: str
     password: str
+    invite_code: NotRequired[Optional[str]]
 
 
 class ResetPasswordRequest(TypedDict):
@@ -399,6 +682,27 @@ class ResetTokenValidity(TypedDict):
     valid: bool
 
 
+class ResetTwoFactorRequest(TypedDict):
+    """The calling admin's own current authenticator code; required when two-factor is on for their account."""
+    code: NotRequired[Optional[str]]
+
+
+class ResolvePurchase(TypedDict):
+    """ResolvePurchase."""
+    action: str
+    note: str
+    attempt_id: NotRequired[Optional[str]]
+    keep_on_exchange: NotRequired[bool]
+
+
+class RetryWithdrawalOut(TypedDict):
+    """RetryWithdrawalOut."""
+    purchase_id: str
+    status: str
+    next_execution: NotRequired[Optional[str]]
+    withdrawal: TransactionOut
+
+
 class SendNotificationRequest(TypedDict):
     """SendNotificationRequest."""
     email: str
@@ -411,6 +715,27 @@ class SendVerificationRequest(TypedDict):
     email: str
 
 
+class SeriesBuy(TypedDict):
+    """SeriesBuy."""
+    t: int
+    crypto: str
+    amount: float
+    cost_usd: float
+
+
+class SeriesPoint(TypedDict):
+    """SeriesPoint."""
+    t: int
+    value: float
+    invested: float
+
+
+class SignupDay(TypedDict):
+    """SignupDay."""
+    day: str
+    count: int
+
+
 class StatusResponse(TypedDict):
     """StatusResponse."""
     kyc_status: str
@@ -420,6 +745,13 @@ class StatusResponse(TypedDict):
     rejection_reason: NotRequired[Optional[str]]
     retryable: NotRequired[bool]
     synced: NotRequired[bool]
+
+
+class TelegramTestResult(TypedDict):
+    """TelegramTestResult."""
+    configured: bool
+    sent: bool
+    error: NotRequired[Optional[str]]
 
 
 class TimelinePoint(TypedDict):
@@ -436,11 +768,11 @@ class TimelineResponse(TypedDict):
 
 
 class TokenResponse(TypedDict):
-    """TokenResponse."""
+    """The access token is returned in the body and must be kept in memory only. The refresh token never appears in a body: it travels in an httpOnly cookie scoped to /api/auth, and `csrf_token` (also set as a readable cookie) must be echoed in the X-CSRF-Token header on /refresh and /logout."""
     access_token: str
-    refresh_token: str
     token_type: NotRequired[str]
     expires_in: int
+    csrf_token: str
 
 
 class TransactionListResponse(TypedDict):
@@ -463,6 +795,19 @@ class TransactionOut(TypedDict):
     error_message: NotRequired[Optional[str]]
     executed_at: NotRequired[Optional[str]]
     created_at: str
+    order_id: NotRequired[Optional[str]]
+    fill_price: NotRequired[Optional[float]]
+    cost_usd: NotRequired[Optional[float]]
+    fee_currency: NotRequired[Optional[str]]
+    parent_transaction_id: NotRequired[Optional[str]]
+    withdrawal_id: NotRequired[Optional[str]]
+    withdrawal_chain: NotRequired[Optional[str]]
+    withdrawal_fee: NotRequired[Optional[float]]
+    withdrawal_fee_currency: NotRequired[Optional[str]]
+    expected_received: NotRequired[Optional[float]]
+    withdrawal_memo: NotRequired[Optional[str]]
+    tx_hash: NotRequired[Optional[str]]
+    raw_status: NotRequired[Optional[str]]
 
 
 class TransactionResponse(TypedDict):
@@ -473,8 +818,10 @@ class TransactionResponse(TypedDict):
     purchase_type: str
     tx_type: str
     amount_crypto: float
+    net_amount: NotRequired[float]
     cost_usdt: float
     exchange_rate: NotRequired[Optional[float]]
+    price_precision: NotRequired[int]
     exchange: NotRequired[Optional[str]]
     order_id: NotRequired[Optional[str]]
     binance_order_id: NotRequired[Optional[str]]
@@ -500,6 +847,44 @@ class TransactionStats(TypedDict):
     completed_count: int
     failed_count: int
     pending_count: int
+    needs_review_count: NotRequired[int]
+
+
+class TravelRuleInfo(TypedDict):
+    """Optional beneficiary / travel-rule details some venues require before an API withdrawal (Bitget: firstName, lastName, identityType, companyName, areaCode, memberCode). Stored on the purchase and sent with withdrawals. Nothing is prefilled: the KYC provider's data is not stored on the user."""
+    first_name: NotRequired[Optional[str]]
+    last_name: NotRequired[Optional[str]]
+    identity_type: NotRequired[Optional[str]]
+    company_name: NotRequired[Optional[str]]
+    area_code: NotRequired[Optional[str]]
+    member_code: NotRequired[Optional[str]]
+
+
+class TwoFactorStatus(TypedDict):
+    """TwoFactorStatus."""
+    enabled: bool
+    enrolled_at: NotRequired[Optional[str]]
+    recovery_codes_remaining: NotRequired[int]
+    pending_enrolment: NotRequired[bool]
+
+
+class UndeliveredEmail(TypedDict):
+    """UndeliveredEmail."""
+    id: NotRequired[Optional[str]]
+    to: str
+    subject: str
+    template: NotRequired[Optional[str]]
+    category: NotRequired[Optional[str]]
+    user_id: NotRequired[Optional[str]]
+    attempts: NotRequired[int]
+    last_error: NotRequired[Optional[str]]
+    queued_at: NotRequired[Optional[float]]
+    gave_up_at: NotRequired[Optional[float]]
+
+
+class UnsuspendPayload(TypedDict):
+    """UnsuspendPayload."""
+    pause_withdraw_mode: NotRequired[bool]
 
 
 class UpcomingPurchase(TypedDict):
@@ -529,6 +914,9 @@ class UserProfile(TypedDict):
     kyc_sumsub_id: NotRequired[Optional[str]]
     created_at: str
     updated_at: str
+    wallet_hold_until: NotRequired[Optional[str]]
+    wallet_hold_reason: NotRequired[Optional[str]]
+    withdrawals_allowed: NotRequired[bool]
 
 
 class UserPublicProfile(TypedDict):
@@ -562,7 +950,7 @@ class VolatilityEntry(TypedDict):
     crypto: str
     volatility_30d_pct: NotRequired[Optional[float]]
     level: str
-    recommendation: str
+    summary: str
 
 
 class VolatilityResponse(TypedDict):
@@ -575,6 +963,8 @@ class WalletCreateRequest(TypedDict):
     address: str
     blockchain_network: str
     label: NotRequired[Optional[str]]
+    destination_type: NotRequired[Optional[str]]
+    memo: NotRequired[Optional[str]]
 
 
 class WalletOut(TypedDict):
@@ -584,6 +974,10 @@ class WalletOut(TypedDict):
     blockchain_network: str
     chain: NotRequired[Optional[str]]
     label: NotRequired[Optional[str]]
+    destination_type: NotRequired[Optional[str]]
+    memo: NotRequired[Optional[str]]
+    needs_tag: NotRequired[bool]
+    unfunded_warning: NotRequired[Optional[str]]
     verified_at: NotRequired[Optional[str]]
     created_at: str
 

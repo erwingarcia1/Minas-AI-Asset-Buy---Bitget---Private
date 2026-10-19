@@ -1,0 +1,19 @@
+# Public HTTPS entry point for the platform (the `caddy` service in
+# docker-compose.yml). Caddy obtains and renews the Let's Encrypt certificate
+# for the hostname by itself (HTTP-01 on :80 / TLS-ALPN-01 on :443, both must
+# be open in the security group) and redirects http:// to https://.
+#
+# Everything is handed to the `web` container (deployment/nginx.web.conf),
+# which serves the SPA and forwards /api/ + /health to the API. Caddy drops any
+# X-Forwarded-* a client sends and writes its own, so the address nginx and
+# the API rate limiter see is the real peer, not a spoofed header.
+#
+# This directory (not the file) is bind-mounted, so an edit pulled by git is
+# picked up with:  docker compose -p autobuy-platform --profile prod exec caddy caddy reload --config /etc/caddy/Caddyfile
+{$PUBLIC_HOSTNAME:autobuy.minastrade.com} {
+	# The API sets HSTS on its own responses; this covers the static SPA too.
+	header ?Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	header -Server
+
+	reverse_proxy web:80
+}

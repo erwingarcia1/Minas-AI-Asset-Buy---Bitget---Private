@@ -57,6 +57,22 @@ except ApiError as e:
 client.logout()
 ```
 
+### Two-factor accounts
+
+When the account has two-factor authentication on, `login()` returns the
+`202` challenge (`MfaRequiredResponse`) instead of a token pair and stores
+nothing. Check `mfa_required` and finish with `login_mfa()` within
+`expires_in` seconds, using either the authenticator `code` or a
+`recovery_code`:
+
+```python
+result = client.login("me@example.com", "Str0ng!Passw0rd")
+if result.get("mfa_required"):
+    code = input("Authenticator code: ")
+    result = client.login_mfa(result["mfa_token"], code=code)   # or recovery_code="..."
+# result is now the TokenResponse and the client is signed in
+```
+
 ### asyncio
 
 ```python

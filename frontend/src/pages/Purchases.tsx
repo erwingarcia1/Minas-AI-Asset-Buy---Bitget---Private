@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { autoBuyAPI } from "@/api/endpoints";
 import { Alert, Loading } from "@/components/Common";
+import WalletHoldNotice from "@/components/Common/WalletHoldNotice";
+import { useAuth } from "@/hooks/useAuth";
 import PurchaseForm from "@/components/Purchases/PurchaseForm";
 import PurchaseList from "@/components/Purchases/PurchaseList";
 import { useAsync } from "@/hooks/useAsync";
@@ -9,10 +11,13 @@ import { useAsync } from "@/hooks/useAsync";
 export default function Purchases() {
   const { data: purchases, loading, error, reload } = useAsync(() => autoBuyAPI.list());
   const [actionError, setActionError] = useState<string | null>(null);
+  const { user, refreshProfile } = useAuth();
+  useEffect(() => { void refreshProfile().catch(() => undefined); }, [refreshProfile]);   // picks up an active wallet-change hold
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Purchases</h1>
+      <WalletHoldNotice user={user} />
       <PurchaseForm onCreated={() => void reload()} />
       <div>
         <h2 className="text-lg font-semibold">Your purchases</h2>

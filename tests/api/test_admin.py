@@ -36,9 +36,17 @@ ADMIN_ROUTES = [
     ("post", "/api/admin/users/{uid}/unsuspend"),
     ("delete", "/api/admin/users/{uid}?confirm=x@example.com"),
     ("post", "/api/admin/users/{uid}/kyc-override"),
+    ("post", "/api/admin/users/{uid}/lift-wallet-hold"),
+    ("post", "/api/admin/users/{uid}/2fa/reset"),
     ("get", "/api/admin/transactions"),
     ("post", "/api/admin/purchases/{uid}/force-retry"),
     ("get", "/api/admin/alerts"),
+    ("get", "/api/admin/emails/undelivered"),
+    ("post", "/api/admin/telegram/test"),
+    ("get", "/api/admin/purchases"),
+    ("get", "/api/admin/purchases/{uid}/review"),
+    ("post", "/api/admin/purchases/{uid}/resolve"),
+    ("get", "/api/admin/fills/deviations"),
     ("post", "/api/admin/scheduler/pause"),
     ("post", "/api/admin/scheduler/resume"),
 ]
@@ -169,6 +177,21 @@ async def test_transactions_audit_and_force_retry(db, admin, user, binance_key):
     done = await make_autobuy_purchase(db, user, crypto="SOL", key=binance_key, status="completed", next_execution=None)
     async with client() as c:
         assert (await c.post(f"/api/admin/purchases/{done.id}/force-retry", headers=H)).status_code == 409
+    # a purchase whose exchange key was deleted can never run again
+    orphan = await make_autobuy_purchase(db, user, crypto="ETH", key=binance_key, status="paused", next_execution=None)
+    orphan.exchange_account_id = None
+    await db.commit()
+    async with client() as c:
+        r = await c.post(f"/api/admin/purchases/{orphan.id}/force-retry", headers=H)
+    assert r.status_code == 409 and "Exchange key removed" in r.json()["detail"]
+    # a filled buy whose withdrawal failed must never be re-armed for another buy
+    for parked in ("withdrawal_failed", "needs_info"):
+        stranded = await make_autobuy_purchase(db, user, crypto="BTC", key=binance_key, status=parked, next_execution=None)
+        async with client() as c:
+            r = await c.post(f"/api/admin/purchases/{stranded.id}/force-retry", headers=H)
+        assert r.status_code == 409 and "retry the withdrawal" in r.json()["detail"]
+        await db.refresh(stranded)
+        assert stranded.status == parked and stranded.next_execution is None
 
 
 async def test_alerts_snapshot(admin):
@@ -177,5 +200,48 @@ async def test_alerts_snapshot(admin):
         items = (await c.get("/api/admin/alerts", headers=H)).json()
     names = {a["name"] for a in items}
     assert names == {"schedulers_paused", "autobuy_run", "autobuy_consecutive_failures",
-                     "failed_transactions_24h"}, "only the Auto-Buy job's alerts remain"
+                     "failed_transactions_24h", "email_delivery_failures", "exchange_unreachable",
+                     "fill_deviations", "stopped_purchases", "missed_cycles", "purchases_needing_review"}
     assert all(a["severity"] in ("ok", "warning", "critical") for a in items)
+
+
+async def test_lift_wallet_hold_override(db, admin, user, monkeypatch, caplog):
+    """Support override: admin only, typed email, reason; audited and the user is emailed."""
+    import logging
+    from api.models import Notification
+    from api.services import email_outbox, wallet_hold
+    box = []
+
+    async def fake_enqueue(to, subject, html, text, template="generic", *, category="confirmation", user_id=None, now=None):
+        box.append({"to": to, "subject": subject, "text": text, "category": category})   # queued to the outbox (audit C2)
+        return True
+    monkeypatch.setattr(email_outbox, "enqueue", fake_enqueue)
+    wallet_hold.start_hold(user, "password_reset")
+    await db.commit()
+    url = f"/api/admin/users/{user.id}/lift-wallet-hold"
+    good = {"confirm_email": user.email, "reason": "video call with ID, ticket #4711"}
+    async with client() as c:
+        assert (await c.post(url, json=good, headers=auth_headers(user))).status_code == 403, "not for the user themselves"
+        H = auth_headers(admin)
+        assert (await c.post(url, json={**good, "confirm_email": "wrong@example.com"}, headers=H)).status_code == 400
+        assert (await c.post(url, json={**good, "reason": "ok"}, headers=H)).status_code == 422, "a reason is required"
+        assert (await c.post(f"/api/admin/users/{uuid.uuid4()}/lift-wallet-hold", json=good, headers=H)).status_code == 404
+        await db.refresh(user)
+        assert user.wallet_hold_until is not None and box == [], "nothing happened on the rejected calls"
+        with caplog.at_level(logging.INFO):
+            r = await c.post(url, json={**good, "confirm_email": user.email.upper()}, headers=H)
+        assert r.status_code == 204, r.text
+        assert (await c.post(url, json=good, headers=H)).status_code == 409, "no hold left to lift"
+        listed = (await c.get("/api/admin/users", params={"q": user.email}, headers=H)).json()["items"][0]
+        assert listed["wallet_hold_until"] is None
+    await db.refresh(user)
+    assert user.wallet_hold_until is None and user.wallet_hold_reason is None
+    audit_rows = [r for r in caplog.records if getattr(r, "action", None) == "wallet_hold_lifted"]
+    assert audit_rows and audit_rows[0].admin_id == str(admin.id) and audit_rows[0].reason == good["reason"]
+    assert audit_rows[0].user_id == str(user.id) and audit_rows[0].lifted_at
+    assert len(box) == 1 and box[0]["to"] == user.email and "hold was lifted" in box[0]["subject"]
+    assert "support administrator lifted the hold" in box[0]["text"] and "If you did not ask for this" in box[0]["text"]
+    assert box[0]["category"] == "security"
+    note = (await db.execute(select(Notification).where(Notification.user_id == user.id,
+                                                         Notification.template == "wallet_hold_lifted"))).scalars().all()
+    assert len(note) == 1 and note[0].status == "queued"

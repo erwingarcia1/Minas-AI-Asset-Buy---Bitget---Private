@@ -13,9 +13,16 @@ class CapturingEmail(EmailService):
                           "template": template})
         return True
 
+    async def queue(self, to, subject, html, text, template="generic", **kw):
+        """Queued (outbox) mail is captured the same way as direct sends."""
+        return await self._send(to, subject, html, text, template)
+
 
 class ExplodingEmail(EmailService):
     async def _send(self, to, subject, html, text, template="generic"):
+        raise RuntimeError("resend is down")
+
+    async def queue(self, to, subject, html, text, template="generic", **kw):
         raise RuntimeError("resend is down")
 
 
@@ -39,22 +46,33 @@ async def _run(db, user, key, gateway, **purchase):
 async def test_completed_purchase_email(db, user, binance_key, capture):
     from tests.test_purchase_events import RichGateway
     counts = await _run(db, user, binance_key, RichGateway(), purchase_type="dca", amount_usd=100)
-    assert counts["executed"] == 1
-    mails = [m for m in capture.sent if m["template"] == "purchase"]
+    assert counts["executed"] >= 1, "this test's purchase ran (the executor also picks up any other due purchase in the shared test database)"
+    mails = [m for m in capture.sent if m["template"] == "purchase" and m["to"] == user.email]   # scoped to this test's user
     assert len(mails) == 1
     mail = mails[0]
     assert mail["to"] == user.email
     assert mail["subject"].startswith("[DRY RUN] ✓ Purchase complete") and "BTC" in mail["subject"]
-    assert "50000.00" in mail["text"] and "ORD-1" in mail["text"] and "held on the exchange" in mail["text"]
+    assert "50,000.00" in mail["text"] and "ORD-1" in mail["text"] and "held on the exchange" in mail["text"]
 
 
 async def test_failed_purchase_email(db, user, binance_key, capture):
+    """One email per failed cycle: nothing on attempts 1 and 2, a "didn't go through"
+    email when the third attempt fails, naming the next attempt time."""
+    from datetime import timedelta
+    from api.tasks import purchase_scheduler as ps
+    from tests.conftest_autobuy import make_purchase
     from tests.test_purchase_events import BuyFails
-    counts = await _run(db, user, binance_key, BuyFails())
-    assert counts["failed"] == 1
-    mail = [m for m in capture.sent if m["template"] == "purchase"][0]
-    assert mail["subject"].startswith("[DRY RUN] ✗ Purchase failed")
-    assert "MIN_NOTIONAL" in mail["text"] and "Attempt 1/3" in mail["text"]
+    from tests.test_purchase_scheduler import NOW
+    await make_purchase(db, user, binance_key, purchase_type="dca", frequency="daily", next_execution=NOW)
+    for i in range(2):
+        counts = await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=5 * i), gateway=BuyFails(), dry_run=True)
+        assert counts["failed"] == 1
+    assert [m for m in capture.sent if m["template"] == "purchase"] == [], "attempts 1 and 2 send nothing"
+    await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=10), gateway=BuyFails(), dry_run=True)
+    mail = [m for m in capture.sent if m["template"] == "purchase"]
+    assert len(mail) == 1 and mail[0]["subject"].startswith("[DRY RUN] Your") and "didn't go through" in mail[0]["subject"]
+    assert "Bitget needs at least" in mail[0]["text"] and "tried 3 times" in mail[0]["text"]
+    assert "Your next attempt is" in mail[0]["text"] and "MIN_NOTIONAL" not in mail[0]["text"]
 
 
 async def test_email_failure_never_breaks_purchase(db, user, binance_key, monkeypatch):

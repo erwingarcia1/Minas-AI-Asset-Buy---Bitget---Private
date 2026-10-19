@@ -10,7 +10,7 @@ def test_all_templates_render_both_formats():
     contexts = {
         "welcome": {"name": "sam"},
         "first_purchase": {"name": "sam", "crypto": "BTC", "amount_crypto": "0.001",
-                           "cost_usdt": "100.00", "exchange_rate": "50000.00",
+                           "cost_usdt": "100.00", "exchange_rate": "50,000.00",
                            "order_id": "123"},
         "purchase_summary": {"name": "sam", "rows": [{"crypto": "BTC", "amount": "0.001",
                              "cost": "100.00"}], "total_usdt": "100.00", "count": 1,
@@ -19,6 +19,14 @@ def test_all_templates_render_both_formats():
         "kyc_rejected": {"name": "sam"},
         "downtime_alert": {"start": "2026-09-05 02:00", "end": "2026-09-05 03:00"},
         "milestone": {"name": "sam", "milestone": "1,000"},
+        "unified_ready": {"greeting": "Hello,", "message": "Good news.", "purchases_url": "https://x.test/purchases", "settings_url": "https://x.test/settings"},
+        "unified_step": {"greeting": "Hello,", "message": "One small step.", "purchases_url": "https://x.test/purchases", "settings_url": "https://x.test/settings"},
+        "unified_account": {"greeting": "Hello,", "message": "This Bitget account uses Unified Trading mode, which AutoBuy doesn't support yet.", "paused": 1, "settings_url": "https://x.test/settings", "purchases_url": "https://x.test/purchases"},
+        "low_balance": {"greeting": "Hello,", "attempts": 3, "missed_cycles": 3, "purchases": [{"coin": "XRP", "amount_usdt": "10.00", "frequency": "weekly",
+                                                      "run_at": "Saturday, Oct 11 at 8:16 PM ET (00:16 UTC)"}],
+                        "count": 1, "count_words": "one", "needed_usdt": "10.10", "balance_usdt": "3.50", "shortfall_usdt": "6.60",
+                        "exchange": "Bitget", "purchases_url": "https://x.test/purchases",
+                        "unsubscribe_url": "https://x.test/settings/notifications"},
     }
     assert set(contexts) == TEMPLATES
     for name, ctx in contexts.items():
@@ -44,7 +52,7 @@ async def test_first_purchase_email(db, user, binance_key, monkeypatch):
     await camp.on_buy_executed(db, user, tx, p)
     assert len(capture.sent) == 1
     assert "first automated purchase" in capture.sent[0]["subject"]
-    assert "ORD-1" in capture.sent[0]["text"] and "50000.00" in capture.sent[0]["text"]
+    assert "ORD-1" in capture.sent[0]["text"] and "50,000.00" in capture.sent[0]["text"]
 
 
 async def test_milestone_crossing(db, user, binance_key, monkeypatch):

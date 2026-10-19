@@ -9,15 +9,33 @@ docker compose --profile monitoring up -d                # + Prometheus (:9090)
 ```
 
 The compose project is pinned to `autobuy-platform` (top-level `name:` in
-docker-compose.yml), so these commands are safe to run on the production box
-where the legacy bot's project (`autobuy`, docker-compose.legacy.yml) is also
-running — the two stacks can never displace each other's containers. Never
-run `--remove-orphans` against the legacy project. On the server, deploys go
-through `scripts/deploy.sh platform` (see the README's AWS section).
+docker-compose.yml), so the containers are addressed the same way from any
+checkout path. On the server, deploys go through `scripts/deploy.sh platform`
+(see the README's AWS section).
+
+The compose profile is exactly `prod` (`profiles: ["prod"]` on the api
+service). Any other profile name makes `docker compose up -d` a silent no-op:
+it prints "Container autobuy_postgres Running", exits 0, and leaves the old
+API serving stale code and environment. `scripts/deploy.sh platform` now
+refuses a profile that does not include the api service, asserts that the
+`autobuy_api` container was actually recreated (id / created-at changed), and
+asserts that `/health` reports the checkout's commit (`GIT_COMMIT` build arg
+stamped into the image). The API binds `127.0.0.1:8000` only; nginx fronts it
+in production and the Vite proxy in development.
 
 The entrypoint applies Alembic migrations, then serves via **gunicorn with 4
 uvicorn workers** (measured: p95 245ms @10 concurrent vs 1.6s single-worker).
-The root `Dockerfile` belongs to the legacy sub-account bot — don't confuse them.
+
+## Production host
+
+| | |
+|---|---|
+| Instance | Ubuntu EC2, Tokyo (`ap-northeast-1`), repo at `~/autobuy` |
+| Public address | **Elastic IP `16.76.92.209`** (assigned 2026-09-21; survives stop/start). The earlier auto-assigned `18.179.57.78` / `ec2-18-179-57-78…` hostname is gone. |
+| SSH | `bash scripts/server_ssh.sh` → `ubuntu@16.76.92.209`. The address is defined once, as `SERVER_HOST` in `scripts/lib/server_host.sh`; both scripts source it (override with `SERVER_HOST=` or `SERVER=`). A future address change is that one line. |
+| Public entry point | **https://autobuy.minastrade.com** — GoDaddy A record → `16.76.92.209`; security group opens 80 + 443; the `caddy` compose service terminates TLS (automatic Let's Encrypt) and proxies to `web`. Matches `APP_BASE_URL` / `ALLOWED_ORIGINS` in the server's `.env`. See "Public HTTPS" below. |
+| Private entry point | `https://ip-172-31-21-173.tail0fdd4a.ts.net` (`tailscale serve` → `127.0.0.1:8080`), tailnet members only |
+| Exchange key allowlists | every IP-allowlisted exchange API key must name `16.76.92.209` |
 
 ## Production deployment checklist
 
@@ -30,13 +48,13 @@ rest are manual and tracked as Phase 7 issues.
 | 1 | Credential files ignored by git (`.env`, every `.env.*`, `.envy`, `*.pem`) | ✅ done | `.gitignore` |
 | 2 | Dev-only `/test-purchase` routes removed | ✅ done (#34) | `api/main.py` |
 | 3 | Production env template with every required variable | ✅ done | `.env.production.example` |
-| 4 | TLS + DNS: real hostname (`api.autobuy.app`) and certificate paths in `deployment/nginx.conf`; DNS A/AAAA records; HTTP→HTTPS redirect verified | ⬜ manual (#31) | `deployment/nginx.conf` |
+| 4 | TLS + DNS: public hostname `autobuy.minastrade.com` with a GoDaddy **A record → `16.76.92.209`** (the box's Elastic IP); security group opens 80 + 443; certificate issued; HTTP→HTTPS redirect verified | ✅ done 2026-09-21 (#31) — Let's Encrypt cert via the `caddy` service, auto-renewing (first expiry 2026-12-20) | GoDaddy DNS, EC2 security group, `deployment/caddy/Caddyfile` |
 | 5 | Credentials provisioned into the server's root-owned `.env` (`chmod 600`): `SECRET_KEY`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, Resend (#28), Sumsub (#27); optional Twilio (#29), FCM (#30), Slack | ⬜ manual | `.env.production.example` |
 | 6 | `.env` validated (command below) | ⬜ manual | `scripts/validate_env.py` |
 | 7 | Sumsub webhook pointed at `https://<api host>/api/webhooks/sumsub` with the same secret as `SUMSUB_WEBHOOK_SECRET`; Resend sending domain verified (SPF/DKIM) | ⬜ manual (#27, #28) | provider dashboards |
 | 8 | Daily `pg_dump` scheduled to off-host storage, retention set, one restore rehearsed | ⬜ manual (#32) | "Database" section |
 | 9 | Prometheus scraping `/metrics`; `docs/ALERTING.md` rules routed to a pager with an on-call rotation | ⬜ manual (#33) | `deployment/prometheus.yml` |
-| 10 | Binance testnet run, then a small-amount canary before `AUTOBUY_DRY_RUN=0` | ⬜ manual | `PRODUCTION_READINESS.md` |
+| 10 | Small-amount canary withdrawals with real money, in the order and shape given in "Go-live runbook" below (XRP first, then BTC) | ⬜ manual | "Go-live runbook" |
 | 11 | `main` is the default branch and the deploy key pulls it | ⬜ manual | GitHub settings |
 
 ### Validate `.env` before every deploy
@@ -52,18 +70,185 @@ default Postgres password). Warnings cover disabled features, plain-http
 origins, and `AUTOBUY_DRY_RUN=0`. Values are never printed. `scripts/deploy.sh
 platform` performs its own, narrower check afterwards.
 
+## Go-live runbook: first real withdrawals (Phase 2)
+
+Status on 2026-09-17: the Tokyo server runs the platform with `AUTOBUY_DRY_RUN=0`
+at commit bd93adf and has handled one real transaction (a BTC buy on
+2026-09-16, no withdrawal yet). Every step below is deliberate, one at a time,
+with a human watching the exchange's own history.
+
+### Step 0 — migration 023 on the server (before any XRP/XLM purchase exists)
+
+Migration 023 (destination type + memo columns, two CHECK constraints) is
+committed and applied locally; it is **not** on the server. Apply it as its
+own step, never bundled with a trading change:
+
+```bash
+# on the server, before anything else: a backup you have listed and can restore
+sudo docker exec autobuy_postgres pg_dump -U autobuy -Fc autobuy_db > ~/backups/autobuy_db-before-023-$(date -u +%Y%m%dT%H%M%SZ).dump
+ls -la ~/backups | tail -3
+scripts/deploy.sh platform            # pulls main, rebuilds, migrates, verifies /health.commit
+sudo docker exec autobuy_api alembic current                    # expect 023
+sudo docker exec autobuy_postgres psql -U autobuy -d autobuy_db -Atc \
+  "select conname from pg_constraint where conname in ('ck_wallets_destination_type','ck_purchases_wallet_destination_type')"
+```
+
+Existing rows keep NULL in the new columns; every purchase on the server is
+on a tag-free chain, so nothing changes for them.
+
+### Step 1 — XRP first: ~6 XRP to Erwin's own account on another exchange (preferred)
+
+**Why XRP before BTC.** Bitget's XRP minimum withdrawal is 5 XRP, so the test
+costs under $15 (about $7 at the 2026-09-17 price) against roughly $41 for the
+smallest BTC withdrawal that clears Bitget's minimum plus fee, and the XRP
+Ledger settles in seconds rather than the minutes-to-an-hour a BTC withdrawal
+takes to confirm.
+
+**Why an exchange address, not a self-custody wallet.** The Bitget withdrawal
+request field that carries the destination tag is named `tag` in Bitget's
+documentation and SDK and **has never been exercised by this system**. A
+self-custody XRP withdrawal carries no tag at all: it would succeed whether or
+not the field name is right and prove nothing. Only a withdrawal to an
+exchange address *with a tag attached* tests the field name. If the name is
+right, the receiving exchange credits the deposit within a minute and the
+field is live-verified. If it is wrong, the XRP lands in that exchange's
+pooled account, and because it is Erwin's own account and his own tag, he is
+the one person who can recover it through that exchange's support. That is
+the cheapest possible test of an unverified field name with real money, and
+far safer than testing against a third party's address.
+
+Shape of the test:
+
+1. Erwin opens the XRP deposit page of his own account on another exchange
+   and copies the deposit **address** and its **destination tag** exactly.
+2. On Bitget: the address is saved in the account's withdrawal address book
+   (with its tag) and the API key used by AutoBuy has the Withdraw permission
+   and the server IP whitelisted. Bitget refuses API withdrawals to unlisted
+   addresses.
+3. In AutoBuy, a **one-time** XRP purchase, chain `XRP`, answering **"An
+   exchange or custody account"** and entering the tag. The form and the API
+   both refuse the purchase without it. Size it from the live numbers, not
+   from memory: Bitget's minimum withdrawal is 5 XRP and the fee 0.2 XRP on
+   top (exclusive mode), so the form's "minimum per buy" for chain `XRP` is
+   the floor (about $7 at the 2026-09-17 price of $1.30; a $15 buy sends
+   about 11.3 XRP). The purchase amount is a deliberate decision, not a
+   default.
+4. Watch, in this order: the AutoBuy transaction rows (buy → withdrawal row
+   with `withdrawal_memo` = the tag), Bitget's withdrawal history (status,
+   tx hash within a minute), then the receiving exchange's deposit history
+   (credited to Erwin's account within a minute or two).
+5. **Confirm the fee mode against the balance, and record it.** After Bitget
+   marks the withdrawal successful, read the dashboard's "on exchange" figure
+   for XRP and Bitget's available XRP balance (Assets → Spot, or
+   `get_available("XRP")` in the container) and compare them to the last
+   digit. The app computes "on exchange" from the recorded row under the mode
+   it was sent in: exclusive means the balance dropped by size + 0.2 XRP fee,
+   inclusive by size only. Equal to the last digit = the configured
+   `BITGET_WITHDRAW_FEE_MODE` (exclusive) is confirmed. Off by exactly the
+   0.2 XRP fee = Bitget deducts the fee from the size, the mode must be
+   switched to `inclusive` before the next withdrawal, and the row is left as
+   recorded (it was sent under exclusive; the app reads each row's own mode).
+   Write the result down: date, withdrawal order id, app figure, Bitget
+   figure, verdict — in `docs/API.md` under "Bitget market data" next to
+   `BITGET_WITHDRAW_FEE_MODE` and in `CHANGELOG.md`. Observing it is not
+   enough; the recorded comparison is what closes the gap.
+6. Record the outcome in `docs/API.md` under "Destination tag / memo": change
+   the `tag` field from *unverified* to *verified on <date>, withdrawal
+   <Bitget order id>*, and only then remove the "unverified" flag from the
+   code comment in `bitget_client.withdraw`. If the deposit is **not**
+   credited: do not send again; Erwin opens a ticket with the receiving
+   exchange (address + tag + Bitget tx hash), and the field name is corrected
+   in `bitget_client.withdraw` before any further tag-chain withdrawal.
+
+### Step 2 — BTC: smallest amount that clears the minimum (~$41)
+
+The first BTC withdrawal also confirms `BITGET_WITHDRAW_FEE_MODE` (exclusive,
+the default: AutoBuy sends net minus the 0.00003 BTC fee; if Bitget instead
+deducts the fee from the size sent, the wallet receives less than
+`expected_received` and the mode must be switched to `inclusive` before the
+next run). Use a one-time BTC purchase at the amount the form reports as the
+minimum for chain `BTC` (about $41 at current prices: minimum withdrawal
+0.0005 BTC plus fee at the live ask), to a self-custody wallet Erwin controls.
+Compare the withdrawal row's `amount_executed` / `expected_received` with what
+the wallet actually receives and with Bitget's withdrawal record.
+
+### Between steps
+
+`AUTOBUY_DRY_RUN=1` plus a restart stops all real orders at once; the
+scheduler pause switch (`POST /api/admin/scheduler/pause`) stops the jobs
+without a restart. Each step is one purchase, watched to completion, before
+the next.
+
 ## Web frontend
 
 The SPA in `frontend/` is static files; it is not part of the API image.
 Build it on the server (or in CI) and let nginx serve it:
 
 ```bash
-cd frontend && npm ci && npm run build          # -> frontend/dist
+cd frontend && npm ci && npm run build          # -> frontend/dist, stamped with dist/BUILD_INFO
 sudo rsync -a --delete frontend/dist/ /var/www/autobuy/frontend/dist/
+```
+
+Alternatively, the prod compose profile ships a `web` service (nginx, published
+on 127.0.0.1:8080) that serves `frontend/dist` straight from the checkout and
+forwards `/api/` + `/health` to the `api` container (config:
+`deployment/nginx.web.conf`). Build on a laptop, rsync `frontend/dist/` to a
+staging directory on the server (for example `~/web-v0.6.1/`) and pass it to
+the deploy: `bash scripts/deploy.sh platform --branch main --web ~/web-v0.6.1`.
+The script installs it into `frontend/dist` before the API moves and, after
+`/health`, checks that nginx on :8080 serves a bundle built from the
+checkout's `frontend/` tree (`dist/BUILD_INFO`, written by every
+`npm run build`). Without `--web` the deploy refuses to complete unless the
+bundle already on disk carries that stamp, so the served SPA can never
+silently be an older release than the API (that happened once, with v0.6.0,
+before this check existed). No Node on the server required.
+
+### Public HTTPS (the `caddy` service)
+
+```
+browser ──443──> caddy ──> web (nginx, SPA + /api/ proxy) ──> api
+tailnet ──> tailscale serve ──> 127.0.0.1:8080 ──┘
+```
+
+`caddy` is part of the prod profile, so `scripts/deploy.sh platform` starts it
+with everything else. It is the only service published on a public interface
+(80 and 443); it gets and renews the certificate for `PUBLIC_HOSTNAME`
+(default `autobuy.minastrade.com`, config in `deployment/caddy/Caddyfile`) and
+redirects http to https. Requirements: the DNS A record points at the box and
+the security group allows inbound 80 **and** 443 — without 80 the http
+redirect and the HTTP-01 challenge fail.
+
+* **`PUBLIC_BIND_IP` in the server's `.env` is `172.31.21.173`** (the box's VPC
+  address, where the Elastic IP lands). `tailscaled` already listens on
+  `100.66.20.22:443` for the tailnet URL, so publishing on `0.0.0.0:443` fails
+  with "address already in use"; bound to the VPC address the two coexist.
+* **The certificate lives in the `autobuy-platform_caddy_data` volume.** Never
+  remove it casually (`down -v`, `volume prune`): Let's Encrypt allows 5
+  duplicate certificates per week, and a wiped volume re-issues on every start.
+* **Client addresses.** Caddy discards any `X-Forwarded-*` a client sends and
+  writes its own; nginx takes the visitor's address from it (`real_ip_header`)
+  and passes the API exactly one `X-Forwarded-For` value; gunicorn runs with
+  `--forwarded-allow-ips "*"`, so `request.client` — the key for every per-IP
+  rate limit — is the real visitor. Before this, everyone behind nginx shared
+  one address, i.e. one `5/minute` login bucket. The arrangement is only safe
+  while the API port stays on `127.0.0.1`; `tests/test_public_proxy.py` pins it.
+* Reload after editing the Caddyfile (the directory is mounted, so a `git pull`
+  is visible inside the container):
+  `sudo docker compose -p autobuy-platform --profile prod exec caddy caddy reload --config /etc/caddy/Caddyfile`
+* Certificate / ACME trouble: `sudo docker logs autobuy_caddy`.
+* After changing `deployment/nginx.web.conf` through git, recreate `web`
+  (`… up -d --force-recreate --no-deps web`): it is a single-file bind mount
+  and keeps the old inode, so `nginx -s reload` alone serves the old config.
+
+The tailnet URL keeps working as a private path to the same `web` container.
+
+### Host nginx instead of compose (alternative)
+
+```bash
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-`deployment/nginx.conf` has two vhosts: `api.example.com` (API only) and
+The former `deployment/nginx.conf` (removed 2026-09-22; the served config is `deployment/nginx.web.conf` behind caddy) had two vhosts: `api.example.com` (API only) and
 `app.example.com`, which serves `frontend/dist` with an SPA fallback, forwards
 `/api/` and `/health` to the API upstream, and sets a Content-Security-Policy
 that allows only Sumsub's origins (`api.sumsub.com`, `in.sumsub.com`,
@@ -109,10 +294,111 @@ testing steps: `docs/API.md` → "Email (Resend)".
 - Adopting a pre-Alembic DB: `alembic stamp 001 && alembic upgrade head`.
 - Backups: `docker exec autobuy_postgres pg_dump -U autobuy autobuy_db | gzip > backup.sql.gz` on a cron; test restores quarterly.
 - Restore: `gunzip -c backup.sql.gz | docker exec -i autobuy_postgres psql -U autobuy autobuy_db`.
+- Rolling back below migration 029 (`alembic downgrade 028`) drops every two-factor
+  enrolment (those users fall back to password only and must enrol again) and
+  forgets every "sign out everywhere" revocation; rotate `SECRET_KEY` first if a
+  revoked session must stay dead.
+
+## Guardian worker (v0.9.1)
+
+The read-only exchange monitor runs as its own container, `autobuy_guardian`,
+on the API image with the command `python -m guardian.worker`. It publishes
+no port; its Prometheus exposition is on the compose network only
+(`guardian:9109`). It is part of the `prod` profile, so `scripts/deploy.sh
+platform` builds, recreates and verifies it with the API:
+
+- the container must be recreated and run the **same image id** as `autobuy_api`;
+- `/health` must report `guardian.running: true` — a heartbeat in Redis
+  (`autobuy:guardian:heartbeat`) younger than 180 s — within two minutes,
+  **whether `GUARDIAN_ENABLED` is on or off**. Off, the worker only heartbeats.
+- Its loops are not scheduler jobs: the job list in the deploy checklist stays
+  seven.
+- Rolling back below migration 030 (`alembic downgrade 029`) drops the 19
+  `guardian_*` tables with their data and narrows `users.notification_preferences`
+  back to 500 characters: Postgres refuses the downgrade if any row holds a
+  longer blob (nothing writes one before the Guardian toggles land in PR4), so
+  the schema stays at 030 and the operator trims or exports first.
+- Both checks key on the checkout's `docker-compose.yml` declaring the
+  `guardian` service. `deploy.sh` runs from the file on disk at invocation, so
+  a newer script can run against an older tree; without the service the worker
+  checks are skipped with a note and the rest of the verification still runs.
+
+Settings (all in `.env.example`, both compose blocks and `api/config.py`):
+`GUARDIAN_ENABLED` (0/1, the owner's switch), `GUARDIAN_ALLOWED_EMAILS`
+(internal test phase: only these users see Guardian), `GUARDIAN_RULES_PATH`
+(empty = the file baked into the image), `GUARDIAN_METRICS_HOST/PORT`,
+`GUARDIAN_TELEGRAM_CHAT_ID` (optional team chat), `CLICKSEND_*` and
+`TWILIO_TO_NUMBERS` (SMS; empty = none). `scripts/lib/platform_env_checks.sh`
+refuses a `GUARDIAN_ENABLED` that is not `0`, `1` or unset.
+
+Operations:
+
+```bash
+sudo docker compose -p autobuy-platform --profile prod logs --tail 100 guardian   # the worker's JSON log
+curl -s http://127.0.0.1:8000/health | python3 -c 'import json,sys; print(json.load(sys.stdin)["guardian"])'
+sudo docker compose -p autobuy-platform --profile prod exec guardian python -m guardian.validate_config   # the rules file
+```
+
+Pause and resume (admin API, PR5) write `autobuy:guardian:paused`; the worker
+reads it every pass and fails closed when Redis is unreadable. The daily
+MEDIUM/LOW digest goes out from the worker after `alerting.digest_hour_utc`
+(08:00 UTC by default), once per day, tracked in Redis.
+
+Resources: the worker is capped at 1 GB. Two things the operator checks
+before the first deploy of this service:
+
+- **Postgres connections.** The API opens one SQLAlchemy pool *per gunicorn
+  worker*: `api/database.py` sets `pool_size=20, max_overflow=10` and
+  `Dockerfile.api` runs `--workers 4`, so the API alone holds up to
+  4 × 20 = 80 connections once every pool has filled and can burst to
+  4 × 30 = 120 under load (overflow connections open on demand and close when
+  returned). The worker adds about ten: `guardian/db.py` keeps one psycopg2
+  connection per thread, and the process has 8 pool threads
+  (`workers.pool_size` in `guardian/rules.yaml`), the scheduler and the main
+  thread. The server runs Postgres's default `max_connections = 100`; the
+  owner confirms it with `SHOW max_connections;` before the deploy. 80 + 10
+  fits, with room for a few `psql` / `pg_dump` sessions; a full API burst
+  (120 + 10) does not. Whoever connects last then gets `FATAL: sorry, too many
+  clients already` — for the worker that is at start-up (`Database()` connects
+  in its constructor and refuses to look healthy without a connection), so the
+  container exits and compose restarts it in a loop. If the numbers do not
+  fit, either raise `max_connections` on the `postgres` service
+  (`command: ["postgres", "-c", "max_connections=200"]` in
+  `docker-compose.yml`; the postgres container must be recreated, so that is
+  its own deploy) or lower `pool_size` / `max_overflow` in `api/database.py`
+  (a code change). The owner decides which.
+- **`up -d` waits for the API's healthcheck.** The worker declares
+  `depends_on: api: condition: service_healthy`, so `docker compose up -d`
+  does not return until `autobuy_api` reports healthy. Healthy is the
+  `HEALTHCHECK` in `Dockerfile.api`: GET `/health` every 10 s, 5 s timeout,
+  3 retries, 15 s start period — failures inside the start period do not
+  count, so the API has roughly 40–45 s from container start to answer, and
+  migrations run in the entrypoint before gunicorn listens, so a slow
+  migration spends that budget. If the API is marked unhealthy, `up -d` exits
+  non-zero with `dependency failed to start: container autobuy_api is
+  unhealthy`, and `scripts/deploy.sh` stops right there (`set -e`): none of
+  its own verification runs — not the "container recreated" check, not the
+  two-minute `/health` loop that was written to wait for migrations, not the
+  commit, bundle or heartbeat checks. The API container keeps running (Docker
+  never restarts on health alone) and the worker was not started (`docker ps
+  -a` shows whether its container was even created). What to do: watch
+  `sudo docker inspect --format '{{.State.Health.Status}}' autobuy_api` and
+  `curl -s http://127.0.0.1:8000/health`; once the API is healthy, start the
+  worker with `sudo docker compose -p autobuy-platform --profile prod up -d
+  guardian` and run the post-deploy checks from the checklist by hand (health
+  commit, served bundle, `alembic current`, holdings and digest, scheduler
+  jobs, the worker heartbeat, the WARNING/ERROR scan). Re-running
+  `scripts/deploy.sh platform` is not the way out: the API container is
+  already the new one, so the script's "was not recreated" check refuses. If
+  the API never turns healthy, read `docker compose ... logs api`: that is a
+  failed migration or boot guard, not a worker problem.
+
+See `docs/GUARDIAN-ARCHITECTURE.md`, `docs/GUARDIAN-SECURITY.md`,
+`docs/GUARDIAN-THREAT-MODEL.md` and `docs/GUARDIAN-RETENTION.md`.
 
 ## Monitoring
 
-Prometheus scrapes `/metrics` (keep it private — nginx config already denies
+Prometheus scrapes `/metrics` (keep it private — `deployment/nginx.web.conf` already denies
 public access). Thresholds, PromQL sketches, and the runbook: `docs/ALERTING.md`.
 `/health` reports per-component state including the scheduler's last tick.
 
@@ -122,7 +408,7 @@ public access). Thresholds, PromQL sketches, and the runbook: `docs/ALERTING.md`
 - Horizontal: multiple API containers are safe — the scheduler takes a Postgres
   advisory lock per tick, so replicas never double-execute; rate limits and
   lockout live in shared Redis.
-- Put nginx (or a cloud LB) in front for TLS; the app emits HSTS in production.
+- TLS is terminated by the `caddy` service (or a cloud LB / host nginx); the app emits HSTS in production.
 
 ## Security operations
 
@@ -140,3 +426,13 @@ public access). Thresholds, PromQL sketches, and the runbook: `docs/ALERTING.md`
 | Purchases not executing | `/health` scheduler state; user KYC verified? key verified? `AUTOBUY_DRY_RUN`? |
 | "cannot decrypt" on keys | `ENCRYPTION_KEY` changed without running the rotation script |
 | Slow requests | JSON logs: `slow_query` warnings; worker count; DB indexes (`EXPLAIN`) |
+
+## Environment variables and docker-compose
+
+The `api` service in `docker-compose.yml` uses an explicit `environment:`
+list; docker compose does NOT forward `.env` to the container by itself, so a
+variable that is read by `api/config.py` but missing from that list is
+silently ignored in production (the container runs on the code default).
+Every variable the code reads must therefore appear in the compose list in
+`${VAR:-default}` style and in `.env.example`. `tests/test_env_plumbing.py`
+compares the three and fails CI on drift in either direction.

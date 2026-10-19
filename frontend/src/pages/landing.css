@@ -1,0 +1,67 @@
+/* Landing page only (lazy chunk). Brand tokens from tailwind; the flow animation below. */
+.flow { width: 100%; max-width: 720px; margin: 0 auto; }
+.flow__svg { display: block; width: 100%; height: auto; overflow: visible; font-family: inherit; }   /* base first: the --wide/--tall rules below override display */
+.flow__svg--wide { aspect-ratio: 640 / 190; }
+.flow__svg--tall { aspect-ratio: 320 / 560; max-width: 320px; margin: 0 auto; display: none; }
+@media (max-width: 639.98px) { .flow__svg--wide { display: none; } .flow__svg--tall { display: block; } }   /* below 640px: top to bottom, no horizontal scroll */
+.flow__rail { stroke: #cfc6d9; stroke-width: 2; }
+.flow__box { fill: #fff; stroke: #cfc6d9; stroke-width: 1.5; }
+.flow__box--brand { fill: #f5f3f7; stroke: #b0a2c0; }
+.flow__coin { stroke-width: 2; }
+.flow__coin--usdt { fill: #e6f5ee; stroke: #0f9d75; }
+.flow__coin--btc { fill: #fff2e3; stroke: #f7931a; }
+.flow__coin-label { font-size: 11px; font-weight: 700; fill: #1e293b; }
+.flow__label { font-size: 12px; font-weight: 600; fill: #1e293b; }
+.flow__sublabel { font-size: 11px; fill: #64748b; }
+.flow__clock { fill: #fff; stroke: #543477; stroke-width: 2.5; }
+.flow__hand { stroke: #543477; stroke-width: 2.5; stroke-linecap: round; transform-box: view-box; }
+.flow__ticket { fill: #fff; stroke: #64748b; stroke-width: 1.5; }
+.flow__ticket-line { stroke: #cbd5e1; stroke-width: 2; stroke-linecap: round; }
+.flow__tick { fill: #0f9d75; }
+.flow__dot { fill: #543477; opacity: 0; }
+.flow__dot--h { cx: 112px; }
+.flow__dot--v { cy: 108px; }
+
+/* the loop: dot travels rail 1, clock ticks, dot travels rail 2, ticket ticks, dot travels rail 3, coin appears */
+.flow.is-playing .flow__dot--h { animation: flow-dot 6s linear infinite; }
+.flow.is-playing .flow__dot--v { animation: flow-dot-v 6s linear infinite; }
+.flow.is-playing .flow__hand--minute { animation: flow-minute 6s linear infinite; }
+.flow.is-playing .flow__tick { animation: flow-tick 6s linear infinite; }
+.flow.is-playing .flow__coin--btc, .flow.is-playing .flow__coin--btc + .flow__coin-label { animation: flow-coin 6s linear infinite; }
+.flow:not(.is-playing) .flow__dot { opacity: 0; }
+.flow.is-static .flow__tick, .flow.is-static .flow__coin--btc { opacity: 1; }
+
+@keyframes flow-dot {
+  0%   { cx: 112px; opacity: 0; }
+  4%   { opacity: 1; }
+  22%  { cx: 196px; opacity: 1; }
+  26%  { opacity: 0; }
+  38%  { cx: 276px; opacity: 0; }
+  42%  { opacity: 1; }
+  58%  { cx: 360px; opacity: 1; }
+  62%  { opacity: 0; }
+  72%  { cx: 440px; opacity: 0; }
+  76%  { opacity: 1; }
+  92%  { cx: 524px; opacity: 1; }
+  96%, 100% { cx: 524px; opacity: 0; }
+}
+@keyframes flow-dot-v {
+  0%   { cy: 108px; opacity: 0; }
+  4%   { opacity: 1; }
+  22%  { cy: 150px; opacity: 1; }
+  26%  { opacity: 0; }
+  38%  { cy: 258px; opacity: 0; }
+  42%  { opacity: 1; }
+  58%  { cy: 300px; opacity: 1; }
+  62%  { opacity: 0; }
+  72%  { cy: 408px; opacity: 0; }
+  76%  { opacity: 1; }
+  92%  { cy: 450px; opacity: 1; }
+  96%, 100% { cy: 450px; opacity: 0; }
+}
+@keyframes flow-minute { 0%, 22% { transform: rotate(0deg); } 38% { transform: rotate(360deg); } 100% { transform: rotate(360deg); } }
+@keyframes flow-tick { 0%, 58% { opacity: 0; } 66%, 100% { opacity: 1; } }
+@keyframes flow-coin { 0%, 88% { opacity: 0.18; } 96%, 100% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .flow .flow__dot, .flow .flow__hand--minute, .flow .flow__tick, .flow .flow__coin--btc { animation: none !important; }
+}

@@ -56,3 +56,8 @@ gunicorn==21.2.0
 
 # PDF reports
 reportlab==4.1.0
+
+# Guardian read-only monitoring (v0.9.1)
+ccxt==4.5.63            # pinned: the four read-only exchange adapters were verified against this exact version
+PyYAML==6.0.3           # guardian/rules.yaml
+cryptography==50.0.2   # was transitive via python-jose; pinned now that Guardian secrets and TOTP use it directly

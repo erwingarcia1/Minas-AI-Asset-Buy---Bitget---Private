@@ -62,22 +62,23 @@ async def test_hsts_in_production(client, monkeypatch):
     assert "max-age=31536000" in r.headers["strict-transport-security"]
 
 
-async def test_logout_revokes_refresh_token(client):
-    from api.routes.auth import _create_refresh_token
-    refresh = _create_refresh_token(str(uuid.uuid4()))
+async def test_logout_revokes_refresh_token(client, user):
+    from api.routes.auth import CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE, _create_refresh_token
+    refresh = _create_refresh_token(str(user.id))
+    cookies = {REFRESH_COOKIE: refresh, CSRF_COOKIE: "csrf-1"}
     async with client as c:
-        assert (await c.post("/api/auth/logout",
-                             json={"refresh_token": refresh})).status_code == 204
-        r = await c.post("/api/auth/refresh", json={"refresh_token": refresh})
+        assert (await c.post("/api/auth/logout", cookies=cookies, headers={CSRF_HEADER: "csrf-1"})).status_code == 204
+        r = await c.post("/api/auth/refresh", cookies=cookies, headers={CSRF_HEADER: "csrf-1"})
         assert r.status_code == 401, "revoked refresh token must be rejected"
 
 
-async def test_logout_rejects_access_token(client, user):
+async def test_logout_ignores_an_access_token_in_the_cookie(client, user):
     from api.auth import create_access_token
+    from api.routes.auth import CSRF_COOKIE, CSRF_HEADER, REFRESH_COOKIE
     async with client as c:
-        r = await c.post("/api/auth/logout",
-                         json={"refresh_token": create_access_token(str(user.id)).access_token})
-    assert r.status_code == 401
+        r = await c.post("/api/auth/logout", cookies={REFRESH_COOKIE: create_access_token(str(user.id)).access_token, CSRF_COOKIE: "x"},
+                         headers={CSRF_HEADER: "x"})
+    assert r.status_code == 204, "nothing valid to revoke; the cookies are cleared anyway"
 
 
 async def test_password_change_invalidates_old_tokens(db):
@@ -110,9 +111,9 @@ async def test_password_change_invalidates_old_tokens(db):
 
             assert (await c.get("/api/user/profile", headers=H_old)).status_code == 401, \
                 "pre-change access token must die"
-            assert (await c.post("/api/auth/refresh",
-                                 json={"refresh_token": old["refresh_token"]})).status_code == 401, \
-                "pre-change refresh token must die"
+            from api.routes.auth import CSRF_HEADER
+            assert (await c.post("/api/auth/refresh", headers={CSRF_HEADER: old["csrf_token"]})).status_code == 401, \
+                "pre-change refresh cookie (kept by the client) must die"
             assert (await c.post("/api/auth/login",
                                  json={"email": email, "password": PW})).status_code == 401
             relogin = await c.post("/api/auth/login",
@@ -129,7 +130,7 @@ async def test_no_secrets_in_logs(db, user, binance_key, monkeypatch, caplog):
     """A full Auto-Buy execution through the real gateway (exchange stubbed) never logs key material."""
     from datetime import timedelta
     from api.models import utcnow
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
     from api.tasks import purchase_scheduler as ps
     from tests.api.conftest import make_autobuy_purchase
     from tests.test_purchase_scheduler import FakeLegacy

@@ -4,16 +4,26 @@ import type { HttpTransport } from "./http.js";
 import type {
   APIKeyCreate,
   APIKeyResponse,
+  AdminPurchaseList,
+  AdminPurchaseRow,
   AdminTransactionList,
   AdminUserList,
   AlertItem,
   ApplicantStatusResponse,
   ChangePasswordRequest,
+  CoinMarketOut,
   ComparisonResponse,
+  ConfirmRequest,
   CreateApplicantRequest,
   CreateApplicantResponse,
   DashboardResponse,
+  DestinationCheckOut,
+  DisableRequest,
+  EmailOutboxView,
   EmailSentResponse,
+  EnrolRequest,
+  EnrolResponse,
+  FillDeviation,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
   HistoryResponse,
@@ -21,34 +31,46 @@ import type {
   IntegrationInfo,
   KeyVerifyResponse,
   KycOverride,
+  LiftWalletHold,
   LoginRequest,
-  LogoutRequest,
+  MfaLoginRequest,
+  MfaRequiredResponse,
   PerformanceResponse,
   PlatformStats,
+  PortfolioSeriesResponse,
   PreferencesPayload,
   PreferencesResponse,
   ProfileUpdateRequest,
+  PublicMeta,
   PurchaseCreateRequest,
   PurchaseCreatedOut,
   PurchaseDetailOut,
   PurchaseOut,
+  PurchaseReview,
   PurchaseUpdateRequest,
   QuickStats,
+  RecoveryCodesResponse,
   RecurringResponse,
-  RefreshRequest,
+  RegenerateRequest,
   RegisterRequest,
   ResetPasswordRequest,
   ResetTokenRequest,
   ResetTokenValidity,
+  ResetTwoFactorRequest,
+  ResolvePurchase,
+  RetryWithdrawalOut,
   SendNotificationRequest,
   SendVerificationRequest,
   StatusResponse,
+  TelegramTestResult,
   TimelineResponse,
   TokenResponse,
   TransactionListResponse,
   TransactionOut,
   TransactionResponse,
   TransactionStats,
+  TwoFactorStatus,
+  UnsuspendPayload,
   UserOut,
   UserProfile,
   UserPublicProfile,
@@ -88,8 +110,18 @@ export class AuthApi {
   }
 
   /** Login — `POST /api/auth/login` */
-  login(body: LoginRequest): Promise<TokenResponse> {
-    return this.http.request<TokenResponse>("POST", "/api/auth/login", { body, auth: false });
+  login(body: LoginRequest): Promise<TokenResponse | MfaRequiredResponse> {
+    return this.http.request<TokenResponse | MfaRequiredResponse>("POST", "/api/auth/login", { body, auth: false });
+  }
+
+  /** Login Mfa — `POST /api/auth/login/mfa` */
+  loginMfa(body: MfaLoginRequest): Promise<TokenResponse> {
+    return this.http.request<TokenResponse>("POST", "/api/auth/login/mfa", { body, auth: false });
+  }
+
+  /** Logout All — `POST /api/auth/logout-all` */
+  logoutAll(): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/auth/logout-all", { auth: true });
   }
 
   /** Verify — `POST /api/auth/verify` */
@@ -98,13 +130,13 @@ export class AuthApi {
   }
 
   /** Refresh — `POST /api/auth/refresh` */
-  refresh(body: RefreshRequest): Promise<TokenResponse> {
-    return this.http.request<TokenResponse>("POST", "/api/auth/refresh", { body, auth: false });
+  refresh(): Promise<TokenResponse> {
+    return this.http.request<TokenResponse>("POST", "/api/auth/refresh", { auth: false });
   }
 
   /** Logout — `POST /api/auth/logout` */
-  logout(body: LogoutRequest): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/auth/logout", { body, auth: false });
+  logout(): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/auth/logout", { auth: false });
   }
 
   /** Change Password — `POST /api/auth/change-password` */
@@ -129,9 +161,45 @@ export class AuthApi {
 
 }
 
+/** `public` endpoints. */
+export class PublicApi {
+  constructor(private readonly http: HttpTransport) {}
+
+  /** Public Meta — `GET /api/public/meta` */
+  publicMeta(): Promise<PublicMeta> {
+    return this.http.request<PublicMeta>("GET", "/api/public/meta", { auth: false });
+  }
+
+}
+
 /** `user` endpoints. */
 export class UserApi {
   constructor(private readonly http: HttpTransport) {}
+
+  /** Two Factor Status — `GET /api/user/2fa` */
+  twoFactorStatus(): Promise<TwoFactorStatus> {
+    return this.http.request<TwoFactorStatus>("GET", "/api/user/2fa", { auth: true });
+  }
+
+  /** Enrol — `POST /api/user/2fa/enrol` */
+  enrol(body: EnrolRequest): Promise<EnrolResponse> {
+    return this.http.request<EnrolResponse>("POST", "/api/user/2fa/enrol", { body, auth: true });
+  }
+
+  /** Confirm — `POST /api/user/2fa/confirm` */
+  confirm(body: ConfirmRequest): Promise<RecoveryCodesResponse> {
+    return this.http.request<RecoveryCodesResponse>("POST", "/api/user/2fa/confirm", { body, auth: true });
+  }
+
+  /** Regenerate Recovery Codes — `POST /api/user/2fa/recovery-codes` */
+  regenerateRecoveryCodes(body: RegenerateRequest): Promise<RecoveryCodesResponse> {
+    return this.http.request<RecoveryCodesResponse>("POST", "/api/user/2fa/recovery-codes", { body, auth: true });
+  }
+
+  /** Disable — `POST /api/user/2fa/disable` */
+  disable(body: DisableRequest): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/user/2fa/disable", { body, auth: true });
+  }
 
   /** Get Profile — `GET /api/user/profile` */
   getProfile(): Promise<UserProfile> {
@@ -153,6 +221,11 @@ export class UserApi {
 /** `exchange` endpoints. */
 export class ExchangeApi {
   constructor(private readonly http: HttpTransport) {}
+
+  /** Supported Exchanges — `GET /api/exchange/supported` */
+  supportedExchanges(): Promise<string[]> {
+    return this.http.request<string[]>("GET", "/api/exchange/supported", { auth: false });
+  }
 
   /** List Keys — `GET /api/exchange/keys` */
   listKeys(): Promise<APIKeyResponse[]> {
@@ -224,6 +297,11 @@ export class DashboardApi {
   /** Analytics Timeline — `GET /api/dashboard/analytics/timeline` */
   analyticsTimeline(query?: { days?: number }): Promise<TimelineResponse> {
     return this.http.request<TimelineResponse>("GET", "/api/dashboard/analytics/timeline", { query, auth: true });
+  }
+
+  /** Portfolio Series — `GET /api/dashboard/portfolio/series` */
+  portfolioSeries(query?: { range?: string }): Promise<PortfolioSeriesResponse> {
+    return this.http.request<PortfolioSeriesResponse>("GET", "/api/dashboard/portfolio/series", { query, auth: true });
   }
 
 }
@@ -310,11 +388,6 @@ export class NotificationsApi {
 export class AdminApi {
   constructor(private readonly http: HttpTransport) {}
 
-  /** Platform Stats — `GET /api/admin/stats` */
-  platformStats(): Promise<PlatformStats> {
-    return this.http.request<PlatformStats>("GET", "/api/admin/stats", { auth: true });
-  }
-
   /** List Users — `GET /api/admin/users` */
   listUsers(query?: { q?: string | null; limit?: number; offset?: number }): Promise<AdminUserList> {
     return this.http.request<AdminUserList>("GET", "/api/admin/users", { query, auth: true });
@@ -326,8 +399,8 @@ export class AdminApi {
   }
 
   /** Unsuspend User — `POST /api/admin/users/{user_id}/unsuspend` */
-  unsuspendUser(userId: string): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { auth: true });
+  unsuspendUser(userId: string, body?: UnsuspendPayload | null): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/unsuspend", { body, auth: true });
   }
 
   /** Delete User — `DELETE /api/admin/users/{user_id}` */
@@ -335,9 +408,49 @@ export class AdminApi {
     return this.http.request<unknown>("DELETE", "/api/admin/users/" + encodeURIComponent(String(userId)), { query, auth: true });
   }
 
+  /** Lift Wallet Hold — `POST /api/admin/users/{user_id}/lift-wallet-hold` */
+  liftWalletHold(userId: string, body: LiftWalletHold): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/lift-wallet-hold", { body, auth: true });
+  }
+
   /** Kyc Override — `POST /api/admin/users/{user_id}/kyc-override` */
   kycOverride(userId: string, body: KycOverride): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/kyc-override", { body, auth: true });
+  }
+
+  /** Reset Two Factor — `POST /api/admin/users/{user_id}/2fa/reset` */
+  resetTwoFactor(userId: string, body?: ResetTwoFactorRequest | null): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/admin/users/" + encodeURIComponent(String(userId)) + "/2fa/reset", { body, auth: true });
+  }
+
+  /** List Purchases — `GET /api/admin/purchases` */
+  listPurchases(query?: { status?: string | null; limit?: number; offset?: number }): Promise<AdminPurchaseList> {
+    return this.http.request<AdminPurchaseList>("GET", "/api/admin/purchases", { query, auth: true });
+  }
+
+  /** Review Purchase — `GET /api/admin/purchases/{purchase_id}/review` */
+  reviewPurchase(purchaseId: string): Promise<PurchaseReview> {
+    return this.http.request<PurchaseReview>("GET", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/review", { auth: true });
+  }
+
+  /** Resolve Purchase — `POST /api/admin/purchases/{purchase_id}/resolve` */
+  resolvePurchase(purchaseId: string, body: ResolvePurchase): Promise<AdminPurchaseRow> {
+    return this.http.request<AdminPurchaseRow>("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/resolve", { body, auth: true });
+  }
+
+  /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
+  forceRetry(purchaseId: string): Promise<unknown> {
+    return this.http.request<unknown>("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
+  }
+
+  /** Fill Deviations — `GET /api/admin/fills/deviations` */
+  fillDeviations(query?: { limit?: number }): Promise<FillDeviation[]> {
+    return this.http.request<FillDeviation[]>("GET", "/api/admin/fills/deviations", { query, auth: true });
+  }
+
+  /** Platform Stats — `GET /api/admin/stats` */
+  platformStats(): Promise<PlatformStats> {
+    return this.http.request<PlatformStats>("GET", "/api/admin/stats", { auth: true });
   }
 
   /** All Transactions — `GET /api/admin/transactions` */
@@ -345,9 +458,9 @@ export class AdminApi {
     return this.http.request<AdminTransactionList>("GET", "/api/admin/transactions", { query, auth: true });
   }
 
-  /** Force Retry — `POST /api/admin/purchases/{purchase_id}/force-retry` */
-  forceRetry(purchaseId: string): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/admin/purchases/" + encodeURIComponent(String(purchaseId)) + "/force-retry", { auth: true });
+  /** Undelivered Emails — `GET /api/admin/emails/undelivered` */
+  undeliveredEmails(query?: { limit?: number }): Promise<EmailOutboxView> {
+    return this.http.request<EmailOutboxView>("GET", "/api/admin/emails/undelivered", { query, auth: true });
   }
 
   /** Alerts — `GET /api/admin/alerts` */
@@ -363,6 +476,11 @@ export class AdminApi {
   /** Resume Scheduler — `POST /api/admin/scheduler/resume` */
   resumeScheduler(): Promise<unknown> {
     return this.http.request<unknown>("POST", "/api/admin/scheduler/resume", { auth: true });
+  }
+
+  /** Telegram Test — `POST /api/admin/telegram/test` */
+  telegramTest(): Promise<TelegramTestResult> {
+    return this.http.request<TelegramTestResult>("POST", "/api/admin/telegram/test", { auth: true });
   }
 
 }
@@ -433,11 +551,6 @@ export class WebhooksApi {
     return this.http.request<unknown>("POST", "/api/webhooks/sumsub", { auth: false });
   }
 
-  /** Resend Events — `POST /api/webhooks/resend` */
-  resendEvents(): Promise<unknown> {
-    return this.http.request<unknown>("POST", "/api/webhooks/resend", { auth: false });
-  }
-
 }
 
 /** `email` endpoints. */
@@ -485,9 +598,24 @@ export class V2Api {
     return this.http.request<unknown>("DELETE", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)), { auth: true });
   }
 
+  /** Retry Withdrawal — `POST /api/v2/purchases/{purchase_id}/retry-withdrawal` */
+  retryWithdrawal(purchaseId: string): Promise<RetryWithdrawalOut> {
+    return this.http.request<RetryWithdrawalOut>("POST", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)) + "/retry-withdrawal", { auth: true });
+  }
+
   /** Purchase Transactions — `GET /api/v2/purchases/{purchase_id}/transactions` */
   purchaseTransactions(purchaseId: string, query?: { status_filter?: string | null }): Promise<TransactionOut[]> {
     return this.http.request<TransactionOut[]>("GET", "/api/v2/purchases/" + encodeURIComponent(String(purchaseId)) + "/transactions", { query, auth: true });
+  }
+
+  /** Coin Market — `GET /api/v2/market/coins/{coin}` */
+  coinMarket(coin: string, query?: { amount_usd?: number | null }): Promise<CoinMarketOut> {
+    return this.http.request<CoinMarketOut>("GET", "/api/v2/market/coins/" + encodeURIComponent(String(coin)), { query, auth: true });
+  }
+
+  /** Check Withdrawal Destination — `GET /api/v2/market/destination` */
+  checkWithdrawalDestination(query: { chain: string; address: string; destination_type?: string | null; memo?: string | null }): Promise<DestinationCheckOut> {
+    return this.http.request<DestinationCheckOut>("GET", "/api/v2/market/destination", { query, auth: true });
   }
 
 }
@@ -518,6 +646,7 @@ export function buildApi(http: HttpTransport) {
   return {
     system: new SystemApi(http),
     auth: new AuthApi(http),
+    public: new PublicApi(http),
     user: new UserApi(http),
     exchange: new ExchangeApi(http),
     transactions: new TransactionsApi(http),

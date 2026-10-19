@@ -11,13 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_db
 from api.models import Notification, User
 from api.routes.user import UTCModel, get_current_user
-from api.services.notifications import Preferences, dispatcher
+from api.services.notifications import ALWAYS_ON_EMAILS, OPTIONAL_EMAIL_CATEGORIES, Preferences, dispatcher
 
 router = APIRouter()
 
 
 class PreferencesPayload(BaseModel):
     email_enabled: Optional[bool] = None
+    email_purchase_confirmations: Optional[bool] = None
+    email_weekly_summary: Optional[bool] = None
+    email_milestones: Optional[bool] = None
+    email_low_balance: Optional[bool] = None
     sms_enabled: Optional[bool] = None
     push_enabled: Optional[bool] = None
     quiet_hours_start: Optional[int] = Field(default=None, ge=0, le=23)
@@ -37,6 +41,11 @@ class PreferencesPayload(BaseModel):
 
 class PreferencesResponse(BaseModel):
     email_enabled: bool
+    email_purchase_confirmations: bool
+    email_weekly_summary: bool
+    email_milestones: bool
+    email_low_balance: bool
+    always_on_emails: List[str] = list(ALWAYS_ON_EMAILS)   # never optional: security + failures
     sms_enabled: bool
     push_enabled: bool
     quiet_hours_start: int
@@ -64,10 +73,12 @@ async def update_preferences(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update channel toggles, quiet hours (UTC), phone number, device token."""
+    """Update channel toggles, optional email categories (purchase confirmations,
+    weekly summary, milestones, low-balance warnings), quiet hours (UTC), phone number, device token.
+    Security and failure emails cannot be switched off."""
     prefs = Preferences.for_user(current_user)
     for field in ("email_enabled", "sms_enabled", "push_enabled",
-                  "quiet_hours_start", "quiet_hours_end"):
+                  "quiet_hours_start", "quiet_hours_end", *OPTIONAL_EMAIL_CATEGORIES):
         value = getattr(payload, field)
         if value is not None:
             setattr(prefs, field, value)
@@ -104,10 +115,14 @@ async def history(
     db: AsyncSession = Depends(get_db),
 ):
     """Audit log of the caller's notifications across all channels."""
+    # The customer feed shows what actually reached them. Skipped/covered/failed
+    # channel attempts stay in the table for the admin audit only.
     total = (await db.execute(select(func.count(Notification.id)).where(
-        Notification.user_id == current_user.id))).scalar_one()
+        Notification.user_id == current_user.id,
+        Notification.status == "sent"))).scalar_one()
     rows = (await db.execute(
-        select(Notification).where(Notification.user_id == current_user.id)
+        select(Notification).where(Notification.user_id == current_user.id,
+                                   Notification.status == "sent")
         .order_by(Notification.created_at.desc()).limit(limit).offset(offset)
     )).scalars().all()
     return HistoryResponse(items=[NotificationRow.model_validate(r) for r in rows],

@@ -1,0 +1,7 @@
+{{ greeting }}
+
+{{ message }}
+
+{% if paused %}We've paused your purchases so nothing fails; nothing was bought. Your purchases: {{ purchases_url }}{% else %}Until then, scheduled buys on this key will not run.{% endif %} Your settings: {{ settings_url }}
+
+{% if support_email %}Questions? {{ support_email }}{% endif %}

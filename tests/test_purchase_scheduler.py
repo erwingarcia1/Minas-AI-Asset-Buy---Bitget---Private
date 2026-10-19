@@ -7,7 +7,8 @@ from sqlalchemy import select
 
 from api.models import PurchaseTransaction
 from api.tasks import purchase_scheduler as ps
-from tests.conftest_autobuy import (BTC_MAIN, binance_key, client, db, make_key, make_purchase,  # noqa: F401
+from tests.conftest_autobuy import (bitget_key,  # noqa: F401
+                                    BTC_MAIN, binance_key, client, db, make_key, make_purchase,  # noqa: F401
                                     other_user, user)
 
 NOW = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
@@ -37,9 +38,9 @@ async def test_finds_only_active_due_purchases(db, user, binance_key):
 # --------------------------------------------------------------------------- execution
 
 @pytest.mark.parametrize("frequency, expected_next", [
-    ("daily", NOW + timedelta(days=1)),
-    ("weekly", NOW + timedelta(days=7)),
-    ("monthly", datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)),
+    ("daily", (NOW - timedelta(minutes=5)) + timedelta(days=1)),
+    ("weekly", (NOW - timedelta(minutes=5)) + timedelta(days=7)),
+    ("monthly", datetime(2026, 10, 8, 11, 55, tzinfo=timezone.utc)),   # the due time's day and clock, next month
 ])
 async def test_success_updates_next_execution_by_frequency(db, user, binance_key, frequency, expected_next):
     p = await make_purchase(db, user, binance_key, frequency=frequency, next_execution=NOW - timedelta(minutes=5))
@@ -65,12 +66,12 @@ async def test_creates_buy_and_withdrawal_rows(db, user, binance_key):
     txs = await tx_for(db, p)
     assert [t.tx_type for t in txs] == ["buy", "withdrawal"]
     buy, wd = txs
-    assert buy.status == "success" and buy.order_id == "ORD-1" and buy.exchange_tx_id == "ORD-1"
+    assert buy.status == "success" and buy.order_id.startswith("ORD-1-") and buy.exchange_tx_id == buy.order_id
     assert buy.client_oid.startswith("ab-") and gw.placed[0][0] == buy.client_oid, "client id stored before sending"
     assert buy.amount_executed == pytest.approx(100 / 50_000) and buy.fill_price == 50_000.0 and buy.cost_usd == 100
     assert buy.fee == pytest.approx(100 / 50_000 * 0.001) and buy.fee_currency == "BTC"
     assert buy.executed_at == NOW and buy.error_message is None
-    assert wd.status == "success" and wd.parent_transaction_id == buy.id and wd.withdrawal_id == "WD-1"
+    assert wd.status == "success" and wd.parent_transaction_id == buy.id and wd.withdrawal_id.startswith("WD-1-")
     assert wd.amount_executed == pytest.approx(100 / 50_000 * 0.999), "buy fee in the base coin is deducted"
     assert wd.withdrawal_fee == 0.0001 and wd.withdrawal_fee_currency == "BTC" and wd.client_oid.startswith("abw-")
 
@@ -106,8 +107,10 @@ async def test_skips_unverified_or_suspended_users(db, user, other_user, binance
 
 # --------------------------------------------------------------------------- failures
 
-async def test_failure_records_attempts_and_marks_failed_after_three(db, user, binance_key):
-    p = await make_purchase(db, user, binance_key, next_execution=NOW)
+async def test_failure_records_attempts_and_misses_the_cycle_after_three(db, user, binance_key):
+    """Three attempts one tick apart; then a recurring purchase moves on to its next
+    interval (it never stalls) and reports the missed cycle."""
+    p = await make_purchase(db, user, binance_key, next_execution=NOW)   # daily
     gw = BuyFails()
     for attempt in (1, 2):
         counts = await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=5 * attempt), gateway=gw, dry_run=True)
@@ -117,13 +120,15 @@ async def test_failure_records_attempts_and_marks_failed_after_three(db, user, b
         assert p.next_execution == NOW, "stays due for the retry"
     await ps.execute_due_purchases(db, now=NOW + timedelta(minutes=15), gateway=gw, dry_run=True)
     await db.refresh(p)
-    assert p.status == "failed" and p.failure_count == 3 and p.next_execution is None
-    assert "MIN_NOTIONAL" in p.last_error
+    assert p.status == "active" and p.failure_count == 3
+    assert p.next_execution == NOW + timedelta(days=1), "the missed cycle's successor on the anchor grid (due time + a day), not stalled"
+    assert "missed this cycle (1 of 3 in a row)" in p.last_error and "MIN_NOTIONAL" in p.last_error
     txs = await tx_for(db, p)
     assert [t.status for t in txs] == ["failed"] * 3 and all(t.error_message for t in txs)
     assert all(t.tx_type == "buy" and t.client_oid for t in txs)
-    # a failed purchase is never picked up again
-    assert p.id not in {x.id for x in await ps.find_due_purchases(db, NOW + timedelta(days=1))}
+    # the missed cycle is not retried early; the purchase is due again exactly on its next grid point
+    assert p.id not in {x.id for x in await ps.find_due_purchases(db, NOW + timedelta(days=1) - timedelta(seconds=1))}
+    assert p.id in {x.id for x in await ps.find_due_purchases(db, NOW + timedelta(days=1))}
 
 
 async def test_success_resets_failure_count(db, user, binance_key):
@@ -141,12 +146,14 @@ async def test_missing_exchange_account_is_a_failure(db, user, binance_key):
     await ps.execute_due_purchases(db, now=NOW, gateway=gw, dry_run=True)
     assert gw.calls == []
     txs = await tx_for(db, p)
-    assert txs[0].status == "failed" and "exchange account" in txs[0].error_message
+    assert txs[0].status == "failed" and txs[0].error_message == ps.KEY_REMOVED_MESSAGE
+    await db.refresh(p)
+    assert p.status == "failed" and p.next_execution is None, "stopped at once, no three retries"
 
 
 async def test_gateway_dry_run_via_real_client_is_simulated(db, user, binance_key, monkeypatch):
     """The production gateway prices, buys and withdraws through ExchangeClient; in dry-run nothing is sent."""
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
 
     class FakeLegacy:
         def __init__(self, *a, **k): pass
@@ -173,7 +180,7 @@ class FakeLegacy:
 
 
 async def test_autobuy_mode_withdraws_and_records_withdrawal_tx(db, user, binance_key, monkeypatch):
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
     FakeLegacy.withdrawals.clear()
     p = await make_purchase(db, user, binance_key, purchase_type="autobuy", amount_usd=100, next_execution=NOW)
@@ -187,7 +194,7 @@ async def test_autobuy_mode_withdraws_and_records_withdrawal_tx(db, user, binanc
 
 
 async def test_dca_mode_skips_withdrawal_and_records_a_buy_row(db, user, binance_key, monkeypatch):
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
     monkeypatch.setattr(bc, "_LegacyClient", FakeLegacy)
     FakeLegacy.withdrawals.clear()
     p2 = await make_purchase(db, user, binance_key, crypto_symbol="ETH", wallet_address="0x52908400098527886E0F7030069857D2E4169EE7",
@@ -298,9 +305,11 @@ def test_build_scheduler_sets_grace_and_listener():
     assert any(cb is ps.job_event_listener and (mask & EVENT_JOB_MISSED) for cb, mask in sched._listeners)
 
 
-async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binance_key, monkeypatch, caplog):
+async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, bitget_key, monkeypatch, caplog):
+    """Bitget dry runs are priced at the live best ask (the Bitget transport is patched; audit C1
+    removed the duck-typed fallback that let a Binance-selected client answer this path)."""
     import logging
-    from api.services import binance_client as bc
+    from api.services import exchange_client as bc
 
     class TickerClient:
         def __init__(self, *a, **k): pass
@@ -308,8 +317,8 @@ async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binanc
         def spot_symbol(b, q): return f"{b}{q}"
         def get_ticker(self, symbol): return {"last": 77042.68, "ask": 77042.84, "bid": 77042.83, "ts": "1789130047195"}
         def get_ticker_price(self, symbol): return 77042.68
-    monkeypatch.setattr(bc, "_LegacyClient", TickerClient)
-    p = await make_purchase(db, user, binance_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
+    monkeypatch.setitem(bc.LEGACY_CLIENTS, "bitget", TickerClient)
+    p = await make_purchase(db, user, bitget_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
     with caplog.at_level(logging.INFO, logger="autobuy.exchange_client"):
         await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
     tx = (await tx_for(db, p))[0]
@@ -318,16 +327,16 @@ async def test_dry_run_prices_at_live_best_ask_with_no_rounding(db, user, binanc
     assert any("dry-run priced BTCUSDT at ask 77042.84" in r.getMessage() for r in caplog.records)
 
 
-async def test_dry_run_fails_closed_when_no_live_price(db, user, binance_key, monkeypatch):
-    from api.services import binance_client as bc
+async def test_dry_run_fails_closed_when_no_live_price(db, user, bitget_key, monkeypatch):
+    from api.services import exchange_client as bc
 
     class NoPrice:
         def __init__(self, *a, **k): pass
         @staticmethod
         def spot_symbol(b, q): return f"{b}{q}"
         def get_ticker(self, symbol): return {"last": None, "ask": None, "bid": None, "ts": None}
-    monkeypatch.setattr(bc, "_LegacyClient", NoPrice)
-    p = await make_purchase(db, user, binance_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
+    monkeypatch.setitem(bc.LEGACY_CLIENTS, "bitget", NoPrice)
+    p = await make_purchase(db, user, bitget_key, amount_usd=15, purchase_type="dca", next_execution=NOW)
     counts = await ps.execute_due_purchases(db, now=NOW, gateway=ps.ExchangeClientGateway(), dry_run=True)
     assert counts["failed"] == 1
     tx = (await tx_for(db, p))[0]

@@ -1,3 +1,9 @@
+"""Fixtures for tests/api/: HTTP-level tests of one router or service.
+
+Rate limiting is off, the DB pool is disabled (pooled asyncpg connections pin
+to one event loop) and no real email can be sent. See the docstring in
+tests/conftest.py for the tests/ vs tests/api/ rule.
+"""
 import os
 os.environ.setdefault("RATE_LIMIT_ENABLED", "0")
 os.environ.setdefault("AUTOBUY_DB_POOL", "null")  # pooled conns pin to one event loop
@@ -70,7 +76,8 @@ async def make_autobuy_purchase(db, user, crypto="BTC", amount_usd=50.0, purchas
     fields = dict(user_id=user.id, exchange_account_id=key.id if key is not None else None,
                   crypto_symbol=crypto, amount_usd=amount_usd, frequency="weekly",
                   wallet_address=WALLETS.get(crypto, "0x52908400098527886E0F7030069857D2E4169EE7"),
-                  blockchain_network="mainnet", purchase_type=purchase_type, status="active",
+                  blockchain_network={"BTC": "BTC", "SOL": "SOL"}.get(crypto, "ERC20"),
+                  purchase_type=purchase_type, status="active",
                   next_execution=utcnow())
     fields.update(overrides)
     p = Purchase(**fields)

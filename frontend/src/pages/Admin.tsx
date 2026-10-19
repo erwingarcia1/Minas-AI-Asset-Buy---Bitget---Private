@@ -3,13 +3,14 @@ import { Navigate } from "react-router-dom";
 import { adminAPI } from "@/api/endpoints";
 import AlertMonitor from "@/components/Admin/AlertMonitor";
 import TransactionLog from "@/components/Admin/TransactionLog";
+import ReviewQueue from "@/components/Admin/ReviewQueue";
 import UserManagement from "@/components/Admin/UserManagement";
 import { Alert, Loading } from "@/components/Common";
 import { useAsync } from "@/hooks/useAsync";
 import { useAuth } from "@/hooks/useAuth";
 import { fmtUsdt } from "@/utils/format";
 
-const TABS = ["Overview", "Users", "Transactions", "Alerts"] as const;
+const TABS = ["Overview", "Users", "Transactions", "Review", "Alerts"] as const;
 type Tab = (typeof TABS)[number];
 
 /**
@@ -36,6 +37,7 @@ export default function Admin() {
       {tab === "Overview" && <Overview />}
       {tab === "Users" && <UserManagement />}
       {tab === "Transactions" && <TransactionLog />}
+      {tab === "Review" && <ReviewQueue />}
       {tab === "Alerts" && <AlertMonitor />}
     </div>
   );
@@ -50,14 +52,36 @@ function Overview() {
     ["Signups 7d", stats.signups_7d], ["Invested", fmtUsdt(stats.total_invested_usdt)], ["Volume 7d", fmtUsdt(stats.volume_7d_usdt)],
     ["Transactions", stats.total_transactions], ["Failed 24h", stats.failed_transactions_24h],
   ];
+  const days = stats.signups_by_day ?? [];
+  const peak = Math.max(1, ...days.map((d) => d.count));
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="admin-overview">
-      {cells.map(([label, value]) => (
-        <div key={label} className="card">
-          <p className="text-sm text-slate-500">{label}</p>
-          <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
-        </div>
-      ))}
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="admin-overview">
+        {cells.map(([label, value]) => (
+          <div key={label} className="card">
+            <p className="text-sm text-slate-500">{label}</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
+          </div>
+        ))}
+      </div>
+      {days.length > 0 && (
+        <section className="card" aria-label="Signups per day" data-testid="signups-by-day">
+          <div className="flex items-baseline justify-between">
+            <h2 className="font-semibold">Signups per day</h2>
+            <span className="text-xs text-slate-500">last 14 days, UTC · a leaked invite code shows here first</span>
+          </div>
+          <ol className="mt-3 flex items-end gap-1" style={{ height: 72 }}>
+            {days.map((d) => (
+              <li key={d.day} className="flex flex-1 flex-col items-center justify-end" title={`${d.day}: ${d.count}`}>
+                <span className="text-[10px] text-slate-600">{d.count}</span>
+                <span aria-hidden className="w-full rounded-t bg-brand-500" style={{ height: `${Math.max(2, Math.round((d.count / peak) * 48))}px` }} />
+                <span className="sr-only">{d.day}: {d.count} signups</span>
+                <span aria-hidden className="mt-1 text-[10px] text-slate-400">{d.day.slice(8)}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </div>
   );
 }
