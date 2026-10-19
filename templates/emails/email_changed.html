@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}The email address on your {{ app_name }} account was changed{% endblock %}
+{% block body %}
+<p>The email address on your {{ app_name }} account was changed to {{ new_email_masked }} on {{ when }}.</p>
+<p>From now on, sign-in and security notices go to the new address; this is the last message sent to this one.</p>
+<p>If this was you, there is nothing else to do.</p>
+<p>If this was not you, {% if support_email %}contact {{ support_email }}{% else %}contact support{% endif %} right away.</p>
+{% endblock %}

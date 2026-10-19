@@ -1,0 +1,7 @@
+The email address on your {{ app_name }} account was changed to {{ new_email_masked }} on {{ when }}.
+
+From now on, sign-in and security notices go to the new address; this is the last message sent to this one.
+
+If this was you, there is nothing else to do.
+
+If this was not you, {% if support_email %}contact {{ support_email }}{% else %}contact support{% endif %} right away.

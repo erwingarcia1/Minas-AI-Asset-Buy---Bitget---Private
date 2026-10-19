@@ -17,7 +17,7 @@ from api.routes.user import UTCModel, get_current_user
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from api.services.rate_limit import limiter, is_locked_out, register_failed_login, clear_failed_logins, user_or_ip_key
-from api.services import twofactor
+from api.services import guardian_identity, twofactor
 
 import hashlib
 import json
@@ -342,6 +342,14 @@ def _require_csrf(request: Request) -> None:
         raise _csrf_failed(request, reason)
 
 
+def _refused(exc: HTTPException) -> JSONResponse:
+    """The response FastAPI's handler would send for `exc`, built here so a
+    background task can ride on it: a raised exception drops the request's
+    background tasks, a returned response keeps them. Same status, body and
+    headers either way, so the two kinds of refusal are indistinguishable."""
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
 def _start_session(response: Response, user_id: str) -> TokenResponse:
     """Access token for the body (memory only) + refresh/CSRF cookies."""
     access: Token = create_access_token(user_id)
@@ -427,7 +435,8 @@ async def register(request: Request, response: Response, payload: RegisterReques
                               "description": "Password accepted; the account has two-factor authentication on. "
                                              "No session yet and no cookies: finish at /login/mfa."}})
 @limiter.limit("5/minute")
-async def login(request: Request, response: Response, payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, response: Response, payload: LoginRequest, background: BackgroundTasks,
+                db: AsyncSession = Depends(get_db)):
     """Authenticate with email/password. The body carries the short-lived access
     token (keep it in memory) and a CSRF token; the refresh token is set as an
     httpOnly cookie scoped to /api/auth. An account with two-factor
@@ -442,14 +451,25 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
         )
     result = await db.execute(select(User).where(User.email == payload.email.lower()))
     user = result.scalar_one_or_none()
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid email or password",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if user is not None and user.password_reset_required:
+        # No password yet (an account migrated from Minas AI Guardian, or created by an admin):
+        # refused exactly like a wrong password - the same hash check for uniform timing, the
+        # same lockout counter, the same answer - and the set-password link is re-sent, at
+        # most once an hour (api/services/guardian_identity.py).
+        verify_password(payload.password, user.password_hash)
+        logger.info("login refused: password not set yet", extra={"user_id": str(user.id)})
+        await register_failed_login(payload.email)
+        background.add_task(guardian_identity.maybe_send_activation, user)
+        return _refused(invalid)
     if user is None or not verify_password(payload.password, user.password_hash):
         logger.warning("failed login attempt", extra={"email": payload.email.lower()})
         await register_failed_login(payload.email)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        return _refused(invalid)
     if await twofactor.is_enabled(db, user.id):
         # The password alone does not finish this sign-in, so it does not clear the
         # failed-login counter either: wrong codes at /login/mfa count into the same
@@ -557,6 +577,12 @@ async def login_mfa(request: Request, response: Response, payload: MfaLoginReque
         raise start_again
     if user.suspended:
         raise HTTPException(status_code=403, detail="Account suspended — contact support")
+    if user.password_reset_required:
+        # see login(): an account without a password cannot finish a sign-in either
+        logger.info("login refused at the second step: password not set yet", extra={"user_id": str(user.id)})
+        await register_failed_login(user.email)
+        background.add_task(guardian_identity.maybe_send_activation, user)
+        return _refused(start_again)
     if not await twofactor.is_enabled(db, user.id):
         raise start_again
     locked_for = await is_locked_out(user.email)
@@ -799,13 +825,15 @@ def _password_version(password_hash: str) -> str:
     return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
 
 
-def make_password_reset_token(user: User) -> str:
-    """One-hour JWT (type=password_reset) bound to the user's current password.
+def make_password_reset_token(user: User, ttl: timedelta = PASSWORD_RESET_TTL) -> str:
+    """JWT (type=password_reset) bound to the user's current password: one hour
+    for a forgotten password, `ttl` for the seven-day set-password link of an
+    account provisioned without one (api/services/guardian_identity.py).
     Rejected by the bearer guard, so a leaked link cannot log anyone in."""
     now = datetime.now(timezone.utc)
     return jwt.encode({"sub": str(user.id), "type": "password_reset", "jti": uuid4().hex,
                        "pv": _password_version(user.password_hash),
-                       "iat": now, "exp": now + PASSWORD_RESET_TTL},
+                       "iat": now, "exp": now + ttl},
                       settings.secret_key, algorithm=settings.algorithm)
 
 
@@ -925,6 +953,7 @@ async def reset_password(request: Request, response: Response, payload: ResetPas
 
     from api.services import wallet_hold
     user.password_hash = hash_password(payload.new_password)
+    user.password_reset_required = False   # a provisioned account now has a password of its own
     user.password_changed_at = datetime.now(timezone.utc)
     hold_until = wallet_hold.start_hold(user, "password_reset", user.password_changed_at)
     await db.commit()

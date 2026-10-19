@@ -27,6 +27,8 @@ def test_all_templates_render_both_formats():
                         "count": 1, "count_words": "one", "needed_usdt": "10.10", "balance_usdt": "3.50", "shortfall_usdt": "6.60",
                         "exchange": "Bitget", "purchases_url": "https://x.test/purchases",
                         "unsubscribe_url": "https://x.test/settings/notifications"},
+        "guardian_activate": {"link": "https://x.test/reset-password?token=abc", "days": 7},
+        "email_changed": {"new_email_masked": "ne…@example.com", "when": "2026-10-19 12:00:00 UTC"},
     }
     assert set(contexts) == TEMPLATES
     for name, ctx in contexts.items():

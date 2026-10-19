@@ -21,7 +21,10 @@ _env = Environment(
 )
 
 TEMPLATES = {"welcome", "first_purchase", "purchase_summary",
-             "kyc_approved", "kyc_rejected", "downtime_alert", "milestone", "low_balance", "unified_account", "unified_ready", "unified_step"}
+             "kyc_approved", "kyc_rejected", "downtime_alert", "milestone", "low_balance", "unified_account", "unified_ready", "unified_step",
+             # security notices (v0.9.2): the set-password link of an account provisioned without a
+             # password, and the notice to a replaced email address
+             "guardian_activate", "email_changed"}
 
 
 def render(template: str, **context) -> tuple:
