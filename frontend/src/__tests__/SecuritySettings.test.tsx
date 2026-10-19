@@ -9,7 +9,8 @@ vi.mock("@/api/endpoints", () => ({
 }));
 vi.mock("@/api/client", () => ({ errorMessage: (e: unknown) => (e instanceof Error ? e.message : "Request failed") }));
 const signOutEverywhere = vi.fn().mockResolvedValue(undefined);
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ signOutEverywhere }) }));
+const refreshProfile = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ signOutEverywhere, refreshProfile }) }));
 import { twoFactorAPI } from "@/api/endpoints";
 
 const OFF = { enabled: false, enrolled_at: null, recovery_codes_remaining: 0, pending_enrolment: false };
@@ -37,9 +38,11 @@ describe("Security settings: two-factor authentication", () => {
     await waitFor(() => expect(twoFactorAPI.enrol).toHaveBeenCalledWith("Sess-Passw0rd!1"));
     expect(await screen.findByTestId("totp-secret")).toHaveTextContent("JBSWY3DPEHPK3PXP");
     await screen.findByTestId("qr");
+    expect(refreshProfile).not.toHaveBeenCalled();   // nothing has changed yet
     fireEvent.change(screen.getByLabelText("Code from the app"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
     await waitFor(() => expect(twoFactorAPI.confirm).toHaveBeenCalledWith("123456"));
+    await waitFor(() => expect(refreshProfile).toHaveBeenCalledTimes(1));   // the change-email form reads mfa_enabled from the profile
     const codes = await screen.findByTestId("recovery-codes");
     expect(codes.querySelectorAll("li")).toHaveLength(10);
     expect(codes).toHaveTextContent("AAAA-BBBB-000");
@@ -75,6 +78,7 @@ describe("Security settings: two-factor authentication", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate new codes" }));
     await waitFor(() => expect(twoFactorAPI.regenerateCodes).toHaveBeenCalledWith("654321"));
     await screen.findByTestId("recovery-codes");
+    expect(refreshProfile).not.toHaveBeenCalled();   // new codes do not change the flag
     fireEvent.click(screen.getByRole("button", { name: "I have saved them" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Turn off two-factor" }));
@@ -88,6 +92,22 @@ describe("Security settings: two-factor authentication", () => {
     fireEvent.click(screen.getByRole("button", { name: "Turn off two-factor" }));
     await waitFor(() => expect(twoFactorAPI.disable).toHaveBeenCalledWith("pw", { recovery_code: "AAAA-BBBB-0001" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Two-factor authentication is off");
+    await waitFor(() => expect(refreshProfile).toHaveBeenCalledTimes(1));   // off: the profile follows too
+  });
+
+  it("a profile refresh that fails leaves the success in place: two-factor did change", async () => {
+    vi.mocked(twoFactorAPI.status).mockResolvedValueOnce(ON as never).mockResolvedValue(OFF as never);
+    vi.mocked(twoFactorAPI.disable).mockResolvedValue(undefined as never);
+    refreshProfile.mockRejectedValueOnce(new Error("offline"));
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Turn off two-factor" }));
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "pw" } });
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Turn off two-factor" }));
+    await waitFor(() => expect(refreshProfile).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("status")).toHaveTextContent("Two-factor authentication is off");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByTestId("two-factor-status")).toHaveTextContent("Two-factor authentication: off");
   });
 
   it("sign out everywhere asks first, then calls through", async () => {

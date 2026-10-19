@@ -46,6 +46,8 @@ describe("password reset", () => {
     vi.mocked(authAPI.validateResetToken).mockResolvedValue({ valid: false });
     at("/reset-password?token=used-token", <ResetPassword />);
     await waitFor(() => expect(screen.getByText(/no longer valid/)).toBeInTheDocument());
+    expect(screen.getByText(/This link has expired or was already used\. Request a new one from Forgot password\./)).toBeInTheDocument();
+    expect(screen.queryByText(/1 hour/)).toBeNull();   // the same page serves the 7-day Guardian activation link
     expect(screen.queryByLabelText(/^New password/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Request a new link/ })).toBeInTheDocument();
     expect(authAPI.resetPassword).not.toHaveBeenCalled();

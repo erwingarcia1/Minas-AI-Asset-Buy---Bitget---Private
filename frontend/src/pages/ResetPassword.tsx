@@ -51,8 +51,9 @@ export default function ResetPassword() {
   }
 
   if (!token || expired) {
+    // reached by the 1-hour reset link and by the 7-day Guardian activation link alike: no lifetime in the sentence
     return (
-      <AuthCard title="This reset link is no longer valid" subtitle="Links expire after 1 hour and can only be used once."
+      <AuthCard title="This reset link is no longer valid" subtitle="This link has expired or was already used. Request a new one from Forgot password."
         footer={<Link className="text-brand-600 hover:underline" to="/login">Back to sign in</Link>}>
         <Link to="/forgot-password" className="btn-primary w-full">Request a new link</Link>
       </AuthCard>

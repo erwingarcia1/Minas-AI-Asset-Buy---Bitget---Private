@@ -1,9 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import App from "@/App";
 import { FeatureRoute } from "@/components/Common/FeatureRoute";
 import { Sidebar } from "@/components/Layout/Sidebar";
 import Settings from "@/pages/Settings";
+import { useAuthStore } from "@/store/authStore";
 
 vi.mock("@/api/endpoints", () => ({
   authAPI: { changePassword: vi.fn() },
@@ -20,6 +22,10 @@ vi.mock("@/api/endpoints", () => ({
 }));
 let currentUser: Record<string, unknown> | null = null;   // null = the profile has not arrived yet
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: currentUser, logout: vi.fn(), signOutEverywhere: vi.fn(), refreshProfile: vi.fn() }) }));
+// for the App-level tests: no session bootstrap against the network, a bare shell instead of navbar and sidebar, a marker for the dashboard
+vi.mock("@/api/client", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/api/client")>()), bootstrapSession: vi.fn().mockResolvedValue(true) }));
+vi.mock("@/components/Layout", async () => { const { Outlet } = await import("react-router-dom"); return { MainContainer: () => <Outlet /> }; });
+vi.mock("@/pages/Dashboard", () => ({ default: () => <p>dashboard page</p> }));
 import { guardianAPI } from "@/api/endpoints";
 
 const USER = { id: "u1", email: "me@example.com", kyc_status: "verified", created_at: "2026-09-01T00:00:00Z" };
@@ -113,5 +119,35 @@ describe("Settings page: the monitoring section follows the flag", () => {
     render(<MemoryRouter initialEntries={["/settings"]}><Settings /></MemoryRouter>);
     const section = await screen.findByRole("region", { name: "Guardian: exchange monitoring" });
     expect(section.className).not.toMatch(/ring-2/);
+  });
+});
+
+describe("App: the monitoring route itself is behind FeatureRoute", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useAuthStore.setState({ accessToken: "acc", csrfToken: "csrf", status: "authenticated" });   // ProtectedRoute reads the store; FeatureRoute reads the (mocked) profile
+  });
+  afterEach(() => {
+    act(() => useAuthStore.setState({ accessToken: null, csrfToken: null, status: "unknown", user: null }));   // the App is still mounted here
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("sends a signed-in user without the feature to the dashboard instead of rendering Settings", async () => {
+    currentUser = { ...USER, guardian_enabled: false };
+    window.history.replaceState({}, "", "/settings/monitoring");
+    render(<App />);
+    expect(await screen.findByText("dashboard page")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/dashboard");
+    expect(screen.queryByText("Exchange API keys")).toBeNull();
+    expect(guardianAPI.accounts).not.toHaveBeenCalled();
+  });
+
+  it("renders Settings with the monitoring section when the feature is on", async () => {
+    currentUser = { ...USER, guardian_enabled: true };
+    window.history.replaceState({}, "", "/settings/monitoring");
+    render(<App />);
+    expect(await screen.findByRole("region", { name: "Guardian: exchange monitoring" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/settings/monitoring");
+    expect(screen.queryByText("dashboard page")).toBeNull();
   });
 });

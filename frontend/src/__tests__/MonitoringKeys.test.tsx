@@ -110,16 +110,55 @@ describe("Monitoring keys: adding an account", () => {
     fireEvent.change(screen.getByLabelText("Account type"), { target: { value: "sub_account" } });
     fireEvent.change(screen.getByLabelText("Read-only API key"), { target: { value: "by_key" } });
     fireEvent.change(screen.getByLabelText("API secret"), { target: { value: "by_secret" } });
+    const add = screen.getByRole("button", { name: "Add account" });
+    expect(add).toBeEnabled();
+    expect(screen.getByLabelText("Mobile number for SMS (optional)")).toHaveAttribute("aria-required", "false");
     fireEvent.click(screen.getByLabelText(/Text me about critical alerts/));
-    fireEvent.change(screen.getByLabelText("Mobile number for SMS (optional)"), { target: { value: " +1 555 010 0100 " } });
+    expect(add).toBeDisabled();   // SMS on: the number is no longer optional, and the label says so
+    const phone = screen.getByLabelText("Mobile number for SMS (required)");
+    expect(phone).toHaveAttribute("aria-required", "true");
+    fireEvent.change(phone, { target: { value: "   " } });
+    expect(add).toBeDisabled();
+    fireEvent.change(phone, { target: { value: " +1 555 010 0100 " } });
+    expect(add).toBeEnabled();
     fireEvent.change(screen.getByLabelText("Backup email (optional)"), { target: { value: "Backup@Example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    fireEvent.click(add);
     await waitFor(() => expect(guardianAPI.addAccount).toHaveBeenCalledWith({
       exchange: "bybit", api_key: "by_key", api_secret: "by_secret", name: "Bybit", topology: "sub_account", sms_alerts_enabled: true,
       alert_phone: "+1 555 010 0100", alert_email_secondary: "backup@example.com",
     }));
     expect(vi.mocked(guardianAPI.addAccount).mock.calls[0][0]).not.toHaveProperty("passphrase");
     await waitFor(() => expect(screen.getByLabelText(/Text me about critical alerts/)).not.toBeChecked());   // back to the default
+    expect(screen.getByLabelText("Mobile number for SMS (optional)")).toHaveValue("");
+  });
+
+  it("unticking SMS makes the number optional again", async () => {
+    render(<MonitoringKeys />);
+    await screen.findByText("No monitored accounts yet.");
+    fillBitget();
+    const add = screen.getByRole("button", { name: "Add account" });
+    fireEvent.click(screen.getByLabelText(/Text me about critical alerts/));
+    expect(add).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/Text me about critical alerts/));
+    expect(screen.getByLabelText("Mobile number for SMS (optional)")).toBeInTheDocument();
+    expect(add).toBeEnabled();
+  });
+
+  it("a backup email that is not an address is refused in plain words before anything is sent", async () => {
+    vi.mocked(guardianAPI.addAccount).mockResolvedValue({ ...WATCHING, id: 11, name: "Savings", baseline_status: "seeding", last_success_at: null } as never);
+    render(<MonitoringKeys />);
+    await screen.findByText("No monitored accounts yet.");
+    fillBitget();
+    fireEvent.change(screen.getByLabelText("Backup email (optional)"), { target: { value: "backup@nowhere" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a valid backup email address, or leave that field empty.");
+    expect(guardianAPI.addAccount).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Backup email (optional)")).toHaveValue("backup@nowhere");   // nothing typed is lost
+    fireEvent.change(screen.getByLabelText("Backup email (optional)"), { target: { value: " Backup@Example.com " } });
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    await waitFor(() => expect(guardianAPI.addAccount).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(guardianAPI.addAccount).mock.calls[0][0]).toMatchObject({ alert_email_secondary: "backup@example.com" });
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   it.each([["okx", true], ["binance", false]])("%s: the passphrase field is shown only when the exchange has one (%s)", async (exchange, hasPhrase) => {
@@ -256,8 +295,10 @@ describe("Monitoring keys: credentials and copy", () => {
       expect(el.id).not.toMatch(/email|user|login|password|pass$|secret/i);
       expect(el.getAttribute("name")).not.toMatch(/email|user|login|password|pass$|secret/i);
     }
-    for (const label of ["Read-only API key", "API secret", "New read-only API key", "New API secret"]) expect(screen.getByLabelText(label)).toHaveClass("secret-masked");
+    for (const label of ["Read-only API key", "API secret", "Passphrase", "New read-only API key", "New API secret", "New passphrase"]) expect(screen.getByLabelText(label)).toHaveClass("secret-masked");
     expect(screen.getByRole("button", { name: "Show API secret" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show Passphrase" })).toBeInTheDocument();   // the passphrase is a credential too: masked, with the same show/hide control
+    expect(screen.getByRole("button", { name: "Show New passphrase" })).toBeInTheDocument();
     expect(container.querySelectorAll("form")).toHaveLength(0);
     expect(container.querySelectorAll('input[type="password"]')).toHaveLength(0);
     for (const button of Array.from(container.querySelectorAll("button"))) expect(button).toHaveAttribute("type", "button");

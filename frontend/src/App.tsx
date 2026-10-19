@@ -3,7 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { bootstrapSession, csrfToken } from "@/api/client";
 import { useAuthStore } from "@/store/authStore";
 import { purgeLegacyTokenStorage } from "@/store/authStore";
-import { ErrorBoundary, Loading, ProtectedRoute, PublicOnlyRoute } from "@/components/Common";
+import { ErrorBoundary, FeatureRoute, Loading, ProtectedRoute, PublicOnlyRoute } from "@/components/Common";
 import { MainContainer } from "@/components/Layout";
 
 const Login = lazy(() => import("@/pages/Login"));
@@ -58,7 +58,10 @@ export default function App() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/notifications" element={<Settings />} />
                 <Route path="/settings/security" element={<Settings />} />
-                <Route path="/settings/monitoring" element={<Settings />} />
+                <Route element={<FeatureRoute />}>
+                  {/* Guardian off for this user: the deep link goes to the dashboard; the Settings page keeps its own guard too */}
+                  <Route path="/settings/monitoring" element={<Settings />} />
+                </Route>
                 <Route path="/admin" element={<Admin />} />
                 <Route path="*" element={<NotFound />} />
               </Route>

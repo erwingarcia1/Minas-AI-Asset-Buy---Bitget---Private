@@ -25,7 +25,7 @@ function factorFrom(code: string, useRecovery: boolean): MfaFactor {
 
 /** Two-factor authentication and "sign out everywhere". */
 const SecuritySettings = forwardRef<HTMLElement, { highlight?: boolean }>(function SecuritySettings({ highlight }, ref) {
-  const { signOutEverywhere } = useAuth();
+  const { signOutEverywhere, refreshProfile } = useAuth();
   const status = useAsync(() => twoFactorAPI.status());
   const [view, setView] = useState<View>("idle");
   const [msg, setMsg] = useState<Msg>(null);
@@ -70,6 +70,7 @@ const SecuritySettings = forwardRef<HTMLElement, { highlight?: boolean }>(functi
       setCodes(r.recovery_codes); setEnrolment(null); setCode(""); setView("codes");
       setMsg({ kind: "success", text: "Two-factor authentication is on. Save your recovery codes now: they are shown only once." });
       await status.reload();
+      await refreshProfile().catch(() => undefined);   // the profile carries mfa_enabled, which the change-email form reads; a failed refresh does not undo the change
     });
   }
 
@@ -90,6 +91,7 @@ const SecuritySettings = forwardRef<HTMLElement, { highlight?: boolean }>(functi
       reset("idle");
       setMsg({ kind: "success", text: "Two-factor authentication is off. Signing in now needs only your password." });
       await status.reload();
+      await refreshProfile().catch(() => undefined);   // same: the rest of Settings stops asking for a code
     });
   }
 

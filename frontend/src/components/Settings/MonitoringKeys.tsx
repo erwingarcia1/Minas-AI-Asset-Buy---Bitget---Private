@@ -4,8 +4,8 @@ import { errorMessage } from "@/api/client";
 import { Alert, Loading, SecretInput } from "@/components/Common";
 import { useAsync } from "@/hooks/useAsync";
 import type { GuardianAccount, GuardianAccountCreate, GuardianExchange, GuardianTopology } from "@/types";
-import { NO_AUTOFILL } from "@/utils/noAutofill";
 import { capitalize, fmtUtc } from "@/utils/format";
+import { isEmail } from "@/utils/validation";
 
 type Msg = { kind: "error" | "success" | "info"; text: string } | null;
 type Panel = { id: number; kind: "replace" | "remove" } | null;
@@ -51,7 +51,8 @@ const MonitoringKeys = forwardRef<HTMLElement, { highlight?: boolean }>(function
 
   const rows = accounts.data ?? [];
   const needsPassphrase = NEEDS_PASSPHRASE.has(exchange);
-  const canAdd = !busy && name.trim().length > 0 && apiKey.length > 0 && apiSecret.length > 0 && (!needsPassphrase || passphrase.length > 0);
+  // SMS alerts go to the mobile number, so ticking the box makes the number required
+  const canAdd = !busy && name.trim().length > 0 && apiKey.length > 0 && apiSecret.length > 0 && (!needsPassphrase || passphrase.length > 0) && (!sms || phone.trim().length > 0);
 
   function openPanel(id: number, kind: "replace" | "remove") {
     setPanel({ id, kind }); setPanelMsg(null); setNewKey(""); setNewSecret(""); setNewPhrase("");
@@ -68,13 +69,16 @@ const MonitoringKeys = forwardRef<HTMLElement, { highlight?: boolean }>(function
   async function add() {
     // no <form>: the key fields are never submitted natively, so the browser has no
     // submission to attach a "save password" prompt to (same as the exchange-key form)
-    setMsg(null); setBusy(true);
+    setMsg(null);
+    const backup = backupEmail.trim().toLowerCase();
+    if (backup && !isEmail(backup)) return setMsg({ kind: "error", text: "Enter a valid backup email address, or leave that field empty." });   // checked here so the server's field-level 422 never reaches the customer
+    setBusy(true);
     const body: GuardianAccountCreate = {
       exchange, api_key: apiKey, api_secret: apiSecret,
       ...(needsPassphrase ? { passphrase } : {}),
       name: name.trim(), topology, sms_alerts_enabled: sms,
       ...(phone.trim() ? { alert_phone: phone.trim() } : {}),
-      ...(backupEmail.trim() ? { alert_email_secondary: backupEmail.trim().toLowerCase() } : {}),
+      ...(backup ? { alert_email_secondary: backup } : {}),
     };
     try {
       const created = await guardianAPI.addAccount(body);
@@ -164,7 +168,7 @@ const MonitoringKeys = forwardRef<HTMLElement, { highlight?: boolean }>(function
                       <SecretInput id={`monitoring_replacement_private_${a.id}`} name={`monitoring_replacement_private_${a.id}`} label="New API secret" value={newSecret} onChange={setNewSecret} /></div>
                     {NEEDS_PASSPHRASE.has(a.exchange) && (
                       <div><label className="label" htmlFor={`monitoring_replacement_phrase_${a.id}`}>New passphrase</label>
-                        <input id={`monitoring_replacement_phrase_${a.id}`} name={`monitoring_replacement_phrase_${a.id}`} className="input" type="text" value={newPhrase} onChange={(e) => setNewPhrase(e.target.value)} {...NO_AUTOFILL} /></div>
+                        <SecretInput id={`monitoring_replacement_phrase_${a.id}`} name={`monitoring_replacement_phrase_${a.id}`} label="New passphrase" value={newPhrase} onChange={setNewPhrase} /></div>
                     )}
                     {panelMsg && <div className="sm:col-span-2"><Alert kind={panelMsg.kind}>{panelMsg.text}</Alert></div>}
                     <div className="flex gap-2 sm:col-span-2">
@@ -213,7 +217,7 @@ const MonitoringKeys = forwardRef<HTMLElement, { highlight?: boolean }>(function
           </select></div>
         {needsPassphrase && (
           <div><label className="label" htmlFor="monitoring_credential_phrase">Passphrase</label>
-            <input id="monitoring_credential_phrase" name="monitoring_credential_phrase" className="input" type="text" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} {...NO_AUTOFILL} /></div>
+            <SecretInput id="monitoring_credential_phrase" name="monitoring_credential_phrase" label="Passphrase" value={passphrase} onChange={setPassphrase} /></div>
         )}
         <div><label className="label" htmlFor="monitoring_credential_public">Read-only API key</label>
           <SecretInput id="monitoring_credential_public" name="monitoring_credential_public" label="Read-only API key" value={apiKey} onChange={setApiKey} /></div>
@@ -224,8 +228,8 @@ const MonitoringKeys = forwardRef<HTMLElement, { highlight?: boolean }>(function
           <label htmlFor="monitoring-sms" className="text-sm"><span className="font-medium text-slate-900">Text me about critical alerts (SMS)</span>
             <span className="block text-slate-500">Off by default. Needs the mobile number below.</span></label>
         </div>
-        <div><label className="label" htmlFor="monitoring-phone">Mobile number for SMS (optional)</label>
-          <input id="monitoring-phone" className="input" type="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 555 010 0100" /></div>
+        <div><label className="label" htmlFor="monitoring-phone">{sms ? "Mobile number for SMS (required)" : "Mobile number for SMS (optional)"}</label>
+          <input id="monitoring-phone" className="input" type="tel" autoComplete="tel" aria-required={sms} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 555 010 0100" /></div>
         <div><label className="label" htmlFor="monitoring-backup-email">Backup email (optional)</label>
           <input id="monitoring-backup-email" className="input" type="email" autoComplete="off" value={backupEmail} onChange={(e) => setBackupEmail(e.target.value)} /></div>
         <div className="sm:col-span-2"><button className="btn-primary" type="button" disabled={!canAdd} onClick={() => void add()}>Add account</button></div>
