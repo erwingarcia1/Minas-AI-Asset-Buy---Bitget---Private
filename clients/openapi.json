@@ -218,7 +218,7 @@
           "auth"
         ],
         "summary": "Verify",
-        "description": "Verify an access token; returns validity and the user id it belongs to.",
+        "description": "Verify an access token; returns validity and the user id it belongs to.\n`valid: false` for the two-factor pending token and for a password-reset\ntoken (the set-password link included): neither is a credential.",
         "operationId": "verify_api_auth_verify_post",
         "requestBody": {
           "content": {
@@ -466,7 +466,7 @@
           "public"
         ],
         "summary": "Public Meta",
-        "description": "Supported coins and exchanges, the support address and the server IP to\nallowlist on an exchange API key. Anonymous, cacheable for 5 minutes.",
+        "description": "Supported coins and exchanges, the support address, the server IP to\nallowlist on an exchange API key, and whether Guardian is switched on for\nthis deployment (`guardian_enabled`, the raw flag). Anonymous, cacheable\nfor 5 minutes.",
         "operationId": "public_meta_api_public_meta_get",
         "responses": {
           "200": {
@@ -690,13 +690,386 @@
         ]
       }
     },
+    "/api/guardian/accounts": {
+      "get": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "List Accounts",
+        "description": "The caller's monitored accounts, oldest first, each with the engine's\nlast successful check (`last_success_at`, UTC, null until the first).\nRemoved accounts are not listed.",
+        "operationId": "list_accounts_api_guardian_accounts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GuardianAccountOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Accounts Api Guardian Accounts Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "Add Account",
+        "description": "Start watching an exchange account with a separate read-only key.\n\nThe key is checked against the exchange's own permission report before\nanything is stored. A Bitget or OKX key without its passphrase is refused\nas a body error (422) with a plain message before the exchange is asked.\nRefused with 400 and a plain message: an eleventh account, one of the\ncaller's AutoBuy purchase keys, and a key that can trade, withdraw or\ntransfer (or cannot read the account). Refused with 409: an exchange account this user already watches (the message names the\nexisting account). On success the account is stored with its first\nsnapshot still being taken (`baseline_status: seeding`), which finishes in\nthe background; the response never carries key material. 3 a minute.",
+        "operationId": "add_account_api_guardian_accounts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardianAccountCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/guardian/accounts/{account_id}": {
+      "get": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "Get Account",
+        "description": "One of the caller's monitored accounts. 404 for anyone else's, for a\nremoved one and for an unknown id alike.",
+        "operationId": "get_account_api_guardian_accounts__account_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "Update Account",
+        "description": "Change where this account's alerts go (`alert_phone`,\n`alert_email_secondary`, `alert_phone_secondary`, `telegram_handle`; null\nclears a field) and whether SMS alerts are sent (`sms_alerts_enabled`).\nThe account owner's sign-in email always stays the primary destination.\nThe change is recorded on the account's activity by field name only.",
+        "operationId": "update_account_api_guardian_accounts__account_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardianAccountUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "Delete Account",
+        "description": "Remove this account: monitoring stops and the stored key material is\nscrubbed. The account's alert and event history is kept as its record\n(and the removal is added to it), but the account no longer appears in\nthis API. The same key may be added again later as a new account.",
+        "operationId": "delete_account_api_guardian_accounts__account_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guardian/accounts/{account_id}/key": {
+      "put": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "Replace Key",
+        "description": "Replace the monitoring key of one of the caller's accounts.\n\nThe new key must be read-only AND belong to the same exchange account as\nthe old one (a valid read-only key for a different account would leave\nthe real one unwatched); a Bitget or OKX account needs the new key's\npassphrase too, and one of the caller's AutoBuy purchase keys is refused,\nboth before the exchange is asked. A refusal is 400 with a plain message\nand nothing is changed; the refusals the engine pages Minas about (a key\nfor a different account, no recorded account id to check one against)\nare recorded. On success monitoring continues with the new key on the\nnext check and the change is recorded on the account's activity. 3 a\nminute.",
+        "operationId": "replace_key_api_guardian_accounts__account_id__key_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardianKeyReplace"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianKeyReplaceResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guardian/accounts/{account_id}/disable": {
+      "post": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "Disable Account",
+        "description": "Switch monitoring off for this account. The engine stops checking it\nfrom the next pass; the key stays stored so it can be switched back on.\nRecorded on the account's activity.",
+        "operationId": "disable_account_api_guardian_accounts__account_id__disable_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guardian/accounts/{account_id}/enable": {
+      "post": {
+        "tags": [
+          "guardian"
+        ],
+        "summary": "Enable Account",
+        "description": "Switch monitoring back on for this account. It is checked again from\nthe engine's next pass, with its baseline as it was. Recorded on the\naccount's activity.",
+        "operationId": "enable_account_api_guardian_accounts__account_id__enable_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/user/profile": {
       "get": {
         "tags": [
           "user"
         ],
         "summary": "Get Profile",
-        "description": "Return the authenticated user's own profile, including any active\nwallet-change hold (`wallet_hold_until`).",
+        "description": "Return the authenticated user's own profile, including any active\nwallet-change hold (`wallet_hold_until`), whether two-factor authentication\nis on (`mfa_enabled`) and whether Guardian is available to this account\n(`guardian_enabled`).",
         "operationId": "get_profile_api_user_profile_get",
         "responses": {
           "200": {
@@ -721,7 +1094,7 @@
           "user"
         ],
         "summary": "Update Profile",
-        "description": "Update the authenticated user's email and/or KYC status.",
+        "description": "Update the authenticated user's email address. Security notices go to\nthat address, so changing it needs `current_password`, plus the current\nauthenticator `code` when two-factor authentication is on, and the\nprevious address is told about the change. A wrong password or code\ncounts towards the sign-in lockout, and a locked account is refused with\n429 exactly as at /api/auth/login. 5 a minute. KYC status is owned by the\nKYC flow and is not writable here.",
         "operationId": "update_profile_api_user_profile_put",
         "requestBody": {
           "content": {
@@ -5459,6 +5832,390 @@
         "type": "object",
         "title": "ForgotPasswordResponse"
       },
+      "GuardianAccountCreate": {
+        "properties": {
+          "exchange": {
+            "type": "string",
+            "enum": [
+              "bitget",
+              "bybit",
+              "okx",
+              "binance"
+            ],
+            "title": "Exchange"
+          },
+          "api_key": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Api Key"
+          },
+          "api_secret": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Api Secret"
+          },
+          "passphrase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passphrase"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "description": "How the customer calls this account; the label is derived from it"
+          },
+          "topology": {
+            "type": "string",
+            "enum": [
+              "independent",
+              "sub_account"
+            ],
+            "title": "Topology",
+            "default": "independent"
+          },
+          "alert_phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Phone"
+          },
+          "alert_email_secondary": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Email Secondary"
+          },
+          "alert_phone_secondary": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Phone Secondary"
+          },
+          "telegram_handle": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram Handle"
+          },
+          "sms_alerts_enabled": {
+            "type": "boolean",
+            "title": "Sms Alerts Enabled",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "exchange",
+          "api_key",
+          "api_secret",
+          "name"
+        ],
+        "title": "GuardianAccountCreate",
+        "description": "POST /api/guardian/accounts. The key must be a separate read-only key,\nnever an AutoBuy purchase key; a Bitget or OKX key also needs its\npassphrase, and the body is refused with `PASSPHRASE_REQUIRED` without\nit, before the exchange is asked."
+      },
+      "GuardianAccountOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "exchange": {
+            "type": "string",
+            "title": "Exchange"
+          },
+          "topology": {
+            "type": "string",
+            "title": "Topology"
+          },
+          "account_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Mode"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "baseline_status": {
+            "type": "string",
+            "title": "Baseline Status"
+          },
+          "exchange_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Uid"
+          },
+          "sms_alerts_enabled": {
+            "type": "boolean",
+            "title": "Sms Alerts Enabled"
+          },
+          "alert_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Phone"
+          },
+          "alert_email_secondary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Email Secondary"
+          },
+          "alert_phone_secondary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Phone Secondary"
+          },
+          "telegram_handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram Handle"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "exchange",
+          "topology",
+          "status",
+          "baseline_status",
+          "sms_alerts_enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "GuardianAccountOut",
+        "description": "One monitored account as its owner sees it. There is no field for key\nmaterial or for the key fingerprint. Times are UTC."
+      },
+      "GuardianAccountUpdate": {
+        "properties": {
+          "alert_phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Phone"
+          },
+          "alert_email_secondary": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Email Secondary"
+          },
+          "alert_phone_secondary": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Phone Secondary"
+          },
+          "telegram_handle": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram Handle"
+          },
+          "sms_alerts_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sms Alerts Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "GuardianAccountUpdate",
+        "description": "PATCH /api/guardian/accounts/{id}: where alerts go and the SMS switch.\nA field sent as null clears it; one left out is not touched."
+      },
+      "GuardianKeyReplace": {
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Api Key"
+          },
+          "api_secret": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Api Secret"
+          },
+          "passphrase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passphrase"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "api_key",
+          "api_secret"
+        ],
+        "title": "GuardianKeyReplace",
+        "description": "PUT /api/guardian/accounts/{id}/key: a new read-only key for the SAME\nexchange account."
+      },
+      "GuardianKeyReplaceResult": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "GuardianKeyReplaceResult",
+        "description": "What a successful replacement answers. A refusal is a 400 whose\n`detail` is the plain-language message; the technical reason stays in\nthe log."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6441,6 +7198,30 @@
               }
             ],
             "title": "Email"
+          },
+          "current_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6485,6 +7266,11 @@
           "server_ip": {
             "type": "string",
             "title": "Server Ip"
+          },
+          "guardian_enabled": {
+            "type": "boolean",
+            "title": "Guardian Enabled",
+            "default": false
           }
         },
         "type": "object",
@@ -8684,6 +9470,16 @@
             "type": "boolean",
             "title": "Withdrawals Allowed",
             "default": false
+          },
+          "guardian_enabled": {
+            "type": "boolean",
+            "title": "Guardian Enabled",
+            "default": false
+          },
+          "mfa_enabled": {
+            "type": "boolean",
+            "title": "Mfa Enabled",
+            "default": false
           }
         },
         "type": "object",
@@ -9122,6 +9918,10 @@
     {
       "name": "security",
       "description": "Two-factor authentication (TOTP with recovery codes) and sign out everywhere."
+    },
+    {
+      "name": "guardian",
+      "description": "Guardian: read-only monitoring of the customer's own exchange accounts through separate read-only keys. It detects and tells; it never trades, withdraws or transfers. Every route answers 404 while the feature is off or hidden from the caller."
     },
     {
       "name": "user",

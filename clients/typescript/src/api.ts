@@ -26,6 +26,11 @@ import type {
   FillDeviation,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
+  GuardianAccountCreate,
+  GuardianAccountOut,
+  GuardianAccountUpdate,
+  GuardianKeyReplace,
+  GuardianKeyReplaceResult,
   HistoryResponse,
   InitiateResponse,
   IntegrationInfo,
@@ -214,6 +219,52 @@ export class UserApi {
   /** Get User By Id — `GET /api/user/{user_id}` */
   getUserById(userId: string): Promise<UserPublicProfile> {
     return this.http.request<UserPublicProfile>("GET", "/api/user/" + encodeURIComponent(String(userId)), { auth: true });
+  }
+
+}
+
+/** `guardian` endpoints. */
+export class GuardianApi {
+  constructor(private readonly http: HttpTransport) {}
+
+  /** List Accounts — `GET /api/guardian/accounts` */
+  listAccounts(): Promise<GuardianAccountOut[]> {
+    return this.http.request<GuardianAccountOut[]>("GET", "/api/guardian/accounts", { auth: true });
+  }
+
+  /** Add Account — `POST /api/guardian/accounts` */
+  addAccount(body: GuardianAccountCreate): Promise<GuardianAccountOut> {
+    return this.http.request<GuardianAccountOut>("POST", "/api/guardian/accounts", { body, auth: true });
+  }
+
+  /** Get Account — `GET /api/guardian/accounts/{account_id}` */
+  getAccount(accountId: number): Promise<GuardianAccountOut> {
+    return this.http.request<GuardianAccountOut>("GET", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)), { auth: true });
+  }
+
+  /** Update Account — `PATCH /api/guardian/accounts/{account_id}` */
+  updateAccount(accountId: number, body: GuardianAccountUpdate): Promise<GuardianAccountOut> {
+    return this.http.request<GuardianAccountOut>("PATCH", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)), { body, auth: true });
+  }
+
+  /** Delete Account — `DELETE /api/guardian/accounts/{account_id}` */
+  deleteAccount(accountId: number): Promise<unknown> {
+    return this.http.request<unknown>("DELETE", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)), { auth: true });
+  }
+
+  /** Replace Key — `PUT /api/guardian/accounts/{account_id}/key` */
+  replaceKey(accountId: number, body: GuardianKeyReplace): Promise<GuardianKeyReplaceResult> {
+    return this.http.request<GuardianKeyReplaceResult>("PUT", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)) + "/key", { body, auth: true });
+  }
+
+  /** Disable Account — `POST /api/guardian/accounts/{account_id}/disable` */
+  disableAccount(accountId: number): Promise<GuardianAccountOut> {
+    return this.http.request<GuardianAccountOut>("POST", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)) + "/disable", { auth: true });
+  }
+
+  /** Enable Account — `POST /api/guardian/accounts/{account_id}/enable` */
+  enableAccount(accountId: number): Promise<GuardianAccountOut> {
+    return this.http.request<GuardianAccountOut>("POST", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)) + "/enable", { auth: true });
   }
 
 }
@@ -648,6 +699,7 @@ export function buildApi(http: HttpTransport) {
     auth: new AuthApi(http),
     public: new PublicApi(http),
     user: new UserApi(http),
+    guardian: new GuardianApi(http),
     exchange: new ExchangeApi(http),
     transactions: new TransactionsApi(http),
     dashboard: new DashboardApi(http),

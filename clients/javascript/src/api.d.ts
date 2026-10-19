@@ -26,6 +26,11 @@ import type {
   FillDeviation,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
+  GuardianAccountCreate,
+  GuardianAccountOut,
+  GuardianAccountUpdate,
+  GuardianKeyReplace,
+  GuardianKeyReplaceResult,
   HistoryResponse,
   InitiateResponse,
   IntegrationInfo,
@@ -146,6 +151,27 @@ export declare class UserApi {
   updateProfile(body: ProfileUpdateRequest): Promise<UserProfile>;
   /** Get User By Id — `GET /api/user/{user_id}` */
   getUserById(userId: string): Promise<UserPublicProfile>;
+}
+
+/** `guardian` endpoints. */
+export declare class GuardianApi {
+  constructor(http: HttpTransport);
+  /** List Accounts — `GET /api/guardian/accounts` */
+  listAccounts(): Promise<GuardianAccountOut[]>;
+  /** Add Account — `POST /api/guardian/accounts` */
+  addAccount(body: GuardianAccountCreate): Promise<GuardianAccountOut>;
+  /** Get Account — `GET /api/guardian/accounts/{account_id}` */
+  getAccount(accountId: number): Promise<GuardianAccountOut>;
+  /** Update Account — `PATCH /api/guardian/accounts/{account_id}` */
+  updateAccount(accountId: number, body: GuardianAccountUpdate): Promise<GuardianAccountOut>;
+  /** Delete Account — `DELETE /api/guardian/accounts/{account_id}` */
+  deleteAccount(accountId: number): Promise<unknown>;
+  /** Replace Key — `PUT /api/guardian/accounts/{account_id}/key` */
+  replaceKey(accountId: number, body: GuardianKeyReplace): Promise<GuardianKeyReplaceResult>;
+  /** Disable Account — `POST /api/guardian/accounts/{account_id}/disable` */
+  disableAccount(accountId: number): Promise<GuardianAccountOut>;
+  /** Enable Account — `POST /api/guardian/accounts/{account_id}/enable` */
+  enableAccount(accountId: number): Promise<GuardianAccountOut>;
 }
 
 /** `exchange` endpoints. */
@@ -356,6 +382,7 @@ export interface Api {
   readonly auth: AuthApi;
   readonly public: PublicApi;
   readonly user: UserApi;
+  readonly guardian: GuardianApi;
   readonly exchange: ExchangeApi;
   readonly transactions: TransactionsApi;
   readonly dashboard: DashboardApi;

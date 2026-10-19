@@ -29,6 +29,11 @@ from .types import (
     FillDeviation,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    GuardianAccountCreate,
+    GuardianAccountOut,
+    GuardianAccountUpdate,
+    GuardianKeyReplace,
+    GuardianKeyReplaceResult,
     HistoryResponse,
     InitiateResponse,
     IntegrationInfo,
@@ -318,6 +323,84 @@ class AsyncUserApi:
     async def get_user_by_id(self, user_id: str) -> UserPublicProfile:
         """Get User By Id — ``GET /api/user/{user_id}``."""
         return await self._http.request("GET", "/api/user/" + _q(user_id), auth=True)
+
+
+class GuardianApi:
+    """`guardian` endpoints."""
+
+    def __init__(self, http: SyncTransport) -> None:
+        self._http = http
+
+    def list_accounts(self) -> List[GuardianAccountOut]:
+        """List Accounts — ``GET /api/guardian/accounts``."""
+        return self._http.request("GET", "/api/guardian/accounts", auth=True)
+
+    def add_account(self, body: GuardianAccountCreate) -> GuardianAccountOut:
+        """Add Account — ``POST /api/guardian/accounts``."""
+        return self._http.request("POST", "/api/guardian/accounts", auth=True, body=body)
+
+    def get_account(self, account_id: int) -> GuardianAccountOut:
+        """Get Account — ``GET /api/guardian/accounts/{account_id}``."""
+        return self._http.request("GET", "/api/guardian/accounts/" + _q(account_id), auth=True)
+
+    def update_account(self, account_id: int, body: GuardianAccountUpdate) -> GuardianAccountOut:
+        """Update Account — ``PATCH /api/guardian/accounts/{account_id}``."""
+        return self._http.request("PATCH", "/api/guardian/accounts/" + _q(account_id), auth=True, body=body)
+
+    def delete_account(self, account_id: int) -> Any:
+        """Delete Account — ``DELETE /api/guardian/accounts/{account_id}``."""
+        return self._http.request("DELETE", "/api/guardian/accounts/" + _q(account_id), auth=True)
+
+    def replace_key(self, account_id: int, body: GuardianKeyReplace) -> GuardianKeyReplaceResult:
+        """Replace Key — ``PUT /api/guardian/accounts/{account_id}/key``."""
+        return self._http.request("PUT", "/api/guardian/accounts/" + _q(account_id) + "/key", auth=True, body=body)
+
+    def disable_account(self, account_id: int) -> GuardianAccountOut:
+        """Disable Account — ``POST /api/guardian/accounts/{account_id}/disable``."""
+        return self._http.request("POST", "/api/guardian/accounts/" + _q(account_id) + "/disable", auth=True)
+
+    def enable_account(self, account_id: int) -> GuardianAccountOut:
+        """Enable Account — ``POST /api/guardian/accounts/{account_id}/enable``."""
+        return self._http.request("POST", "/api/guardian/accounts/" + _q(account_id) + "/enable", auth=True)
+
+
+class AsyncGuardianApi:
+    """`guardian` endpoints (async)."""
+
+    def __init__(self, http: AsyncTransport) -> None:
+        self._http = http
+
+    async def list_accounts(self) -> List[GuardianAccountOut]:
+        """List Accounts — ``GET /api/guardian/accounts``."""
+        return await self._http.request("GET", "/api/guardian/accounts", auth=True)
+
+    async def add_account(self, body: GuardianAccountCreate) -> GuardianAccountOut:
+        """Add Account — ``POST /api/guardian/accounts``."""
+        return await self._http.request("POST", "/api/guardian/accounts", auth=True, body=body)
+
+    async def get_account(self, account_id: int) -> GuardianAccountOut:
+        """Get Account — ``GET /api/guardian/accounts/{account_id}``."""
+        return await self._http.request("GET", "/api/guardian/accounts/" + _q(account_id), auth=True)
+
+    async def update_account(self, account_id: int, body: GuardianAccountUpdate) -> GuardianAccountOut:
+        """Update Account — ``PATCH /api/guardian/accounts/{account_id}``."""
+        return await self._http.request("PATCH", "/api/guardian/accounts/" + _q(account_id), auth=True, body=body)
+
+    async def delete_account(self, account_id: int) -> Any:
+        """Delete Account — ``DELETE /api/guardian/accounts/{account_id}``."""
+        return await self._http.request("DELETE", "/api/guardian/accounts/" + _q(account_id), auth=True)
+
+    async def replace_key(self, account_id: int, body: GuardianKeyReplace) -> GuardianKeyReplaceResult:
+        """Replace Key — ``PUT /api/guardian/accounts/{account_id}/key``."""
+        return await self._http.request("PUT", "/api/guardian/accounts/" + _q(account_id) + "/key", auth=True, body=body)
+
+    async def disable_account(self, account_id: int) -> GuardianAccountOut:
+        """Disable Account — ``POST /api/guardian/accounts/{account_id}/disable``."""
+        return await self._http.request("POST", "/api/guardian/accounts/" + _q(account_id) + "/disable", auth=True)
+
+    async def enable_account(self, account_id: int) -> GuardianAccountOut:
+        """Enable Account — ``POST /api/guardian/accounts/{account_id}/enable``."""
+        return await self._http.request("POST", "/api/guardian/accounts/" + _q(account_id) + "/enable", auth=True)
 
 
 class ExchangeApi:
@@ -1062,6 +1145,7 @@ class Api:
         self.auth = AuthApi(http)
         self.public = PublicApi(http)
         self.user = UserApi(http)
+        self.guardian = GuardianApi(http)
         self.exchange = ExchangeApi(http)
         self.transactions = TransactionsApi(http)
         self.dashboard = DashboardApi(http)
@@ -1085,6 +1169,7 @@ class AsyncApi:
         self.auth = AsyncAuthApi(http)
         self.public = AsyncPublicApi(http)
         self.user = AsyncUserApi(http)
+        self.guardian = AsyncGuardianApi(http)
         self.exchange = AsyncExchangeApi(http)
         self.transactions = AsyncTransactionsApi(http)
         self.dashboard = AsyncDashboardApi(http)

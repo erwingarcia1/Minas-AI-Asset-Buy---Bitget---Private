@@ -317,6 +317,64 @@ class ForgotPasswordResponse(TypedDict):
     sent: NotRequired[bool]
 
 
+class GuardianAccountCreate(TypedDict):
+    """POST /api/guardian/accounts. The key must be a separate read-only key, never an AutoBuy purchase key; a Bitget or OKX key also needs its passphrase, and the body is refused with `PASSPHRASE_REQUIRED` without it, before the exchange is asked."""
+    exchange: Literal['bitget', 'bybit', 'okx', 'binance']
+    api_key: str
+    api_secret: str
+    passphrase: NotRequired[Optional[str]]
+    name: str
+    topology: NotRequired[Literal['independent', 'sub_account']]
+    alert_phone: NotRequired[Optional[str]]
+    alert_email_secondary: NotRequired[Optional[str]]
+    alert_phone_secondary: NotRequired[Optional[str]]
+    telegram_handle: NotRequired[Optional[str]]
+    sms_alerts_enabled: NotRequired[bool]
+
+
+class GuardianAccountOut(TypedDict):
+    """One monitored account as its owner sees it. There is no field for key material or for the key fingerprint. Times are UTC."""
+    id: int
+    label: str
+    name: NotRequired[Optional[str]]
+    exchange: str
+    topology: str
+    account_mode: NotRequired[Optional[str]]
+    status: str
+    baseline_status: str
+    exchange_uid: NotRequired[Optional[str]]
+    sms_alerts_enabled: bool
+    alert_phone: NotRequired[Optional[str]]
+    alert_email_secondary: NotRequired[Optional[str]]
+    alert_phone_secondary: NotRequired[Optional[str]]
+    telegram_handle: NotRequired[Optional[str]]
+    created_at: str
+    updated_at: str
+    last_success_at: NotRequired[Optional[str]]
+
+
+class GuardianAccountUpdate(TypedDict):
+    """PATCH /api/guardian/accounts/{id}: where alerts go and the SMS switch. A field sent as null clears it; one left out is not touched."""
+    alert_phone: NotRequired[Optional[str]]
+    alert_email_secondary: NotRequired[Optional[str]]
+    alert_phone_secondary: NotRequired[Optional[str]]
+    telegram_handle: NotRequired[Optional[str]]
+    sms_alerts_enabled: NotRequired[Optional[bool]]
+
+
+class GuardianKeyReplace(TypedDict):
+    """PUT /api/guardian/accounts/{id}/key: a new read-only key for the SAME exchange account."""
+    api_key: str
+    api_secret: str
+    passphrase: NotRequired[Optional[str]]
+
+
+class GuardianKeyReplaceResult(TypedDict):
+    """What a successful replacement answers. A refusal is a 400 whose `detail` is the plain-language message; the technical reason stays in the log."""
+    ok: bool
+    message: str
+
+
 class HTTPValidationError(TypedDict):
     """HTTPValidationError."""
     detail: NotRequired[List[ValidationError]]
@@ -511,6 +569,8 @@ class PreferencesResponse(TypedDict):
 class ProfileUpdateRequest(TypedDict):
     """ProfileUpdateRequest."""
     email: NotRequired[Optional[str]]
+    current_password: NotRequired[Optional[str]]
+    code: NotRequired[Optional[str]]
 
 
 class PublicMeta(TypedDict):
@@ -521,6 +581,7 @@ class PublicMeta(TypedDict):
     exchanges: List[str]
     support_email: str
     server_ip: str
+    guardian_enabled: NotRequired[bool]
 
 
 class PurchaseCreateRequest(TypedDict):
@@ -917,6 +978,8 @@ class UserProfile(TypedDict):
     wallet_hold_until: NotRequired[Optional[str]]
     wallet_hold_reason: NotRequired[Optional[str]]
     withdrawals_allowed: NotRequired[bool]
+    guardian_enabled: NotRequired[bool]
+    mfa_enabled: NotRequired[bool]
 
 
 class UserPublicProfile(TypedDict):

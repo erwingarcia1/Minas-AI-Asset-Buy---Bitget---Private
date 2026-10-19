@@ -281,6 +281,65 @@ export interface ForgotPasswordResponse {
   sent?: boolean;
 }
 
+/** POST /api/guardian/accounts. The key must be a separate read-only key, never an AutoBuy purchase key; a Bitget or OKX key also needs its passphrase, and the body is refused with `PASSPHRASE_REQUIRED` without it, before the exchange is asked. */
+export interface GuardianAccountCreate {
+  exchange: "bitget" | "bybit" | "okx" | "binance";
+  api_key: string;
+  api_secret: string;
+  passphrase?: string | null;
+  /** How the customer calls this account; the label is derived from it */
+  name: string;
+  topology?: "independent" | "sub_account";
+  alert_phone?: string | null;
+  alert_email_secondary?: string | null;
+  alert_phone_secondary?: string | null;
+  telegram_handle?: string | null;
+  sms_alerts_enabled?: boolean;
+}
+
+/** One monitored account as its owner sees it. There is no field for key material or for the key fingerprint. Times are UTC. */
+export interface GuardianAccountOut {
+  id: number;
+  label: string;
+  name?: string | null;
+  exchange: string;
+  topology: string;
+  account_mode?: string | null;
+  status: string;
+  baseline_status: string;
+  exchange_uid?: string | null;
+  sms_alerts_enabled: boolean;
+  alert_phone?: string | null;
+  alert_email_secondary?: string | null;
+  alert_phone_secondary?: string | null;
+  telegram_handle?: string | null;
+  created_at: string;
+  updated_at: string;
+  last_success_at?: string | null;
+}
+
+/** PATCH /api/guardian/accounts/{id}: where alerts go and the SMS switch. A field sent as null clears it; one left out is not touched. */
+export interface GuardianAccountUpdate {
+  alert_phone?: string | null;
+  alert_email_secondary?: string | null;
+  alert_phone_secondary?: string | null;
+  telegram_handle?: string | null;
+  sms_alerts_enabled?: boolean | null;
+}
+
+/** PUT /api/guardian/accounts/{id}/key: a new read-only key for the SAME exchange account. */
+export interface GuardianKeyReplace {
+  api_key: string;
+  api_secret: string;
+  passphrase?: string | null;
+}
+
+/** What a successful replacement answers. A refusal is a 400 whose `detail` is the plain-language message; the technical reason stays in the log. */
+export interface GuardianKeyReplaceResult {
+  ok: boolean;
+  message: string;
+}
+
 export interface HTTPValidationError {
   detail?: ValidationError[];
 }
@@ -457,6 +516,8 @@ export interface PreferencesResponse {
 
 export interface ProfileUpdateRequest {
   email?: string | null;
+  current_password?: string | null;
+  code?: string | null;
 }
 
 export interface PublicMeta {
@@ -466,6 +527,7 @@ export interface PublicMeta {
   exchanges: string[];
   support_email: string;
   server_ip: string;
+  guardian_enabled?: boolean;
 }
 
 export interface PurchaseCreateRequest {
@@ -828,6 +890,8 @@ export interface UserProfile {
   wallet_hold_until?: string | null;
   wallet_hold_reason?: string | null;
   withdrawals_allowed?: boolean;
+  guardian_enabled?: boolean;
+  mfa_enabled?: boolean;
 }
 
 export interface UserPublicProfile {

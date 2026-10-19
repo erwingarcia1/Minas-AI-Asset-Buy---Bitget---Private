@@ -226,6 +226,88 @@ export class UserApi {
 
 }
 
+/** `guardian` endpoints. */
+export class GuardianApi {
+  /** @param {import('./http.js').HttpTransport} http */
+  constructor(http) {
+    this.http = http;
+  }
+
+  /**
+   * List Accounts — `GET /api/guardian/accounts`
+   * @returns {Promise<import('./types.js').GuardianAccountOut[]>}
+   */
+  listAccounts() {
+    return this.http.request("GET", "/api/guardian/accounts", { auth: true });
+  }
+
+  /**
+   * Add Account — `POST /api/guardian/accounts`
+   * @param {import('./types.js').GuardianAccountCreate} body
+   * @returns {Promise<import('./types.js').GuardianAccountOut>}
+   */
+  addAccount(body) {
+    return this.http.request("POST", "/api/guardian/accounts", { body, auth: true });
+  }
+
+  /**
+   * Get Account — `GET /api/guardian/accounts/{account_id}`
+   * @param {number} accountId
+   * @returns {Promise<import('./types.js').GuardianAccountOut>}
+   */
+  getAccount(accountId) {
+    return this.http.request("GET", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)), { auth: true });
+  }
+
+  /**
+   * Update Account — `PATCH /api/guardian/accounts/{account_id}`
+   * @param {number} accountId
+   * @param {import('./types.js').GuardianAccountUpdate} body
+   * @returns {Promise<import('./types.js').GuardianAccountOut>}
+   */
+  updateAccount(accountId, body) {
+    return this.http.request("PATCH", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)), { body, auth: true });
+  }
+
+  /**
+   * Delete Account — `DELETE /api/guardian/accounts/{account_id}`
+   * @param {number} accountId
+   * @returns {Promise<unknown>}
+   */
+  deleteAccount(accountId) {
+    return this.http.request("DELETE", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)), { auth: true });
+  }
+
+  /**
+   * Replace Key — `PUT /api/guardian/accounts/{account_id}/key`
+   * @param {number} accountId
+   * @param {import('./types.js').GuardianKeyReplace} body
+   * @returns {Promise<import('./types.js').GuardianKeyReplaceResult>}
+   */
+  replaceKey(accountId, body) {
+    return this.http.request("PUT", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)) + "/key", { body, auth: true });
+  }
+
+  /**
+   * Disable Account — `POST /api/guardian/accounts/{account_id}/disable`
+   * @param {number} accountId
+   * @returns {Promise<import('./types.js').GuardianAccountOut>}
+   */
+  disableAccount(accountId) {
+    return this.http.request("POST", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)) + "/disable", { auth: true });
+  }
+
+  /**
+   * Enable Account — `POST /api/guardian/accounts/{account_id}/enable`
+   * @param {number} accountId
+   * @returns {Promise<import('./types.js').GuardianAccountOut>}
+   */
+  enableAccount(accountId) {
+    return this.http.request("POST", "/api/guardian/accounts/" + encodeURIComponent(String(accountId)) + "/enable", { auth: true });
+  }
+
+}
+
 /** `exchange` endpoints. */
 export class ExchangeApi {
   /** @param {import('./http.js').HttpTransport} http */
@@ -959,6 +1041,7 @@ export function buildApi(http) {
     auth: new AuthApi(http),
     public: new PublicApi(http),
     user: new UserApi(http),
+    guardian: new GuardianApi(http),
     exchange: new ExchangeApi(http),
     transactions: new TransactionsApi(http),
     dashboard: new DashboardApi(http),
