@@ -101,7 +101,7 @@ def client_for(monkeypatch):
     one of the seven calls something further down makes."""
     made = []
 
-    def _install(*, authorities="spot_account_r", uid=OUR_UID, balance_raises=None,
+    def _install(*, authorities="stor", uid=OUR_UID, balance_raises=None,
                  info_raises=None, build_raises=None):
         def _make_client(exchange, api_key, secret, passphrase):
             if build_raises is not None:
@@ -237,7 +237,7 @@ def test_an_unreadable_account_info_is_refused(db, cipher, client_for):
 # --- the read-only guarantee, on a second door --------------------------------
 
 
-@pytest.mark.parametrize("authorities", ["spot_account_r,spot_trade_w", "withdraw_w"])
+@pytest.mark.parametrize("authorities", ["stor,stow", "stor,withdraw", "stor,wtow"])
 def test_a_key_that_can_trade_or_withdraw_is_refused(db, cipher, client_for, authorities):
     """G-4 applies to every door a key can arrive through, not just the one an
     operator uses. Accepting one here with a warning would make the read-only
@@ -523,7 +523,7 @@ def test_learning_about_an_account_that_is_gone_says_unknown(db, cipher):
 # would look exactly like working code.
 
 
-def _exchange_client(authorities="spot_account_r", uid=OUR_UID):
+def _exchange_client(authorities="stor", uid=OUR_UID):
     client = MagicMock()
     client.exchange_id = "bitget"
     client.fetch_balance.return_value = {"total": {"BTC": 1.0}}

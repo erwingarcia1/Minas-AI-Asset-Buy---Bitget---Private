@@ -5,7 +5,10 @@ these functions through `api/services/guardian_bridge.py` and map the results
 to HTTP. Each function speaks raw SQL through `db.cursor()` like the rest of
 the package and records what a person did as an append-only event
 (`guardian.events.append_event`), because "who touched my account" is the one
-page an unauthorised change must not be able to hide from.
+page an unauthorised change must not be able to hide from. Each change and the
+event that records it are written in one transaction, on the same cursor: a
+change that could not be recorded is not made, and a recorded change is one
+that happened.
 
 Every dict returned here is the `guardian_accounts` row plus
 `guardian_poll_state.last_success_at` (`None` until the first successful
@@ -87,6 +90,25 @@ def _existing_row(db: Database, account_id) -> dict:
 
 def _is_removed(row: dict) -> bool:
     return row["encrypted_api_key"] == ""
+
+
+def _other_watcher(db: Database, row: dict) -> str | None:
+    """The label of another row of the same owner that watches the same
+    exchange account (same exchange, same exchange uid) and is not switched
+    off, or None. The same rule onboarding applies (`AlreadyMonitored`): one
+    exchange account, one monitoring key per owner. An exchange whose payload
+    carries no account id (Binance) leaves `exchange_uid` NULL and cannot be
+    checked, as at onboarding."""
+    if row["exchange_uid"] is None:
+        return None
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT label FROM guardian_accounts WHERE user_id = %s AND exchange = %s AND exchange_uid = %s "
+            "AND id <> %s AND status <> 'disabled' ORDER BY id LIMIT 1",
+            (row["user_id"], row["exchange"], row["exchange_uid"], row["id"]),
+        )
+        other = cur.fetchone()
+    return other["label"] if other is not None else None
 
 
 def accounts_for_user(db: Database, user_id) -> list[dict]:
@@ -179,7 +201,7 @@ def update_contacts(db: Database, account_id, *, actor: str | None, **fields) ->
             f"UPDATE guardian_accounts SET {assignments}, updated_at = %s WHERE id = %s",
             (*[changes[name] for name in names], _now(), account_id),
         )
-    append_event(db, account_id, "alert_contact_updated", "LOW", {"fields": names}, actor=actor)
+        append_event(db, account_id, "alert_contact_updated", "LOW", {"fields": names}, actor=actor, cur=cur)
     logger.info("account %s: contact fields changed by %s: %s", current["label"], _actor_for_log(actor), ", ".join(names))
     return _existing_row(db, account_id)
 
@@ -190,8 +212,13 @@ def set_status(db: Database, account_id, status: str, *, actor: str | None) -> d
     the account eligible again on the next pass, with its baseline as it was.
 
     A removed account cannot be re-enabled: there is no key to poll with.
-    Setting the status the row already has writes nothing and records
-    nothing, for the same reason `update_contacts` records only changes."""
+    Nor can one whose exchange account another of the owner's rows already
+    watches: switch off, add the account again with a new key, then switch
+    the old row back on would otherwise leave two active rows polling one
+    exchange account, which onboarding refuses (`AlreadyMonitored`) and this
+    must too. Setting the status the row already has writes nothing and
+    records nothing, for the same reason `update_contacts` records only
+    changes."""
     if status not in CUSTOMER_STATUSES:
         raise ValueError(f"status must be one of {', '.join(CUSTOMER_STATUSES)}, not {status!r}")
     current = _existing_row(db, account_id)
@@ -199,16 +226,23 @@ def set_status(db: Database, account_id, status: str, *, actor: str | None) -> d
         raise ValueError("This account was removed and cannot be switched back on. Add it again with a new read-only key.")
     if current["status"] == status:
         return current
+    enabling = status == "active"
+    if enabling:
+        other = _other_watcher(db, current)
+        if other is not None:
+            raise ValueError(
+                f"This exchange account is already being watched as {other}. "
+                f"Switch that one off or remove it before turning this one on."
+            )
     with db.cursor() as cur:
         cur.execute("UPDATE guardian_accounts SET status = %s, updated_at = %s WHERE id = %s",
                     (status, _now(), account_id))
-    enabling = status == "active"
-    # Switching monitoring off is the kind of change the activity page exists
-    # to make visible, so it carries the weight a key replacement does.
-    append_event(
-        db, account_id, "account_enabled" if enabling else "account_disabled", "LOW" if enabling else "HIGH",
-        {"from": current["status"], "to": status}, actor=actor,
-    )
+        # Switching monitoring off is the kind of change the activity page exists
+        # to make visible, so it carries the weight a key replacement does.
+        append_event(
+            db, account_id, "account_enabled" if enabling else "account_disabled", "LOW" if enabling else "HIGH",
+            {"from": current["status"], "to": status}, actor=actor, cur=cur,
+        )
     logger.info("account %s: %s by %s", current["label"], "enabled" if enabling else "disabled", _actor_for_log(actor))
     return _existing_row(db, account_id)
 
@@ -232,10 +266,10 @@ def scrub_and_delete(db: Database, account_id, *, actor: str | None) -> dict:
             "encrypted_passphrase = '', key_fingerprint = NULL, updated_at = %s WHERE id = %s",
             (_now(), account_id),
         )
-    append_event(
-        db, account_id, "account_deleted", "HIGH",
-        {"label": current["label"], "exchange": current["exchange"], "previous_status": current["status"]},
-        actor=actor,
-    )
+        append_event(
+            db, account_id, "account_deleted", "HIGH",
+            {"label": current["label"], "exchange": current["exchange"], "previous_status": current["status"]},
+            actor=actor, cur=cur,
+        )
     logger.info("account %s: removed by %s; key material scrubbed, history kept", current["label"], _actor_for_log(actor))
     return _existing_row(db, account_id)

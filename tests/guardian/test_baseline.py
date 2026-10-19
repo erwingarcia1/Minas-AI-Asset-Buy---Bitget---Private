@@ -65,7 +65,7 @@ def test_seed_baseline_seeds_pre_existing_transfer_routes(db):
     client.fetch_transfers.return_value = [
         {"id": "t-1", "currency": "USDT", "amount": 216.0, "fromAccount": "spot", "toAccount": "p2p"}
     ]
-    client.fetch_account_info.return_value = {"data": {"authorities": "readonly_r", "ips": ""}}
+    client.fetch_account_info.return_value = {"data": {"authorities": "stor", "ips": ""}}
 
     seed_baseline(db, account_id, client)
 

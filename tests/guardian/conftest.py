@@ -16,6 +16,11 @@ Guardian's own fixtures:
   module owns (`guardian-tests@example.com`, CLAUDE.md's local throwaway
   convention), with its baseline `complete` as onboarding leaves it; pass
   `baseline_status` to say otherwise.
+* `make_user` — a platform user for tests about ownership and contacts. The
+  truncation covers only the `guardian_*` tables, so every user this module
+  inserts (through `make_user`, and the test user itself when it did not
+  exist) is remembered and deleted when the session ends: the platform's
+  `users` table is left as it was found.
 * `cipher`, `rules` — as Guardian's.
 * `safe_settings` (autouse) — every transport setting blanked, so nothing
   here can reach Telegram, Resend, ClickSend or Twilio; a test that wants a
@@ -87,6 +92,12 @@ def safe_settings(monkeypatch):
     monkeypatch.setattr(settings, "guardian_enabled", True)
 
 
+# Users this module inserted into the platform's `users` table, deleted once
+# at session end (`_remove_users_made_here`). A user that already existed is
+# not ours to remove and is not listed.
+_USERS_MADE_HERE: list[uuid.UUID] = []
+
+
 def _truncate(cur) -> None:
     cur.execute("TRUNCATE " + ", ".join(GUARDIAN_TABLES) + " RESTART IDENTITY CASCADE")
 
@@ -95,9 +106,27 @@ def _ensure_test_user(cur) -> None:
     cur.execute(
         "INSERT INTO users (id, email, password_hash, kyc_status, role, suspended, phone_verified, "
         "created_at, updated_at) VALUES (%s, %s, 'x', 'verified', 'user', false, false, now(), now()) "
-        "ON CONFLICT (id) DO NOTHING",
+        "ON CONFLICT (id) DO NOTHING RETURNING id",
         (TEST_USER_ID, TEST_USER_EMAIL),
     )
+    if cur.fetchone() is not None and TEST_USER_ID not in _USERS_MADE_HERE:
+        _USERS_MADE_HERE.append(TEST_USER_ID)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _remove_users_made_here():
+    """Deletes, once the session is over, every user `make_user` and
+    `_ensure_test_user` inserted. Rows that point at them (`guardian_accounts`
+    cascades) are gone by then: the `db` fixture truncates after every test."""
+    yield
+    if not _USERS_MADE_HERE:
+        return
+    database = Database(platform_dsn(os.environ["DATABASE_URL"]))
+    try:
+        with database.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id = ANY(%s)", (list(_USERS_MADE_HERE),))
+    finally:
+        database.close()
 
 
 @pytest.fixture
@@ -156,6 +185,7 @@ def make_user(db, email: str, *, role: str = "user") -> uuid.UUID:
             "created_at, updated_at) VALUES (%s, %s, 'x', 'verified', %s, false, false, now(), now())",
             (user_id, email.lower(), role),
         )
+    _USERS_MADE_HERE.append(user_id)
     return user_id
 
 

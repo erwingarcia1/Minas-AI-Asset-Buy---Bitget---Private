@@ -45,7 +45,7 @@ class Recording:
 
 
 def _client(deposits=None, withdrawals=None, fills=None, balance=None,
-            authorities="spot_account_r", transfers=None, tickers=None):
+            authorities="stor", transfers=None, tickers=None):
     c = MagicMock()
     c.fetch_deposits.return_value = deposits or []
     c.fetch_withdrawals.return_value = withdrawals or []
@@ -200,7 +200,7 @@ def test_permission_state_change_is_wired(db, cipher, monkeypatch, account):
 
     monkeypatch.setattr(
         "guardian.poller.make_client",
-        lambda *a, **k: _client(authorities="spot_account_r,withdraw"),
+        lambda *a, **k: _client(authorities="stor,withdraw"),
     )
     poller.run_slow_loop(row)
 

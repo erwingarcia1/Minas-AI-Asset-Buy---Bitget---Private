@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from guardian.engine import Engine
-from tests.guardian.conftest import make_account
+from guardian.engine import RESEED_MAX_PER_PASS, Engine
+from tests.guardian.conftest import TEST_USER_ID, make_account
 from tests.guardian.fixtures.ccxt_responses import account_info_response
 
 
@@ -173,3 +175,141 @@ def test_run_keeps_the_scheduler_thread_and_join_reaps_it(db, cipher, rules):
     assert not engine._scheduler.is_alive()
     assert not runner.is_alive()
     assert all(not w.is_alive() for w in engine._workers)
+
+
+# --- a row left 'seeding' is re-seeded, not forgotten ----------------------------------
+
+
+def _seeding_account(db, cipher, label, updated_at, *, status="active"):
+    """A row as the API leaves it between the 201 and its background seed:
+    real ciphertexts (the re-seed decrypts them), 'seeding', a poll_state row."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO guardian_accounts (user_id, label, exchange, topology, encrypted_api_key, encrypted_secret, "
+            "encrypted_passphrase, status, baseline_status, onboarding_source, onboarded_at, updated_at) "
+            "VALUES (%s, %s, 'bitget', 'independent', %s, %s, %s, %s, 'seeding', 'self', %s, %s)",
+            (TEST_USER_ID, label, cipher.encrypt(f"{label}-key"), cipher.encrypt(f"{label}-secret"),
+             cipher.encrypt("p"), status, updated_at.isoformat(), updated_at.isoformat()),
+        )
+        account_id = cur.lastrowid
+        cur.execute("INSERT INTO guardian_poll_state (account_id) VALUES (%s)", (account_id,))
+        return account_id
+
+
+def _baseline_status(db, account_id):
+    with db.cursor() as cur:
+        cur.execute("SELECT baseline_status FROM guardian_accounts WHERE id = %s", (account_id,))
+        return cur.fetchone()["baseline_status"]
+
+
+def _queued(engine, kind="reseed"):
+    return [t.account_id for t in list(engine._queue.queue) if t.kind == kind]
+
+
+class _Pager:
+    def __init__(self):
+        self.pages = []
+
+    def page(self, **kwargs):
+        self.pages.append(kwargs)
+        return 1
+
+
+def test_a_row_left_seeding_too_long_is_reseeded_from_the_worker_pool(db, cipher, rules, monkeypatch, caplog):
+    """The API inserts the row 'seeding' and seeds in a background task. If the
+    API died in between, the row stayed 'seeding' forever: the scheduler skips
+    seeding rows, so the account was never polled and nothing said so. The
+    scheduler now re-seeds a row that has said 'seeding' for 15 minutes - as a
+    queued task for the pool, never on its own thread - and leaves fresher and
+    switched-off rows alone."""
+    caplog.set_level(logging.INFO, logger="guardian.engine")
+    now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("guardian.engine._utcnow", lambda: now)
+    stale = _seeding_account(db, cipher, "stale", now - timedelta(minutes=16))
+    fresh = _seeding_account(db, cipher, "fresh", now - timedelta(minutes=14))
+    off = _seeding_account(db, cipher, "off", now - timedelta(hours=2), status="disabled")
+    made = []
+
+    def ctor(exchange, api_key, secret, passphrase=""):
+        made.append((exchange, api_key, secret, passphrase))
+        return _good_client()
+
+    monkeypatch.setattr("guardian.onboarding.make_client", ctor)
+    monkeypatch.setattr("guardian.poller._load_client", lambda c, row: _good_client())
+    engine = Engine(db, cipher, rules, {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []})
+
+    engine._schedule_cycle()
+
+    assert [(t.account_id, t.kind) for t in list(engine._queue.queue)] == [(stale, "reseed")], \
+        "queued for the pool, not run on the scheduler thread"
+    assert _baseline_status(db, stale) == "seeding", "nothing has run yet"
+    assert made == []
+    engine._schedule_cycle()
+    assert _queued(engine) == [stale], "one re-seed in flight per account, however many passes go by"
+    assert "account stale:" in caplog.text and "re-seeding" in caplog.text
+    assert "account fresh:" not in caplog.text and "account off:" not in caplog.text
+
+    engine._drain_once()
+
+    assert _baseline_status(db, stale) == "complete"
+    assert made == [("bitget", "stale-key", "stale-secret", "p")], "the client is rebuilt from the stored credentials"
+    assert _baseline_status(db, fresh) == "seeding"
+    assert _baseline_status(db, off) == "seeding"
+    assert (stale, "reseed") not in engine._inflight
+    assert "re-seeded, baseline is complete" in caplog.text
+
+    # From the next pass the account is an ordinary watched one.
+    engine._schedule_cycle()
+    assert _queued(engine) == []
+    assert _queued(engine, "fast") == [stale]
+    assert {row["id"] for row in engine._active_accounts()} == {stale}
+
+
+def test_at_most_a_few_stale_rows_are_reseeded_per_pass_oldest_first(db, cipher, rules, monkeypatch):
+    now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("guardian.engine._utcnow", lambda: now)
+    ids = [_seeding_account(db, cipher, f"stale-{i}", now - timedelta(hours=1, minutes=i)) for i in range(5)]
+    monkeypatch.setattr("guardian.onboarding.make_client", lambda *a, **k: _good_client())
+    monkeypatch.setattr("guardian.poller._load_client", lambda c, row: _good_client())
+    engine = Engine(db, cipher, rules, {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []})
+
+    engine._schedule_cycle()
+    assert RESEED_MAX_PER_PASS == 3
+    assert _queued(engine) == [ids[4], ids[3], ids[2]], "oldest first, and no more than the cap"
+    engine._drain_once()
+    assert [_baseline_status(db, i) for i in ids] == ["seeding", "seeding", "complete", "complete", "complete"]
+
+    engine._schedule_cycle()
+    assert _queued(engine) == [ids[1], ids[0]]
+    engine._drain_once()
+    assert all(_baseline_status(db, i) == "complete" for i in ids)
+
+
+def test_a_reseed_that_fails_marks_the_row_incomplete_and_pages(db, cipher, rules, monkeypatch):
+    """`seed_account_baseline`'s guarantee holds on this path too: the row ends
+    'incomplete' with a 'baseline_seed_failed' event, the engine's operator
+    alerter is paged, nobody is named as the actor, and the account is polled
+    from the next pass."""
+    now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("guardian.engine._utcnow", lambda: now)
+    stale = _seeding_account(db, cipher, "unlucky", now - timedelta(hours=1))
+
+    def explode(*a, **k):
+        raise RuntimeError("ccxt could not build the client")
+
+    monkeypatch.setattr("guardian.onboarding.make_client", explode)
+    monkeypatch.setattr("guardian.poller._load_client", lambda c, row: _good_client())
+    pager = _Pager()
+    engine = Engine(db, cipher, rules, {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []}, operator_alerter=pager)
+
+    engine.run_one_cycle()
+
+    assert _baseline_status(db, stale) == "incomplete"
+    with db.cursor() as cur:
+        cur.execute("SELECT event_type, actor FROM guardian_events WHERE account_id = %s ORDER BY id", (stale,))
+        events = [dict(r) for r in cur.fetchall()]
+    assert [e["event_type"] for e in events] == ["baseline_seed_failed"]
+    assert events[0]["actor"] is None, "nobody did this"
+    assert [p["rule"] for p in pager.pages] == ["account_baseline_seed_failed"]
+    assert pager.pages[0]["account_id"] == stale
+    assert {row["id"] for row in engine._active_accounts()} == {stale}

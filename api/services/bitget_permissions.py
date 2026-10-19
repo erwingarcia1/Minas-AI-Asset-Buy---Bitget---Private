@@ -99,24 +99,25 @@ def interpret_bitget_authorities(auths: list) -> dict:
 # Guardian's own gate refused `taxw` and `p2pw` for their 'w' suffix, which
 # turned away honest read-only keys.
 #
-# A code the table does not list falls back to Bitget's documented convention
-# (an 'r' suffix is a read scope, a 'w' suffix a write scope; Phase 0 audit,
-# docs/phase0-capability-audit.md), and a code that matches neither is refused
-# by name. Guardian never uses a write scope, so refusing one it cannot place
-# costs the customer a new key and nothing else; accepting one would make
-# "we only hold read-only keys" a hope rather than a check.
+# A code the table does not list is refused by name, whatever its spelling.
+# The codes known to be reads are the ones confirmed on a live key and written
+# into the table at the top of this file; Bitget's suffix habit ('r' read,
+# 'w' write) is not a contract - `taxw` and `p2pw` end in 'w' and are reads -
+# so a code nobody has confirmed cannot be waved through by its last letter.
+# Guardian never uses a write scope, so refusing one it cannot place costs the
+# customer a new key and nothing else; accepting one would make "we only hold
+# read-only keys" a hope rather than a check. A code Bitget adds is confirmed
+# on a real key first and then added to the table, never guessed at here.
 GUARDIAN_BITGET_WRITE_TOKENS = frozenset(
     BITGET_TRADE_TOKENS | BITGET_WITHDRAW_TOKENS | {"smow", "wtow", "transfer"}
 )
 GUARDIAN_BITGET_READ_TOKENS = frozenset(BITGET_READ_ONLY_TOKENS | {"readonly", "read", "taxw", "p2pw"})
-# What each refused code grants, for the log line.
+# What each refused code grants, for the log line. A code added to the write
+# sets above without a line here reads as a plain "write" scope.
 _WRITE_SCOPE_KIND = {
     "trade": "trade", "stow": "spot trade", "smow": "margin trade",
     "withdraw": "withdraw", "wtow": "wallet transfer", "transfer": "transfer",
 }
-# Words that mark a code the table does not list as writable (Guardian's
-# original gate, kept as the fallback for codes nobody has confirmed yet).
-_WRITE_WORDS = ("trade", "withdraw", "transfer", "write")
 _UTA_READ_ONLY_PERM_TYPES = ("read-only", "readonly", "read_only")
 
 
@@ -137,9 +138,10 @@ def guardian_bitget_read_only(authorities, perm_type=None) -> tuple[bool, str]:
     customer.
 
     Classic key (`perm_type` None): `authorities` must carry at least one
-    code and none may be a trade, withdraw or transfer scope; an empty list,
-    an unreadable field and an unrecognised code all fail CLOSED, the last
-    naming the code. Unified key (`perm_type` given, from
+    code and every code must be a confirmed read scope; an empty list, an
+    unreadable field, a trade/withdraw/transfer code and a code the table
+    does not list all fail CLOSED, the last two naming the code - there is no
+    suffix fallback. Unified key (`perm_type` given, from
     /api/v3/account/info): `permType` must be read-only AND the permission
     tokens must carry neither `uta_trade` nor `withdraw`.
     """
@@ -154,17 +156,11 @@ def guardian_bitget_read_only(authorities, perm_type=None) -> tuple[bool, str]:
         return False, "'authorities' field was empty - cannot verify scope"
     for token in tokens:
         if token in GUARDIAN_BITGET_WRITE_TOKENS:
-            return False, f"authority code '{token}' is a {_WRITE_SCOPE_KIND[token]} scope - not a read-only key"
-        if token in GUARDIAN_BITGET_READ_TOKENS:
-            continue
-        if any(word in token for word in _WRITE_WORDS):
-            return False, f"authority token '{token}' indicates non-read-only scope"
-        if token.endswith("r"):
-            continue
-        if token.endswith("w"):
-            return False, f"authority token '{token}' has Bitget's documented write-scope suffix"
-        return False, f"authority token '{token}' is not a recognized read-only code - failing closed"
-    return True, "every authority code is a confirmed or documented read scope"
+            kind = _WRITE_SCOPE_KIND.get(token, "write")
+            return False, f"authority code '{token}' is a {kind} scope - not a read-only key"
+        if token not in GUARDIAN_BITGET_READ_TOKENS:
+            return False, f"authority code '{token}' is not a confirmed read-only code - failing closed"
+    return True, "every authority code is a confirmed read scope"
 
 
 def _unified_read_only(permissions, perm_type) -> tuple[bool, str]:

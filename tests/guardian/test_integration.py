@@ -22,7 +22,7 @@ class RecordingChannel:
         self.sent.append(alert)
 
 
-def _mock_client(deposits=None, withdrawals=None, fills=None, balance_total=None, authorities="spot_account_r"):
+def _mock_client(deposits=None, withdrawals=None, fills=None, balance_total=None, authorities="stor"):
     client = MagicMock()
     client.fetch_deposits.return_value = deposits or []
     client.fetch_withdrawals.return_value = withdrawals or []

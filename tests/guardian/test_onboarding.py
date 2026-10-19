@@ -4,11 +4,13 @@ import json
 import logging
 from unittest.mock import MagicMock
 
+import psycopg2.errors
 import pytest
 
 from guardian.exchange import BitgetClient, TamperSignal
 from guardian.onboarding import (
     NOT_READ_ONLY_MESSAGE,
+    UNIFIED_REASON_PREFIX,
     AlreadyMonitored,
     OnboardingRejected,
     generate_unique_label,
@@ -65,19 +67,19 @@ def _client_with(
 
 
 def test_read_only_key_is_accepted():
-    client = _client_with(account_info_result=account_info_response(authorities="spot_account_r,spot_order_r"))
+    client = _client_with(account_info_result=account_info_response(authorities="stor,taxw"))
     ok, reason = verify_read_only(client)
     assert ok, reason
 
 
 def test_key_with_trade_write_scope_is_rejected():
-    client = _client_with(account_info_result=account_info_response(authorities="spot_account_r,spot_trade_w"))
+    client = _client_with(account_info_result=account_info_response(authorities="stor,stow"))
     ok, reason = verify_read_only(client)
     assert not ok
 
 
 def test_key_with_withdraw_keyword_is_rejected():
-    client = _client_with(account_info_result=account_info_response(authorities="withdraw_w"))
+    client = _client_with(account_info_result=account_info_response(authorities="stor,withdraw"))
     ok, reason = verify_read_only(client)
     assert not ok
 
@@ -99,7 +101,7 @@ def test_balance_call_failure_rejects():
 
 def test_onboard_account_persists_encrypted_on_success(db, cipher, monkeypatch):
     def fake_client_ctor(exchange, api_key, secret, passphrase=""):
-        return _client_with(account_info_result=account_info_response(authorities="spot_account_r"))
+        return _client_with(account_info_result=account_info_response(authorities="stor"))
 
     monkeypatch.setattr("guardian.onboarding.make_client", fake_client_ctor)
 
@@ -150,7 +152,7 @@ def test_a_long_customer_name_still_yields_a_label_that_fits(db):
 
 def test_onboard_account_rejects_write_scope_and_persists_nothing(db, cipher, monkeypatch):
     def fake_client_ctor(exchange, api_key, secret, passphrase=""):
-        return _client_with(account_info_result=account_info_response(authorities="spot_trade_w"))
+        return _client_with(account_info_result=account_info_response(authorities="stow"))
 
     monkeypatch.setattr("guardian.onboarding.make_client", fake_client_ctor)
 
@@ -166,9 +168,10 @@ def test_onboard_account_rejects_write_scope_and_persists_nothing(db, cipher, mo
 
 # --- the Bitget gate on the platform's confirmed permission table (v0.9.2) ----
 #
-# Bitget's real codes are four letters; the fixtures above use synthetic
-# `..._r` / `..._w` names that the documented suffix convention still covers.
-# These tests use the codes seen on live keys (api/services/bitget_permissions.py).
+# Bitget's real codes are four letters, and the gate accepts only the ones the
+# shared table (api/services/bitget_permissions.py) has confirmed on a live key.
+# There is no suffix convention to fall back on: a made-up `..._r` code is
+# refused by name, exactly like `zzzz`, which is what the last test here proves.
 
 
 def _unified_info(perm_type="read-only", permissions=("uta_mgt",), uid="12345"):
@@ -200,13 +203,19 @@ def test_every_trade_withdraw_and_transfer_code_is_refused_by_name(code, kind):
     assert code in reason and kind in reason
 
 
-@pytest.mark.parametrize("authorities", ["", "   ", ",", "zzzz", "stor,zzzz"])
+@pytest.mark.parametrize("authorities", ["", "   ", ",", "zzzz", "stor,zzzz", "zzzr", "stor,zzzr", "spot_account_r"])
 def test_an_empty_list_and_an_unknown_code_fail_closed(authorities):
+    """A code the table does not list is refused by name whatever its last
+    letter: Bitget's 'r'/'w' suffix habit is not a contract (`taxw` and
+    `p2pw` are reads), so an unconfirmed code ending in 'r' is as unknown as
+    one ending in anything else."""
     client = _client_with(account_info_result=account_info_response(authorities=authorities))
     ok, reason = verify_read_only(client)
     assert not ok
-    if "zzzz" in authorities:
-        assert "zzzz" in reason, "the refusal names the code nobody has confirmed"
+    unknown = [code for code in authorities.split(",") if code.strip() and code.strip() != "stor"]
+    if unknown:
+        assert unknown[0] in reason, "the refusal names the code nobody has confirmed"
+        assert "failing closed" in reason
     else:
         assert "empty" in reason
 
@@ -535,3 +544,114 @@ def test_a_unified_bitget_key_is_refused_with_a_message_that_says_so(db, cipher,
     with db.cursor() as cur:
         cur.execute("SELECT count(*) AS n FROM guardian_accounts WHERE label = %s", ("uta-key",))
         assert cur.fetchone()["n"] == 0
+
+
+# --- the Unified refusal is matched as a code, not as digits ------------------------------
+
+
+@pytest.mark.parametrize("text,expected", [
+    ('bitget {"code":"40085","msg":"You are in Unified Account mode, and the Classic Account API is not supported"}', True),
+    ("bitget 40085 Unified Account mode", True),
+    ('bitget {"code":"40014","msg":"Incorrect permissions","requestTime":1740085123456}', False),
+    ("bitget order 140085 not found", False),
+    ('bitget {"code":"400850"}', False),
+])
+def test_the_unified_refusal_is_matched_as_a_standalone_code(text, expected):
+    """ccxt's error text carries the whole response, requestTime included. The
+    digits 40085 inside a longer number are not the refusal, and a substring
+    match used to say they were."""
+    from guardian.onboarding import _is_unified_refusal
+
+    assert _is_unified_refusal(Exception(text)) is expected
+
+
+def test_digits_inside_a_request_time_do_not_turn_a_refusal_into_the_unified_message(db, cipher, monkeypatch):
+    err = Exception('bitget {"code":"40014","msg":"Incorrect permissions","requestTime":1740085123456}')
+    monkeypatch.setattr("guardian.onboarding.make_client", lambda *a, **k: _client_with(balance_error=err))
+
+    with pytest.raises(OnboardingRejected) as info:
+        _onboard(db, cipher, label="classic-refused")
+
+    assert str(info.value) == NOT_READ_ONLY_MESSAGE
+    assert not info.value.reason.startswith(UNIFIED_REASON_PREFIX)
+
+
+# --- seed=True never strands a row either -------------------------------------------------
+
+
+def test_seed_true_never_leaves_the_row_seeding_when_the_seed_raises(db, cipher, monkeypatch, caplog):
+    """The CLI and admin onboarding seed in the request (`seed=True`). A seed
+    that raised there used to propagate out of `onboard_account` with the row
+    already committed at 'seeding': never polled, nobody told. It now ends
+    exactly as a background seed does - 'incomplete', a 'baseline_seed_failed'
+    event, an operator paged - and the onboarding still returns its result."""
+    caplog.set_level(logging.WARNING)
+    key, secret = "SEED-KEY-0123456789", "SEED-SECRET-0123456789"
+    monkeypatch.setattr("guardian.onboarding.make_client",
+                        lambda *a, **k: _client_with(account_info_result=account_info_response(authorities="stor")))
+
+    def explode(db_arg, account_id, client):
+        raise RuntimeError(f"connection lost mid-seed for key {key} secret {secret}")
+
+    monkeypatch.setattr("guardian.baseline.seed_baseline", explode)
+    alerter = _Alerter()
+
+    result = onboard_account(db, cipher, user_id=TEST_USER_ID, label="in-request", topology="independent",
+                             api_key=key, secret=secret, passphrase="p", actor="admin:test", operator_alerter=alerter)
+
+    assert result.label == "in-request"
+    assert _account_row(db, result.account_id)["baseline_status"] == "incomplete"
+    assert _engine_would_poll(db) == [result.account_id]
+    events = _events(db, result.account_id)
+    assert [e["event_type"] for e in events] == ["baseline_seed_failed", "customer_added"]
+    payload = json.loads(events[0]["payload_json"])
+    assert "RuntimeError" in payload["error"] and "consequence" in payload
+    assert events[0]["actor"] == "admin:test"
+    assert alerter.rules() == ["account_baseline_seed_failed"]
+    haystack = "\n".join([json.dumps(events), json.dumps(alerter.pages, default=str), caplog.text])
+    for fragment in (key, secret):
+        assert fragment not in haystack, fragment
+
+
+# --- a label taken while the key was being verified ----------------------------------------
+
+
+def test_a_label_taken_while_the_key_was_being_verified_gets_a_fresh_one(db, cipher, monkeypatch, caplog):
+    """The route chooses the label before the exchange checks, which take
+    seconds, so two customers adding the same name at once reach the INSERT
+    holding one label. The second used to fail on the unique constraint after
+    the customer had done everything right; it now takes the next free label."""
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr("guardian.onboarding.make_client",
+                        lambda *a, **k: _client_with(account_info_result=account_info_response(authorities="stor")))
+    make_account(db, "alice")   # the one that got there first
+
+    result = _onboard(db, cipher, label="alice", api_key="second-key")
+
+    assert result.label == "alice-2"
+    row = _account_row(db, result.account_id)
+    assert row["label"] == "alice-2" and row["baseline_status"] == "complete"
+    assert _count(db, "guardian_poll_state", result.account_id) == 1
+    assert json.loads(_events(db, result.account_id)[-1]["payload_json"])["label"] == "alice-2"
+    with db.cursor() as cur:
+        cur.execute("SELECT label FROM guardian_accounts ORDER BY id")
+        assert [r["label"] for r in cur.fetchall()] == ["alice", "alice-2"]
+    assert "alice-2" in caplog.text
+
+
+def test_a_key_fingerprint_collision_is_not_retried_as_a_label_clash(db, cipher, monkeypatch):
+    """Only the label is retried. The same key offered twice is the fingerprint
+    constraint's refusal, which the route turns into its own sentence; retrying
+    it under a new label would store the same key twice."""
+    info = account_info_response(authorities="stor")
+    info["data"].pop("userId")   # no exchange uid: the duplicate check cannot run, so the constraint is what refuses
+    monkeypatch.setattr("guardian.onboarding.make_client", lambda *a, **k: _client_with(account_info_result=info))
+    _onboard(db, cipher, label="first", api_key="same-key")
+
+    with pytest.raises(psycopg2.errors.UniqueViolation) as excinfo:
+        _onboard(db, cipher, label="second", api_key="same-key")
+
+    assert excinfo.value.diag.constraint_name == "uq_guardian_accounts_key_fingerprint"
+    with db.cursor() as cur:
+        cur.execute("SELECT label FROM guardian_accounts ORDER BY id")
+        assert [r["label"] for r in cur.fetchall()] == ["first"]

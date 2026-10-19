@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import psycopg2.errors
+
 from api.services.bitget_permissions import guardian_bitget_read_only
 from guardian.crypto import CredentialCipher, redact_secrets
 from guardian.db import Database
@@ -88,6 +90,10 @@ NOT_READ_ONLY_MESSAGE = (
 # Bitget client reads the v2 endpoints, so such a key cannot be watched yet; the customer is
 # told that plainly instead of the generic "not read-only" refusal.
 BITGET_UNIFIED_REFUSAL_CODE = "40085"
+# The code as a number standing on its own. ccxt's error text carries the whole response,
+# requestTime included, and a plain substring match read the 40085 inside
+# `"requestTime":1740085123456` as the refusal.
+_UNIFIED_REFUSAL_RE = re.compile(rf"(?<!\d){BITGET_UNIFIED_REFUSAL_CODE}(?!\d)")
 UNIFIED_REASON_PREFIX = "unified_account:"
 UNIFIED_NOT_SUPPORTED_MESSAGE = (
     "This Bitget key belongs to a Unified Trading account, which Guardian cannot watch yet: "
@@ -256,8 +262,10 @@ def _binance_read_only(data: object) -> tuple[bool, str]:
 
 
 def _is_unified_refusal(exc: BaseException) -> bool:
-    """Bitget's 40085: a Classic (v2) endpoint called with a Unified Trading account's key."""
-    return BITGET_UNIFIED_REFUSAL_CODE in str(exc)
+    """Bitget's 40085: a Classic (v2) endpoint called with a Unified Trading
+    account's key. The code must stand alone as a number in the text
+    (`"code":"40085"`, `40085`), never as the digits of a longer one."""
+    return _UNIFIED_REFUSAL_RE.search(str(exc)) is not None
 
 
 def _verify(client: ExchangeClient, exchange: str) -> _Verdict:
@@ -364,6 +372,59 @@ def _record_baseline_outcome(db: Database, account_id: int, label: str, gaps: li
     return status
 
 
+def _record_seed_failure(db: Database, account_id: int, label: str, exc: BaseException, *,
+                         secrets: tuple[str, ...], actor: str | None, operator_alerter) -> str:
+    """A seed that raised. The row must not stay 'seeding', whatever happened:
+    it is marked 'incomplete' and a 'baseline_seed_failed' event says why,
+    with every secret redacted, and an operator is paged to re-seed it. The
+    account is then polled like any other incomplete one. Returns the status
+    written, 'incomplete'."""
+    reason = redact_secrets(f"{type(exc).__name__}: {exc}", *secrets)[:300]
+    logger.warning("account %s: baseline seeding failed: %s", label, reason)
+    try:
+        _set_baseline_status(db, account_id, "incomplete")
+        append_event(
+            db, account_id, "baseline_seed_failed", "HIGH",
+            {"error": reason,
+             "consequence": "the account is polled without a seeded history; detectors that "
+                            "compare against history may false-positive until it is re-seeded"},
+            actor=actor,
+        )
+    except Exception as inner:  # noqa: BLE001
+        logger.error("account %s: could not record the failed seed: %s", label, inner)
+    _page(
+        operator_alerter,
+        rule="account_baseline_seed_failed",
+        severity="HIGH",
+        message=(
+            f"{label}: the baseline could not be seeded ({reason}). The account is marked "
+            f"incomplete and is being polled, but detectors that compare against history may "
+            f"false-positive on activity this customer has always had. Re-run the seed."
+        ),
+        evidence={"account_label": label, "error": reason},
+        account_id=account_id,
+        dedup_scope=f"seed:{label}",
+    )
+    return "incomplete"
+
+
+def _seed_or_mark_incomplete(db: Database, account_id: int, label: str, client: ExchangeClient, *,
+                             secrets: tuple[str, ...], actor: str | None, operator_alerter) -> str:
+    """Seed the baseline with `client` and record what it found; on ANY
+    exception the row is marked 'incomplete' rather than left 'seeding'
+    (`_record_seed_failure`). Both seed paths - `onboard_account(seed=True)`
+    and `seed_account_baseline` - end here, so neither can strand a row.
+    Returns the status written: 'complete' or 'incomplete'."""
+    try:
+        from guardian.baseline import seed_baseline  # local import avoids a module cycle
+
+        gaps = seed_baseline(db, account_id, client)
+        return _record_baseline_outcome(db, account_id, label, gaps, actor=actor, operator_alerter=operator_alerter)
+    except Exception as exc:  # noqa: BLE001 - the row must not stay 'seeding', whatever happened
+        return _record_seed_failure(db, account_id, label, exc, secrets=secrets, actor=actor,
+                                    operator_alerter=operator_alerter)
+
+
 def seed_account_baseline(db: Database, cipher: CredentialCipher, account_id: int, *,
                           actor: str | None = None, operator_alerter=None) -> str:
     """Seed an account's baseline from its stored credentials and return the
@@ -377,7 +438,9 @@ def seed_account_baseline(db: Database, cipher: CredentialCipher, account_id: in
     going away, a credential that no longer decrypts - the row is marked
     'incomplete' and a 'baseline_seed_failed' event says why, with every
     secret redacted. The account is then polled like any other incomplete
-    one, and an operator is paged to re-seed it."""
+    one, and an operator is paged to re-seed it. The engine's scheduler calls
+    this too, for a row the API left 'seeding' when it died between the 201
+    and its background task (`guardian.engine`)."""
     label = f"account {account_id}"
     secrets: tuple[str, ...] = ()
     try:
@@ -398,39 +461,22 @@ def seed_account_baseline(db: Database, cipher: CredentialCipher, account_id: in
         passphrase = cipher.decrypt(row["encrypted_passphrase"]) if row["encrypted_passphrase"] else ""
         secrets = tuple(s for s in (api_key, secret, passphrase) if s)
         client = make_client(row["exchange"], api_key, secret, passphrase)
-
-        from guardian.baseline import seed_baseline  # local import avoids a module cycle
-
-        gaps = seed_baseline(db, account_id, client)
-        return _record_baseline_outcome(db, account_id, label, gaps, actor=actor, operator_alerter=operator_alerter)
     except Exception as exc:  # noqa: BLE001 - the row must not stay 'seeding', whatever happened
-        reason = redact_secrets(f"{type(exc).__name__}: {exc}", *secrets)[:300]
-        logger.warning("account %s: baseline seeding failed: %s", label, reason)
-        try:
-            _set_baseline_status(db, account_id, "incomplete")
-            append_event(
-                db, account_id, "baseline_seed_failed", "HIGH",
-                {"error": reason,
-                 "consequence": "the account is polled without a seeded history; detectors that "
-                                "compare against history may false-positive until it is re-seeded"},
-                actor=actor,
-            )
-        except Exception as inner:  # noqa: BLE001
-            logger.error("account %s: could not record the failed seed: %s", label, inner)
-        _page(
-            operator_alerter,
-            rule="account_baseline_seed_failed",
-            severity="HIGH",
-            message=(
-                f"{label}: the baseline could not be seeded ({reason}). The account is marked "
-                f"incomplete and is being polled, but detectors that compare against history may "
-                f"false-positive on activity this customer has always had. Re-run the seed."
-            ),
-            evidence={"account_label": label, "error": reason},
-            account_id=account_id,
-            dedup_scope=f"seed:{label}",
-        )
-        return "incomplete"
+        return _record_seed_failure(db, account_id, label, exc, secrets=secrets, actor=actor,
+                                    operator_alerter=operator_alerter)
+    return _seed_or_mark_incomplete(db, account_id, label, client, secrets=secrets, actor=actor,
+                                    operator_alerter=operator_alerter)
+
+
+# The label is chosen before the exchange checks (`generate_unique_label` in
+# the API route), and those checks take seconds; two customers adding the same
+# name at once can both reach the INSERT holding one label. The constraint
+# catches it, and the INSERT is retried once with a label chosen after it.
+_LABEL_CONSTRAINT = "uq_guardian_accounts_label"
+
+
+def _is_label_collision(exc: BaseException) -> bool:
+    return getattr(getattr(exc, "diag", None), "constraint_name", None) == _LABEL_CONSTRAINT
 
 
 def onboard_account(
@@ -468,10 +514,12 @@ def onboard_account(
 
     With `seed=True` (the default, and what the CLI and the engine tests do)
     the baseline is seeded here and the row leaves as 'complete' or
-    'incomplete'. With `seed=False` the row is inserted as 'seeding', which
-    the engine does not poll, and the caller runs `seed_account_baseline`
-    afterwards - the API does so in a background task so the customer is not
-    kept waiting on the exchange.
+    'incomplete' - never 'seeding': a seed that raises marks the row
+    'incomplete' and records why, exactly as `seed_account_baseline` does.
+    With `seed=False` the row is inserted as 'seeding', which the engine does
+    not poll, and the caller runs `seed_account_baseline` afterwards - the
+    API does so in a background task so the customer is not kept waiting on
+    the exchange.
 
     Raises `OnboardingRejected` (plain-language `str`, detail in `.reason`)
     when the key is not read-only, and its subclass `AlreadyMonitored` when
@@ -519,51 +567,67 @@ def onboard_account(
         customer_name = customer_name.strip()[:_CUSTOMER_NAME_MAX_LENGTH] or None
 
     now = datetime.now(timezone.utc).isoformat()
-    with db.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO guardian_accounts
-                (user_id, label, exchange, topology, account_mode, encrypted_api_key, encrypted_secret,
-                 encrypted_passphrase, key_fingerprint, customer_name, alert_phone, alert_email_secondary,
-                 alert_phone_secondary, telegram_handle, telegram_handle_secondary, license, sms_alerts_enabled,
-                 status, exchange_uid, baseline_status, onboarding_source, onboarded_by, onboarded_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s,
-                    'seeding', %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (
-                user_id,
-                label,
-                exchange,
-                topology,
-                account_mode,
-                cipher.encrypt(api_key),
-                cipher.encrypt(secret),
-                cipher.encrypt(passphrase or ""),
-                key_fingerprint(api_key),
-                customer_name,
-                alert_phone,
-                alert_email_secondary,
-                alert_phone_secondary,
-                telegram_handle,
-                telegram_handle_secondary,
-                license,
-                bool(sms_alerts_enabled),
-                exchange_uid,
-                source,
-                onboarded_by,
-                now,
-                now,
-            ),
-        )
-        account_id = cur.fetchone()["id"]
-        cur.execute("INSERT INTO guardian_poll_state (account_id) VALUES (%s)", (account_id,))
+
+    def _insert(label_value: str) -> int:
+        with db.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO guardian_accounts
+                    (user_id, label, exchange, topology, account_mode, encrypted_api_key, encrypted_secret,
+                     encrypted_passphrase, key_fingerprint, customer_name, alert_phone, alert_email_secondary,
+                     alert_phone_secondary, telegram_handle, telegram_handle_secondary, license, sms_alerts_enabled,
+                     status, exchange_uid, baseline_status, onboarding_source, onboarded_by, onboarded_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s,
+                        'seeding', %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    user_id,
+                    label_value,
+                    exchange,
+                    topology,
+                    account_mode,
+                    cipher.encrypt(api_key),
+                    cipher.encrypt(secret),
+                    cipher.encrypt(passphrase or ""),
+                    key_fingerprint(api_key),
+                    customer_name,
+                    alert_phone,
+                    alert_email_secondary,
+                    alert_phone_secondary,
+                    telegram_handle,
+                    telegram_handle_secondary,
+                    license,
+                    bool(sms_alerts_enabled),
+                    exchange_uid,
+                    source,
+                    onboarded_by,
+                    now,
+                    now,
+                ),
+            )
+            new_id = cur.fetchone()["id"]
+            cur.execute("INSERT INTO guardian_poll_state (account_id) VALUES (%s)", (new_id,))
+            return new_id
+
+    try:
+        account_id = _insert(label)
+    except psycopg2.errors.UniqueViolation as exc:
+        # Only the label is retried. The key fingerprint's constraint is the
+        # route's to explain (the same key on a row the duplicate check skips).
+        if not _is_label_collision(exc):
+            raise
+        fresh = generate_unique_label(db, label)
+        logger.info("label '%s' was taken while the %s key was being verified - using '%s'", label, exchange, fresh)
+        label = fresh
+        account_id = _insert(label)
 
     if seed:
-        from guardian.baseline import seed_baseline  # local import avoids a module cycle
-
-        gaps = seed_baseline(db, account_id, client)
-        _record_baseline_outcome(db, account_id, label, gaps, actor=actor, operator_alerter=operator_alerter)
+        _seed_or_mark_incomplete(
+            db, account_id, label, client,
+            secrets=tuple(s for s in (api_key, secret, passphrase) if s),
+            actor=actor, operator_alerter=operator_alerter,
+        )
 
     # The act of onboarding is itself something a person did, and until G-50
     # it left no trace at all - no event row, so no "who added this customer".

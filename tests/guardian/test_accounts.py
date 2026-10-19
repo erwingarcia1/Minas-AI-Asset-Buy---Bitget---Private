@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 
+import psycopg2
 import pytest
 
 from guardian.accounts import (
@@ -235,6 +236,135 @@ def test_a_tamper_suspected_account_can_be_switched_back_on_by_its_owner(db):
     assert json.loads(_events(db, account_id)[-1]["payload_json"]) == {"from": "tamper_suspected", "to": "active"}
 
 
+def _set_uid(db, account_id, uid):
+    with db.cursor() as cur:
+        cur.execute("UPDATE guardian_accounts SET exchange_uid = %s WHERE id = %s", (uid, account_id))
+
+
+def test_enable_is_refused_while_another_row_watches_the_same_exchange_account(db):
+    """disable -> add the account again with a new key -> enable the old row
+    would leave two active rows polling one exchange account. Onboarding
+    refuses the second key while the first is live; enabling refuses the
+    mirror image, and the message names the row that is watching."""
+    old = make_account(db, "old-key")
+    _set_uid(db, old, "12345")
+    set_status(db, old, "disabled", actor=ACTOR)
+    new = make_account(db, "new-key")
+    _set_uid(db, new, "12345")
+
+    with pytest.raises(ValueError) as info:
+        set_status(db, old, "active", actor=ACTOR)
+
+    assert "new-key" in str(info.value) and "already being watched" in str(info.value)
+    assert _raw(db, old)["status"] == "disabled"
+    assert [e["event_type"] for e in _events(db, old)] == ["account_disabled"], "a refused change is not recorded"
+    assert _engine_would_poll(db) == [new]
+
+    # Once the newer row is switched off, the old one may come back.
+    set_status(db, new, "disabled", actor=ACTOR)
+    assert set_status(db, old, "active", actor=ACTOR)["status"] == "active"
+    assert _engine_would_poll(db) == [old]
+
+
+def test_a_parked_row_also_blocks_enabling_its_twin(db):
+    """`tamper_suspected` is not switched off: the engine parked it and the
+    customer is expected to sort that key out - the same rule onboarding
+    applies when it refuses a second key."""
+    old = make_account(db, "old-key")
+    _set_uid(db, old, "12345")
+    set_status(db, old, "disabled", actor=ACTOR)
+    parked = make_account(db, "parked")
+    _set_uid(db, parked, "12345")
+    with db.cursor() as cur:
+        cur.execute("UPDATE guardian_accounts SET status = 'tamper_suspected' WHERE id = %s", (parked,))
+
+    with pytest.raises(ValueError, match="parked"):
+        set_status(db, old, "active", actor=ACTOR)
+    assert _raw(db, old)["status"] == "disabled"
+
+
+def test_enable_is_allowed_when_no_other_live_row_is_the_same_exchange_account(db):
+    """Another owner's row, another exchange, a disabled twin and a row with no
+    exchange id on record (Binance) are not duplicates - as at onboarding."""
+    mine = make_account(db, "mine")
+    _set_uid(db, mine, "12345")
+    set_status(db, mine, "disabled", actor=ACTOR)
+    other = make_user(db, "someone-else@example.com")
+    theirs = make_account(db, "theirs", user_id=other)
+    _set_uid(db, theirs, "12345")
+    bybit = make_account(db, "bybit", exchange="bybit")
+    _set_uid(db, bybit, "12345")
+    twin = make_account(db, "twin")
+    _set_uid(db, twin, "12345")
+    set_status(db, twin, "disabled", actor=ACTOR)
+
+    assert set_status(db, mine, "active", actor=ACTOR)["status"] == "active"
+
+    unknown = make_account(db, "no-uid")
+    set_status(db, unknown, "disabled", actor=ACTOR)
+    assert _raw(db, unknown)["exchange_uid"] is None
+    assert set_status(db, unknown, "active", actor=ACTOR)["status"] == "active"
+    assert sorted(_engine_would_poll(db)) == sorted([mine, theirs, bybit, unknown])
+
+
+# --- a change and its record are one transaction ------------------------------------
+
+
+def _break_the_event_log(monkeypatch):
+    """The event INSERT fails on the caller's cursor, as a full disk or a lost
+    connection would make it fail: a statement that violates NOT NULL puts the
+    transaction into an error state, and the UPDATE before it rolls back with it."""
+    import guardian.accounts as accounts_module
+
+    def refuse(db, account_id, *args, cur=None, **kwargs):
+        assert cur is not None, "the event must be written on the change's own cursor"
+        cur.execute("INSERT INTO guardian_events (account_id) VALUES (%s)", (account_id,))
+
+    monkeypatch.setattr(accounts_module, "append_event", refuse)
+
+
+def test_a_status_change_that_cannot_be_recorded_is_not_made(db, monkeypatch):
+    """"Who touched my account" is only an honest page if every change on it
+    is there. The UPDATE and its event share one transaction: when the event
+    cannot be written, the row does not change either."""
+    account_id = make_account(db, "atomic")
+    _break_the_event_log(monkeypatch)
+
+    with pytest.raises(psycopg2.Error):
+        set_status(db, account_id, "disabled", actor=ACTOR)
+
+    assert _raw(db, account_id)["status"] == "active"
+    assert _events(db, account_id) == []
+    assert _engine_would_poll(db) == [account_id]
+
+
+def test_a_contact_change_or_a_removal_that_cannot_be_recorded_is_not_made(db, monkeypatch):
+    account_id = make_account(db, "atomic")
+    _break_the_event_log(monkeypatch)
+
+    with pytest.raises(psycopg2.Error):
+        update_contacts(db, account_id, actor=ACTOR, alert_phone="+15550001111")
+    with pytest.raises(psycopg2.Error):
+        scrub_and_delete(db, account_id, actor=ACTOR)
+
+    row = _raw(db, account_id)
+    assert row["alert_phone"] is None
+    assert row["status"] == "active" and row["encrypted_api_key"] == "x", "nothing was removed"
+    assert _events(db, account_id) == []
+
+
+def test_a_recorded_change_is_one_that_happened(db):
+    """The other half: the event's row id comes back from the same transaction
+    as the change, so an event in the log always has its change beside it."""
+    account_id = make_account(db, "atomic")
+    set_status(db, account_id, "disabled", actor=ACTOR)
+    update_contacts(db, account_id, actor=ACTOR, telegram_handle="@carol")
+    row = _raw(db, account_id)
+    events = _events(db, account_id)
+    assert row["status"] == "disabled" and row["telegram_handle"] == "@carol"
+    assert [e["event_type"] for e in events] == ["account_disabled", "alert_contact_updated"]
+
+
 # --- removal ------------------------------------------------------------------------
 
 
@@ -249,9 +379,10 @@ def test_scrub_and_delete_removes_the_key_material_and_keeps_the_row_and_its_his
             (account_id,),
         )
     history_before = _events(db, account_id)
-    assert _raw(db, account_id)["key_fingerprint"] is None or True   # make_account stores no fingerprint; set one:
+    assert _raw(db, account_id)["key_fingerprint"] is None, "make_account stores no fingerprint; this test sets one"
     with db.cursor() as cur:
         cur.execute("UPDATE guardian_accounts SET key_fingerprint = %s WHERE id = %s", ("f" * 64, account_id))
+    assert _raw(db, account_id)["key_fingerprint"] == "f" * 64
 
     row = scrub_and_delete(db, account_id, actor=ACTOR)
 

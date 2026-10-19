@@ -19,9 +19,15 @@ class _DecimalEncoder(json.JSONEncoder):
         return super().default(o)
 
 
+_INSERT_EVENT = (
+    "INSERT INTO guardian_events (account_id, event_type, severity, payload_json, created_at, actor) "
+    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"
+)
+
+
 def append_event(
     db: Database, account_id: int, event_type: str, severity: str, payload: dict,
-    actor: str | None = None,
+    actor: str | None = None, *, cur=None,
 ) -> int:
     """Writes one row to the append-only event log. The application must
     never UPDATE or DELETE the events table - it is the forensic record that
@@ -30,15 +36,21 @@ def append_event(
     `actor` is the operator username where a person did this, and None where
     nothing did - a detector firing has nobody behind it (G-50). It stays
     nullable for exactly that reason: filling it in with a guess would make the
-    log say a person acted when none did, which is worse than saying nothing."""
+    log say a person acted when none did, which is worse than saying nothing.
+
+    `cur` is a cursor the caller already holds open from `db.cursor()`. Given,
+    the event is written on it, inside the caller's transaction, so a change
+    to a row and the record of that change commit or roll back together
+    (`guardian.accounts`): a change that could not be recorded is not made.
+    Without it the event is its own transaction, as every detector writes it."""
     now = datetime.now(timezone.utc).isoformat()
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO guardian_events (account_id, event_type, severity, payload_json, created_at, actor) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-            (account_id, event_type, severity, json.dumps(payload, cls=_DecimalEncoder), now, actor),
-        )
+    values = (account_id, event_type, severity, json.dumps(payload, cls=_DecimalEncoder), now, actor)
+    if cur is not None:
+        cur.execute(_INSERT_EVENT, values)
         return cur.fetchone()["id"]
+    with db.cursor() as own:
+        own.execute(_INSERT_EVENT, values)
+        return own.fetchone()["id"]
 
 
 # Event types that are a change to how an account is watched or reached, as

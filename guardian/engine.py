@@ -6,12 +6,14 @@ import random
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from guardian.circuit import BreakerRegistry
 from guardian.config import RulesConfig
 from guardian.crypto import CredentialCipher
 from guardian.db import Database
+from guardian.onboarding import seed_account_baseline
 from guardian.poller import AccountPoller
 from guardian.ratelimit import RateLimiters
 from guardian.retention import prune_all, table_counts
@@ -27,15 +29,30 @@ logger = logging.getLogger("guardian.engine")
 # than this and beats between them (`_sleep_with_heartbeat`).
 HEARTBEAT_MAX_INTERVAL_S = 60.0
 
+# A row the API inserted stays 'seeding' until its background seed moves it on,
+# and that seed never leaves it there (guardian.onboarding) - unless the API
+# process died between the 201 and the seed, in which case nothing else would,
+# and the row would never be polled. The scheduler re-seeds a row that has said
+# 'seeding' this long, a few per pass, as work for the pool. Fifteen minutes is
+# far longer than a seed takes and short enough that the customer is watched
+# within the hour they were told they would be.
+RESEED_STALE_AFTER = timedelta(minutes=15)
+RESEED_MAX_PER_PASS = 3
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 @dataclass(order=True)
 class Task:
     """A unit of per-account work. Idempotent by construction: fast/slow
-    loops diff against stored state, so re-running one is harmless."""
+    loops diff against stored state, so re-running one is harmless, and a
+    re-seed ends with the row 'complete' or 'incomplete' whatever it finds."""
 
     due_at: float
     account_id: int = field(compare=False)
-    kind: str = field(compare=False)  # 'fast' | 'slow'
+    kind: str = field(compare=False)  # 'fast' | 'slow' | 'reseed'
 
 
 class Engine:
@@ -152,12 +169,40 @@ class Engine:
         # detectors compare against stored history, and half-seeded history
         # reads as a stranger's activity. Onboarding moves the row to
         # 'complete' or 'incomplete' when the seed finishes, and the next
-        # scheduler pass picks it up.
+        # scheduler pass picks it up; a row left 'seeding' by an API that died
+        # mid-onboarding is re-seeded by `_queue_stale_reseeds`.
         with self._db.cursor() as cur:
             cur.execute(
                 "SELECT * FROM guardian_accounts WHERE status = 'active' AND baseline_status <> 'seeding'"
             )
             return cur.fetchall()
+
+    def _stale_seeding_accounts(self) -> list:
+        """Active rows that have said 'seeding' for longer than RESEED_STALE_AFTER,
+        oldest first, at most RESEED_MAX_PER_PASS of them."""
+        cutoff = (_utcnow() - RESEED_STALE_AFTER).isoformat()
+        with self._db.cursor() as cur:
+            cur.execute(
+                "SELECT id, label, updated_at FROM guardian_accounts "
+                "WHERE status = 'active' AND baseline_status = 'seeding' AND updated_at < %s "
+                "ORDER BY updated_at, id LIMIT %s",
+                (cutoff, RESEED_MAX_PER_PASS),
+            )
+            return cur.fetchall()
+
+    def _queue_stale_reseeds(self, now: float, jitter: float) -> None:
+        """Queue a re-seed for each row stranded at 'seeding'. Queued, not run:
+        a seed makes several exchange calls, and the scheduler thread must
+        never wait on an exchange. The claim keeps one re-seed per account in
+        flight, so a slow one is not queued again next pass."""
+        for row in self._stale_seeding_accounts():
+            if not self._claim(row["id"], "reseed"):
+                continue
+            logger.info(
+                "account %s: baseline has said 'seeding' since %s (UTC) and nothing finished it - re-seeding",
+                row["label"], row["updated_at"],
+            )
+            self._queue.put(Task(now + random.uniform(0, jitter), row["id"], "reseed"))
 
     def _schedule_cycle(self) -> None:
         jitter = self._rules.get_seconds("polling", "jitter_seconds", default=10)
@@ -196,6 +241,7 @@ class Engine:
             if due and self._claim(account_id, "slow"):
                 self._queue.put(Task(now + random.uniform(0, jitter), account_id, "slow"))
                 self._last_slow[account_id] = now
+        self._queue_stale_reseeds(now, jitter)
 
     def _scheduler_loop(self) -> None:
         while not self._stop.is_set():
@@ -398,6 +444,9 @@ class Engine:
                 row = self._fetch_account(task.account_id)
                 if row is None:
                     continue
+                if task.kind == "reseed":
+                    self._reseed(row)
+                    continue
                 before_failures = self._consecutive_failures(task.account_id)
                 if task.kind == "fast":
                     self._poller.run_fast_loop(row)
@@ -424,6 +473,17 @@ class Engine:
                     # Last statement in the finally, so a failure above cannot
                     # leave the queue's unfinished-task count wrong forever.
                     self._queue.task_done()
+
+    def _reseed(self, row) -> None:
+        """Re-run the baseline seed for a row stranded at 'seeding', on a
+        worker thread. `seed_account_baseline` rebuilds the client from the
+        stored credentials and never leaves the row 'seeding': it ends
+        'complete' or 'incomplete', records why, and pages an operator when
+        the exchange could not be read. Nobody did this, so there is no actor."""
+        status = seed_account_baseline(
+            self._db, self._cipher, row["id"], actor=None, operator_alerter=self._operator_alerter,
+        )
+        logger.info("account %s: re-seeded, baseline is %s", row["label"], status)
 
     def _consecutive_failures(self, account_id: int) -> int:
         with self._db.cursor() as cur:
@@ -475,6 +535,9 @@ class Engine:
                     continue
                 row = self._fetch_account(task.account_id)
                 if row is None:
+                    continue
+                if task.kind == "reseed":
+                    self._reseed(row)
                     continue
                 before_failures = self._consecutive_failures(task.account_id)
                 if task.kind == "fast":

@@ -47,7 +47,12 @@ def trade_record(symbol="BTC/USDT", side="sell", amount="0.1", cost="6000", fee_
     }
 
 
-def account_info_response(authorities="spot_account_r,spot_order_r", ips="1.2.3.4"):
+def account_info_response(authorities="stor", ips="1.2.3.4"):
+    """/api/v2/spot/account/info as a Classic Bitget account answers it. The
+    default `authorities` is Spot -> Read (`stor`), a code confirmed on a live
+    key: the read-only gate accepts only codes the shared table
+    (api/services/bitget_permissions.py) has confirmed, so a made-up code
+    such as the old `spot_account_r` is refused by name."""
     return {
         "code": "00000",
         "msg": "success",
