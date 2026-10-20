@@ -104,7 +104,7 @@ def _not_found() -> HTTPException:
 async def _own_account(user: User, account_id: int) -> dict:
     """The caller's account row, or 404. Not theirs, removed and non-existent
     are one answer on purpose: nobody learns whether an id exists."""
-    row = await bridge.run_db(engine_accounts.account_for_user, user.id, account_id)
+    row = await bridge.run_db_read(engine_accounts.account_for_user, user.id, account_id)
     if row is None:
         raise _not_found()
     return row
@@ -215,7 +215,7 @@ async def list_accounts(current_user: User = Depends(require_guardian_enabled)):
     """The caller's monitored accounts, oldest first, each with the engine's
     last successful check (`last_success_at`, UTC, null until the first).
     Removed accounts are not listed."""
-    rows = await bridge.run_db(engine_accounts.accounts_for_user, current_user.id)
+    rows = await bridge.run_db_read(engine_accounts.accounts_for_user, current_user.id)
     return [account_out(row) for row in rows]
 
 

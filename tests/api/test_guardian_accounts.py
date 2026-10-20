@@ -599,3 +599,17 @@ async def test_the_body_is_validated_without_echoing_the_key(guardian_on, exchan
         r = await c.post("/api/guardian/accounts", json={**BODY, "status": "active"}, headers=auth_headers(user))
         assert r.status_code == 422, "fields the body does not know are refused, not ignored"
     assert exchange.builds == []
+
+
+async def test_a_wrong_method_probe_is_404_while_the_flag_is_off(monkeypatch):
+    """A method the collection does not support would answer 405 with an Allow header before any
+    dependency runs, revealing the routes exist; while the flag is off it is 404 like a missing path."""
+    monkeypatch.setattr(settings, "guardian_enabled", False)
+    async with fresh() as c:
+        r = await c.delete("/api/guardian/accounts")
+    assert r.status_code == 404 and "allow" not in {k.lower() for k in r.headers}
+    assert r.json() == {"detail": "Not found"}
+    monkeypatch.setattr(settings, "guardian_enabled", True)
+    async with fresh() as c:
+        r = await c.delete("/api/guardian/accounts")
+    assert r.status_code == 405, "with the feature on, an unsupported method is reported as such"

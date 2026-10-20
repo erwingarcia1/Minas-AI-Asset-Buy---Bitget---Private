@@ -109,14 +109,17 @@ def _connection_lost(exc: psycopg2.OperationalError) -> bool:
     return code is None or code.startswith(("08", "57P"))
 
 
-def _with_db(fn: Callable[..., T], args: tuple, kwargs: dict) -> T:
-    """`fn(db(), *args, **kwargs)` on this thread, once more if the
-    connection was lost. The engine's `Database.cursor` has replaced the dead
-    connection by the time the error gets here, so the retry starts clean."""
+def _with_db(fn: Callable[..., T], args: tuple, kwargs: dict, *, retry: bool = False) -> T:
+    """`fn(db(), *args, **kwargs)` on this thread; with `retry`, once more if
+    the connection was lost. Only reads ask for the retry: a write such as
+    onboard_account is not idempotent, and a connection dropped after its
+    INSERT committed would make the second attempt look like a duplicate. The
+    engine's `Database.cursor` has replaced the dead connection by the time
+    the error gets here, so a retry starts clean."""
     try:
         return fn(db(), *args, **kwargs)
     except psycopg2.OperationalError as exc:
-        if not _connection_lost(exc):
+        if not retry or not _connection_lost(exc):
             raise
         logger.warning("guardian bridge: the engine connection was lost during %s (%s); retrying once on a fresh connection",
                        getattr(fn, "__name__", "an engine call"), type(exc).__name__)
@@ -125,9 +128,16 @@ def _with_db(fn: Callable[..., T], args: tuple, kwargs: dict) -> T:
 
 async def run_db(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """Call `fn(db(), *args, **kwargs)` on a bridge request thread and await
-    it. The database is looked up inside that thread, never on the event loop."""
+    it. The database is looked up inside that thread, never on the event loop.
+    No retry: use this for writes."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, functools.partial(_with_db, fn, args, kwargs))
+
+
+async def run_db_read(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """`run_db` for a read: retried once if the engine connection was lost."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, functools.partial(_with_db, fn, args, kwargs, retry=True))
 
 
 async def run_db_background(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:

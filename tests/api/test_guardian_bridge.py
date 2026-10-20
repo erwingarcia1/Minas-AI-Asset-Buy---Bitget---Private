@@ -77,7 +77,7 @@ async def test_run_db_looks_the_database_up_inside_the_bridge_thread(monkeypatch
         seen["gdb"] = gdb
         return a + b
 
-    assert await guardian_bridge.run_db(work, 2, b=3) == 5
+    assert await guardian_bridge.run_db_read(work, 2, b=3) == 5
     assert seen["gdb"] is sentinel
     assert seen["db_thread"].startswith("guardian-bridge") and seen["fn_thread"] == seen["db_thread"]
     assert seen["db_thread"] != threading.current_thread().name, "never on the event-loop thread"
@@ -101,7 +101,7 @@ async def test_run_db_retries_once_when_the_connection_was_lost(monkeypatch, cap
         return "ok"
 
     with caplog.at_level("WARNING"):
-        assert await guardian_bridge.run_db(flaky) == "ok"
+        assert await guardian_bridge.run_db_read(flaky) == "ok"
     assert calls == ["gdb", "gdb"]
     assert "retrying once on a fresh connection" in caplog.text
 
@@ -115,7 +115,7 @@ async def test_run_db_gives_up_after_the_one_retry(monkeypatch):
         raise _Lost("could not connect to server")
 
     with pytest.raises(psycopg2.OperationalError):
-        await guardian_bridge.run_db(dead)
+        await guardian_bridge.run_db_read(dead)
     assert len(calls) == 2
 
 
@@ -128,7 +128,7 @@ async def test_run_db_does_not_retry_an_error_the_server_answered(monkeypatch):
         raise _ServerAnswered("could not serialize access due to concurrent update")
 
     with pytest.raises(psycopg2.OperationalError):
-        await guardian_bridge.run_db(refused)
+        await guardian_bridge.run_db_read(refused)
     assert calls == [1], "a live connection answered: repeating the statement is not what was asked"
 
 
@@ -141,7 +141,7 @@ async def test_run_db_does_not_retry_other_exceptions(monkeypatch):
         raise ValueError("no")
 
     with pytest.raises(ValueError):
-        await guardian_bridge.run_db(boom)
+        await guardian_bridge.run_db_read(boom)
     assert calls == [1]
 
 
@@ -154,7 +154,7 @@ async def test_the_operator_pager_records_a_page_with_no_channel_configured(db, 
     channel is configured, and is built on the bridge thread that pages."""
     scope = f"bridge-test:{uuid.uuid4().hex}"
     with caplog.at_level("ERROR"):
-        page_id = await guardian_bridge.run_db(
+        page_id = await guardian_bridge.run_db_read(
             lambda gdb: guardian_bridge.operator_pager().page(
                 rule="bridge_test_page", severity="LOW", message="a test page from the bridge",
                 evidence={"scope": scope}, dedup_scope=scope))
@@ -172,3 +172,18 @@ async def test_the_operator_pager_records_a_page_with_no_channel_configured(db, 
     left = (await db.execute(text("SELECT count(*) FROM guardian_operator_pages WHERE id = :id"), {"id": page_id})).scalar_one()
     await db.commit()
     assert left == 0
+
+
+async def test_run_db_does_not_retry_a_write(monkeypatch):
+    """A write such as onboard_account is not idempotent: a connection dropped after its INSERT
+    committed would make a second attempt look like a duplicate, so only reads retry."""
+    monkeypatch.setattr(guardian_bridge, "db", lambda: "gdb")
+    calls = []
+
+    def flaky(gdb):
+        calls.append(gdb)
+        raise _Lost("server closed the connection unexpectedly")
+
+    with pytest.raises(_Lost):
+        await guardian_bridge.run_db(flaky)
+    assert calls == ["gdb"], "a write is attempted once"

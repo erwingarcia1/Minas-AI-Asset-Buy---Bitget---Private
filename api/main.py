@@ -113,6 +113,21 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 
+# While GUARDIAN_ENABLED is off the Guardian routes do not exist for anyone: a request that
+# matches a path but not a method would otherwise answer 405 with an Allow header before any
+# dependency runs, revealing the routes. Everything else keeps FastAPI's default handling.
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler
+
+
+async def guardian_hidden_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 405 and request.url.path.startswith("/api/guardian") and not settings.guardian_enabled:
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    return await http_exception_handler(request, exc)
+
+
+app.add_exception_handler(StarletteHTTPException, guardian_hidden_http_exception_handler)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
