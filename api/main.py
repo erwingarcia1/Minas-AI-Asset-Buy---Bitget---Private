@@ -36,12 +36,12 @@ async def lifespan(app: FastAPI):
         autobuy = getattr(app.state, "autobuy_scheduler", None)
         if autobuy is not None:
             autobuy.shutdown(wait=False)
-        try:
-            from api.services import guardian_bridge
-            guardian_bridge.close()   # engine connections the Guardian routes opened (v0.9.2)
-        except Exception as exc:  # noqa: BLE001 - shutdown must finish
-            logger.warning("guardian bridge not closed cleanly: %s", exc)
-            app.state.autobuy_scheduler = None
+        app.state.autobuy_scheduler = None
+    try:
+        from api.services import guardian_bridge
+        guardian_bridge.close()   # engine connections the Guardian routes opened (v0.9.2)
+    except Exception as exc:  # noqa: BLE001 - shutdown must finish
+        logger.warning("guardian bridge not closed cleanly: %s", exc)
     await close_db()
     print("✓ Database closed")
 
