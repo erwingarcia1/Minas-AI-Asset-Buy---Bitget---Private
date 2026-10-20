@@ -39,8 +39,10 @@ def main() -> None:
     engine = create_engine(url)
     with engine.begin() as conn:
         def rotate(token):
-            """None stays None (Binance keys carry no passphrase)."""
-            return None if token is None else new_f.encrypt(old_f.decrypt(token.encode())).decode()
+            """None stays None (Binance keys carry no passphrase) and '' stays '' (a removed
+            Guardian account keeps its row with the ciphertext scrubbed); only a real token
+            is re-encrypted, so one removed account cannot fail the whole rotation."""
+            return token if not token else new_f.encrypt(old_f.decrypt(token.encode())).decode()
 
         rows = conn.execute(
             text("SELECT id, encrypted_api_key, encrypted_api_secret, encrypted_passphrase FROM api_keys")).all()
