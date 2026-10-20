@@ -446,7 +446,7 @@ def seed_account_baseline(db: Database, cipher: CredentialCipher, account_id: in
     try:
         with db.cursor() as cur:
             cur.execute(
-                "SELECT label, exchange, encrypted_api_key, encrypted_secret, encrypted_passphrase "
+                "SELECT label, exchange, status, encrypted_api_key, encrypted_secret, encrypted_passphrase "
                 "FROM guardian_accounts WHERE id = %s",
                 (account_id,),
             )
@@ -454,8 +454,12 @@ def seed_account_baseline(db: Database, cipher: CredentialCipher, account_id: in
         if row is None:
             raise LookupError("no such account")
         label = row["label"]
-        if not row["encrypted_api_key"]:
-            raise RuntimeError("the account has no monitoring key on record")
+        if row["status"] == "disabled" or not row["encrypted_api_key"]:
+            # Removed or paused between the 201 and this seed: nothing to read, nobody to
+            # page. 'incomplete' keeps the row out of 'seeding' without a failure event.
+            logger.info("account %s: removed or paused before its baseline was seeded; not seeding", label)
+            _set_baseline_status(db, account_id, "incomplete")
+            return "incomplete"
         api_key = cipher.decrypt(row["encrypted_api_key"])
         secret = cipher.decrypt(row["encrypted_secret"])
         passphrase = cipher.decrypt(row["encrypted_passphrase"]) if row["encrypted_passphrase"] else ""

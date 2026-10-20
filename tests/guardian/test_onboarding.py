@@ -655,3 +655,24 @@ def test_a_key_fingerprint_collision_is_not_retried_as_a_label_clash(db, cipher,
     with db.cursor() as cur:
         cur.execute("SELECT label FROM guardian_accounts ORDER BY id")
         assert [r["label"] for r in cur.fetchall()] == ["first"]
+
+
+def test_an_account_removed_before_its_baseline_seeded_is_not_seeded_or_paged(db, cipher, monkeypatch):
+    """The customer removes the account between the 201 and the background seed: nothing to read,
+    nobody to page, no failure event; the row just leaves 'seeding'."""
+    from unittest.mock import MagicMock
+    from guardian import accounts
+    from guardian.onboarding import onboard_account, seed_account_baseline
+    client = _client_with()
+    monkeypatch.setattr("guardian.onboarding.make_client", lambda *a, **k: client)
+    result = onboard_account(db, cipher, label="removed-early", topology="independent", api_key="k-re", secret="s",
+                             passphrase="p", exchange="bitget", user_id=TEST_USER_ID, source="self", seed=False)
+    accounts.scrub_and_delete(db, result.account_id, actor="user:test")
+    pager = MagicMock()
+    assert seed_account_baseline(db, cipher, result.account_id, operator_alerter=pager) == "incomplete"
+    pager.page.assert_not_called()
+    with db.cursor() as cur:
+        cur.execute("SELECT baseline_status FROM guardian_accounts WHERE id = %s", (result.account_id,))
+        assert cur.fetchone()["baseline_status"] == "incomplete"
+        cur.execute("SELECT count(*) AS n FROM guardian_events WHERE account_id = %s AND event_type = 'baseline_seed_failed'", (result.account_id,))
+        assert cur.fetchone()["n"] == 0
